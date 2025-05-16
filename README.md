@@ -96,3 +96,11 @@ Nest is an MIT-licensed open source project. It can grow thanks to the sponsors 
 ## License
 
 Nest is [MIT licensed](https://github.com/nestjs/nest/blob/master/LICENSE).
+
+## 🚀 Cómo iniciar el proyecto
+
+1. Levanta la base de datos (si no está corriendo):
+   docker compose up -d
+
+2. Inicia el backend:
+   npm run start:dev

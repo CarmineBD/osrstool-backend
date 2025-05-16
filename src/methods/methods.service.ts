@@ -4,8 +4,18 @@ import { MethodDto } from './dto/method.dto';
 @Injectable()
 export class MethodsService {
   private readonly methods: MethodDto[] = [
-    { id: '1', name: 'Mining Iron', gpPerHour: 50000 },
-    { id: '2', name: 'Fishing Salmon', gpPerHour: 75000 },
+    {
+      id: '1',
+      name: 'Mining Iron ores',
+      inputs: [],
+      outputs: [{ id: 440, quantity: 1700 }],
+    },
+    {
+      id: '2',
+      name: 'Mining runite ore',
+      inputs: [],
+      outputs: [{ id: 451, quantity: 65 }],
+    },
   ];
 
   findAll(): MethodDto[] {
