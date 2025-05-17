@@ -1,21 +1,17 @@
-// src/methods/dto/method.dto.ts
+export interface VariantDto {
+  inputs: { id: number; quantity: number }[];
+  outputs: { id: number; quantity: number }[];
+}
 
 export class MethodDto {
   id: string;
   name: string;
-  inputs: { id: number; quantity: number }[];
-  outputs: { id: number; quantity: number }[];
+  variants: VariantDto[];
 
-  constructor(
-    id: string,
-    name: string,
-    inputs: { id: number; quantity: number }[],
-    outputs: { id: number; quantity: number }[],
-  ) {
+  constructor(id: string, name: string, variants: VariantDto[]) {
     this.id = id;
     this.name = name;
-    this.inputs = inputs;
-    this.outputs = outputs;
+    this.variants = variants;
   }
 
   static fromEntity(e: {
@@ -25,16 +21,15 @@ export class MethodDto {
       ioItems: Array<{ itemId: number; quantity: number; type: 'input' | 'output' }>;
     }>;
   }): MethodDto {
-    const inputs = e.variants
-      .flatMap((v) => v.ioItems)
-      .filter((i) => i.type === 'input')
-      .map((i) => ({ id: i.itemId, quantity: Number(i.quantity) }));
-
-    const outputs = e.variants
-      .flatMap((v) => v.ioItems)
-      .filter((i) => i.type === 'output')
-      .map((i) => ({ id: i.itemId, quantity: Number(i.quantity) }));
-
-    return new MethodDto(e.id, e.name, inputs, outputs);
+    const variants = e.variants.map((variant) => {
+      const inputs = variant.ioItems
+        .filter((item) => item.type === 'input')
+        .map((item) => ({ id: item.itemId, quantity: Number(item.quantity) }));
+      const outputs = variant.ioItems
+        .filter((item) => item.type === 'output')
+        .map((item) => ({ id: item.itemId, quantity: Number(item.quantity) }));
+      return { inputs, outputs };
+    });
+    return new MethodDto(e.id, e.name, variants);
   }
 }
