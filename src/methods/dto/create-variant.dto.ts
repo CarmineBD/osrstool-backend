@@ -1,0 +1,20 @@
+// src/methods/dto/create-variant.dto.ts
+import { IsString, IsOptional, IsNumber, IsArray, ValidateNested } from 'class-validator';
+import { Type } from 'class-transformer';
+import { IoItemDto } from './io-item.dto';
+
+export class CreateVariantDto {
+  @IsString() label: string;
+  @IsOptional() @IsNumber() actionsPerHour?: number;
+  @IsOptional() xpHour?: object;
+
+  @IsArray()
+  @ValidateNested({ each: true })
+  @Type(() => IoItemDto)
+  inputs: IoItemDto[];
+
+  @IsArray()
+  @ValidateNested({ each: true })
+  @Type(() => IoItemDto)
+  outputs: IoItemDto[];
+}

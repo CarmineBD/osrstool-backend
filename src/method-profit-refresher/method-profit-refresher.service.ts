@@ -1,10 +1,10 @@
 // src/method-profit-refresher/method-profit-refresher.service.ts
+
 import { Injectable, Logger } from '@nestjs/common';
 import { Cron } from '@nestjs/schedule';
 import Redis from 'ioredis';
 import { MethodsService } from '../methods/methods.service';
 import { PricesService } from '../prices/prices.service';
-import { MethodDto } from '../methods/dto/method.dto';
 
 interface Price {
   high?: number;
@@ -27,30 +27,31 @@ export class MethodProfitRefresherService {
 
   @Cron('*/1 * * * *') // cada minuto
   async refresh(): Promise<void> {
-    const methods: MethodDto[] = this.methodsService.findAll();
-    if (methods.length === 0) return;
+    const { data: methods } = await this.methodsService.findAll(1, 1000);
+    if (methods.length === 0) {
+      this.logger.log('No hay métodos que refrescar');
+      return;
+    }
 
-    // 1) Reunir todos los IDs de items:
+    // 3) Reunir todos los IDs de ítems (inputs y outputs)
     const itemIds = new Set<number>();
     for (const m of methods) {
       m.inputs.forEach((i) => itemIds.add(i.id));
       m.outputs.forEach((o) => itemIds.add(o.id));
     }
 
-    // 2) Traer precios
+    // 4) Traer precios
     const raw = await this.pricesService.getMany([...itemIds]);
     const prices: Record<number, Price> = raw as Record<number, Price>;
 
-    // 3) Calcular profits
+    // 5) Calcular profits por método
     const profits: Record<string, Profit> = {};
-
     for (const m of methods) {
-      // helper para sumar inputs/outputs
-      const sum = (arr: { id: number; quantity: number }[], pick: keyof Price) =>
+      const sum = (arr: { id: number; quantity: number }[], field: keyof Price) =>
         arr.reduce((acc, { id, quantity }) => {
           const p = prices[id];
           if (!p) return acc;
-          const unit = pick === 'high' ? (p.high ?? p.low) : p.low;
+          const unit = field === 'high' ? (p.high ?? p.low) : p.low;
           return acc + unit * quantity;
         }, 0);
 
@@ -65,9 +66,8 @@ export class MethodProfitRefresherService {
       };
     }
 
-    // 4) Guardar en Redis JSON
+    // 6) Guardar resultado en Redis
     await this.redis.call('JSON.SET', 'methodsProfits', '$', JSON.stringify(profits));
-
     this.logger.log(`🔄 Actualizado methodsProfits (${methods.length} métodos)`);
   }
 }
