@@ -2,11 +2,14 @@ export interface VariantDto {
   id: string;
   inputs: { id: number; quantity: number }[];
   outputs: { id: number; quantity: number }[];
+  actionsPerHour?: number;
+  label?: string;
   clickIntensity?: number;
   afkiness?: number;
   riskLevel?: string;
   requirements?: string;
   recommendations?: string;
+  xpHour?: string; // <-- Agregado xpHour
 }
 
 export class MethodDto {
@@ -29,7 +32,6 @@ export class MethodDto {
     this.category = category;
     this.variants = variants;
   }
-
   static fromEntity(e: {
     id: string;
     name: string;
@@ -37,6 +39,7 @@ export class MethodDto {
     category?: string;
     variants: Array<{
       id: string;
+      label: string;
       actionsPerHour: number;
       clickIntensity: number;
       afkiness: number;
@@ -56,6 +59,7 @@ export class MethodDto {
         .map((item) => ({ id: item.itemId, quantity: Number(item.quantity) }));
       return {
         id: variant.id,
+        label: variant.label,
         actionsPerHour: variant.actionsPerHour,
         clickIntensity: variant.clickIntensity,
         afkiness: variant.afkiness,

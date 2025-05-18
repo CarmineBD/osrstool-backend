@@ -107,6 +107,47 @@ export class MethodsService {
     if (result.affected === 0) throw new NotFoundException(`Method ${id} not found`);
   }
 
+  async findAllWithProfit(page = 1, perPage = 10): Promise<{ data: any[]; total: number }> {
+    const result = await this.findAll(page, perPage);
+    const redis: Redis = new IORedis(process.env.REDIS_URL as string);
+    const rawData = (await redis.call('JSON.GET', 'methodsProfits', '$')) as string | null;
+    let allProfits: Record<string, Record<string, { low: number; high: number }>> = {};
+    try {
+      if (rawData) {
+        const parsed = JSON.parse(rawData) as Record<
+          string,
+          Record<string, { low: number; high: number }>
+        >[];
+        allProfits = parsed[0] || {};
+      }
+    } catch {
+      allProfits = {};
+    }
+    const enrichedMethods = result.data.map((method) => {
+      const methodProfits = allProfits[method.id] ?? {};
+      const enrichedVariants = method.variants.map((variant) => {
+        const profitKey = method.variants.length === 1 ? method.id : variant.id;
+        const profit = methodProfits[profitKey] ?? { low: 0, high: 0 };
+        const { id, clickIntensity, afkiness, riskLevel, requirements, xpHour, label } = variant;
+        return {
+          id,
+          xpHour,
+          label,
+          clickIntensity,
+          afkiness,
+          riskLevel,
+          requirements,
+          lowProfit: profit.low,
+          highProfit: profit.high,
+        };
+      });
+      // Eliminamos 'description' destructurando el objeto
+      const { description: _description, ...methodWithoutDescription } = method;
+      return { ...methodWithoutDescription, variants: enrichedVariants };
+    });
+    return { data: enrichedMethods, total: result.total };
+  }
+
   async findMethodDetailsWithProfit(id: string): Promise<any> {
     const methodDto = await this.findOne(id);
     const redis: Redis = new IORedis(process.env.REDIS_URL as string);

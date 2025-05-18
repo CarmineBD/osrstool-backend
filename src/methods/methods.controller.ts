@@ -22,7 +22,7 @@ export class MethodsController {
   async findAll(@Query('page') page = '1', @Query('perPage') perPage = '10') {
     const p = parseInt(page, 10);
     const pp = parseInt(perPage, 10);
-    const result: PaginatedResult = await this.svc.findAll(p, pp);
+    const result: PaginatedResult = await this.svc.findAllWithProfit(p, pp);
     return { data: result.data, meta: { total: result.total, page: p, perPage: pp } };
   }
 
