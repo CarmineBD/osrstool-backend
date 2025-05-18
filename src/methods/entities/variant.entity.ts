@@ -29,14 +29,30 @@ export class MethodVariant {
     type: 'jsonb',
     nullable: true,
   })
-  xpHour?: any; // { hitpoints:number, combat:number }
+  xpHour: any; // { hitpoints:number, combat:number }
+
+  // Nuevos campos con tipos y nombres de columna actualizados:
+  @Column({ name: 'click_intensity', type: 'int', nullable: true })
+  clickIntensity: number;
+
+  @Column({ name: 'afkiness', type: 'int', nullable: true })
+  afkiness: number;
+
+  @Column({ name: 'risk_level', nullable: true })
+  riskLevel: string;
+
+  @Column({ type: 'jsonb', nullable: true })
+  requirements: any;
+
+  @Column({ type: 'jsonb', nullable: true })
+  recommendations: any;
 
   @Column({
     name: 'actions_per_hour',
     type: 'int',
     nullable: true,
   })
-  actionsPerHour?: number;
+  actionsPerHour: number;
 
   @CreateDateColumn({ name: 'created_at' })
   createdAt: Date;

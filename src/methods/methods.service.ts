@@ -7,6 +7,14 @@ import { VariantIoItem } from './entities/io-item.entity';
 import { CreateMethodDto } from './dto/create-method.dto';
 import { UpdateMethodDto } from './dto/update-method.dto';
 import { MethodDto } from './dto/method.dto';
+import IORedis, { Redis } from 'ioredis';
+
+// Definimos tipos para mayor seguridad
+interface Profit {
+  low: number;
+  high: number;
+}
+type ProfitRecord = Record<string, Profit>;
 
 @Injectable()
 export class MethodsService {
@@ -27,12 +35,9 @@ export class MethodsService {
 
   async create(createDto: CreateMethodDto): Promise<MethodDto> {
     const { name, description, category, variants } = createDto;
-
-    // 1) Crear y guardar el método
     const method = this.methodRepo.create({ name, description, category });
     await this.methodRepo.save(method);
 
-    // 2) Crear y guardar variantes + IO-items
     for (const v of variants) {
       const variant = this.variantRepo.create({
         method,
@@ -62,9 +67,6 @@ export class MethodsService {
         await this.ioRepo.save(io);
       }
     }
-
-    // 3) ¡En lugar de hacer `toDto(method)` aquí, recargamos con relaciones!
-    //    De este modo `method.variants[i].ioItems` ya existe y no explota.
     return this.findOne(method.id);
   }
 
@@ -75,10 +77,7 @@ export class MethodsService {
       relations: ['variants', 'variants.ioItems'],
       order: { createdAt: 'ASC' },
     });
-    return {
-      data: methods.map((m) => this.toDto(m)),
-      total,
-    };
+    return { data: methods.map((m) => this.toDto(m)), total };
   }
 
   async findOne(id: string): Promise<MethodDto> {
@@ -91,28 +90,66 @@ export class MethodsService {
   }
 
   async update(id: string, updateDto: UpdateMethodDto): Promise<MethodDto> {
-    // 1. Preparamos la entidad con los datos nuevos
     const method = await this.methodRepo.preload({ id, ...updateDto });
     if (!method) {
       throw new NotFoundException(`Method ${id} not found`);
     }
-
-    // 2. Guardamos los cambios
     await this.methodRepo.save(method);
-
-    // 3. Re-cargamos la entidad con sus relaciones
     const reloaded = await this.methodRepo.findOne({
       where: { id },
       relations: ['variants', 'variants.ioItems'],
     });
-    // (Podrías comprobar aquí !reloaded, pero dado que acabas de guardar, debería existir)
-
-    // 4. Lo convertimos a DTO
     return this.toDto(reloaded!);
   }
 
   async remove(id: string): Promise<void> {
     const result = await this.methodRepo.delete(id);
     if (result.affected === 0) throw new NotFoundException(`Method ${id} not found`);
+  }
+
+  async findMethodDetailsWithProfit(id: string): Promise<any> {
+    const methodDto = await this.findOne(id);
+    const redis: Redis = new IORedis(process.env.REDIS_URL as string);
+
+    // Obtenemos el snapshot de los profits desde Redis
+    const rawData = (await redis.call('JSON.GET', 'methodsProfits', '$')) as string | null;
+    let allProfits: ProfitRecord = {};
+
+    try {
+      if (rawData) {
+        const parsed = JSON.parse(rawData) as Record<string, ProfitRecord>[];
+        // Verifica que el id del método coincide con la clave en Redis
+        allProfits = parsed[0][methodDto.id] ?? {};
+      }
+    } catch {
+      allProfits = {};
+    }
+
+    const enrichedVariants = methodDto.variants.map((variant, index: number) => {
+      // Si solo hay una variante se utiliza el id del método; de lo contrario se usa una clave compuesta
+      const profitKey =
+        methodDto.variants.length === 1 ? methodDto.id : `${methodDto.variants[index].id}`;
+      const profit = allProfits[profitKey] ?? { low: 0, high: 0 };
+
+      return {
+        ...variant,
+        // Se calculan campos a partir de Redis
+        clickIntensity: variant.clickIntensity,
+        afkiness: variant.afkiness,
+        riskLevel: variant.riskLevel,
+        requirements: variant.requirements,
+        recommendations: variant.recommendations,
+        lowProfit: profit.low,
+        highProfit: profit.high,
+      };
+    });
+
+    return {
+      id: methodDto.id,
+      name: methodDto.name,
+      description: methodDto.description,
+      category: methodDto.category,
+      variants: enrichedVariants,
+    };
   }
 }

@@ -51,7 +51,7 @@ export class MethodProfitRefresherService {
     const profits: Record<string, Record<string, { low: number; high: number }>> = {};
     for (const method of methods) {
       profits[method.id] = {};
-      method.variants.forEach((variant, index) => {
+      method.variants.forEach((variant) => {
         const sum = (arr: { id: number; quantity: number }[], field: 'high' | 'low') =>
           arr.reduce((acc, { id, quantity }) => {
             const p = prices[id];
@@ -68,9 +68,8 @@ export class MethodProfitRefresherService {
         const lowProfit = outputsLow - inputsHigh;
         const highProfit = outputsHigh - inputsLow;
 
-        // Si solo hay una variante, la llave será el id del método, sino id + #index
-        const variantKey = method.variants.length === 1 ? method.id : `${method.id}#${index}`;
-        profits[method.id][variantKey] = { low: lowProfit, high: highProfit };
+        // Usamos directamente el id de la variante
+        profits[method.id][variant.id] = { low: lowProfit, high: highProfit };
       });
     }
 

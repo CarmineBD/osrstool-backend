@@ -1,7 +1,11 @@
-// src/methods/methods.controller.ts
 import { Controller, Get, Post, Put, Delete, Param, Body, Query } from '@nestjs/common';
 import { MethodsService } from './methods.service';
 import { CreateMethodDto, UpdateMethodDto } from './dto';
+
+interface PaginatedResult {
+  data: any[];
+  total: number;
+}
 
 @Controller('methods')
 export class MethodsController {
@@ -13,20 +17,34 @@ export class MethodsController {
     return { data: created };
   }
 
+  // Endpoint original de paginación
   @Get()
   async findAll(@Query('page') page = '1', @Query('perPage') perPage = '10') {
     const p = parseInt(page, 10);
     const pp = parseInt(perPage, 10);
-    const { data, total } = await this.svc.findAll(p, pp);
-    return {
-      data,
-      meta: { total, page: p, perPage: pp },
-    };
+    const result: PaginatedResult = await this.svc.findAll(p, pp);
+    return { data: result.data, meta: { total: result.total, page: p, perPage: pp } };
   }
 
+  // Nuevo endpoint para obtener método con datos actualizados desde Redis
+  @Get('redis')
+  async findAllRedis(@Query('page') page = '1', @Query('perPage') perPage = '10') {
+    const p = parseInt(page, 10);
+    const pp = parseInt(perPage, 10);
+    const result: PaginatedResult = await this.svc.findAll(p, pp);
+    return { data: result.data, meta: { total: result.total, page: p, perPage: pp } };
+  }
+
+  // // --- Agrega el endpoint de profit ---
+  // @Get('profit/:id')
+  // async findMethodDetailsWithProfit(@Param('id') id: string) {
+  //   const method = (await this.svc.findMethodDetailsWithProfit(id)) as object; // Replace 'object' with the actual expected type if available
+  //   return { data: method };
+  // }
+
   @Get(':id')
-  async findOne(@Param('id') id: string) {
-    const method = await this.svc.findOne(id);
+  async findMethodDetailsWithProfit(@Param('id') id: string) {
+    const method = (await this.svc.findMethodDetailsWithProfit(id)) as object; // Replace 'object' with the actual expected type if available
     return { data: method };
   }
 
