@@ -8,6 +8,13 @@ interface PaginatedResult {
   total: number;
 }
 
+// Add new interface to type the user info returned by the API
+interface UserInfo {
+  levels: Record<string, number>;
+  quests: Record<string, number>;
+  achievement_diaries: any;
+}
+
 @Controller('methods')
 export class MethodsController {
   constructor(
@@ -30,16 +37,17 @@ export class MethodsController {
     const p = parseInt(page, 10);
     const pp = parseInt(perPage, 10);
 
-    let userInfo: Record<string, number> | null = null;
+    let userInfo: UserInfo | null = null; // Changed type from Record<string, number> to UserInfo
     if (username) {
       try {
-        userInfo = await this.runescapeApi.fetchUserInfo(username);
-      } catch (error) {
-        console.error('Error fetching levels for username:', username, error);
+        userInfo = (await this.runescapeApi.fetchUserInfo(username)) as UserInfo;
+      } catch (error: unknown) {
+        const err = error instanceof Error ? error : new Error(String(error));
+        console.error('Error fetching levels for username:', username, err.message);
       }
     }
 
-    // Se pasa userLevels (o null) al método findAllWithProfit
+    // Se pasa userInfo (o null) al método findAllWithProfit
     const result: PaginatedResult = await this.svc.findAllWithProfit(p, pp, userInfo);
 
     return {
@@ -56,13 +64,6 @@ export class MethodsController {
     const result: PaginatedResult = await this.svc.findAll(p, pp);
     return { data: result.data, meta: { total: result.total, page: p, perPage: pp } };
   }
-
-  // // --- Agrega el endpoint de profit ---
-  // @Get('profit/:id')
-  // async findMethodDetailsWithProfit(@Param('id') id: string) {
-  //   const method = (await this.svc.findMethodDetailsWithProfit(id)) as object; // Replace 'object' with the actual expected type if available
-  //   return { data: method };
-  // }
 
   @Get(':id')
   async findMethodDetailsWithProfit(@Param('id') id: string) {

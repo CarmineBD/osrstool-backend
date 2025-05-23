@@ -52,7 +52,8 @@ export class RuneScapeApiService {
         achievement_diaries: data.achievement_diaries,
       };
     } catch (error: any) {
-      throw new HttpException(`Error fetching levels: ${error.message}`, HttpStatus.BAD_GATEWAY);
+      const message = error instanceof Error ? error.message : String(error);
+      throw new HttpException(`Error fetching levels: ${message}`, HttpStatus.BAD_GATEWAY);
     }
   }
 }

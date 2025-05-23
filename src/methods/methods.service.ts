@@ -1,4 +1,4 @@
-import { Injectable, NotFoundException } from '@nestjs/common';
+import { Injectable, NotFoundException, OnModuleDestroy } from '@nestjs/common';
 import { InjectRepository } from '@nestjs/typeorm';
 import { Repository } from 'typeorm';
 import { Method } from './entities/method.entity';
@@ -91,7 +91,9 @@ export function filterMethodsByUserStats(methods: MethodDto[], userInfo: UserInf
 }
 
 @Injectable()
-export class MethodsService {
+export class MethodsService implements OnModuleDestroy {
+  private readonly redis: Redis;
+
   constructor(
     @InjectRepository(Method)
     private readonly methodRepo: Repository<Method>,
@@ -101,7 +103,13 @@ export class MethodsService {
 
     @InjectRepository(VariantIoItem)
     private readonly ioRepo: Repository<VariantIoItem>,
-  ) {}
+  ) {
+    this.redis = new IORedis(process.env.REDIS_URL as string);
+  }
+
+  onModuleDestroy() {
+    void this.redis.quit();
+  }
 
   private toDto(entity: Method): MethodDto {
     return MethodDto.fromEntity(entity);
@@ -191,13 +199,13 @@ export class MethodsService {
     // Si se pasó el objeto userLevels, filtramos los métodos antes de enriquecerlos
     let methodsToProcess = result.data;
     if (userInfo) {
-      methodsToProcess = filterMethodsByUserStats(result.data, userInfo);
+      methodsToProcess = filterMethodsByUserStats(result.data, userInfo as UserInfo);
       console.log('result.data');
       console.log(JSON.stringify(result.data));
     }
 
     // Enriquecemos la lista (filtrada o no) con la información de profit proveniente de Redis
-    const redis: Redis = new IORedis(process.env.REDIS_URL as string);
+    const redis = this.redis; // use the singleton instance
     const rawData = (await redis.call('JSON.GET', 'methodsProfits', '$')) as string | null;
     let allProfits: Record<string, Record<string, { low: number; high: number }>> = {};
     try {
@@ -238,7 +246,7 @@ export class MethodsService {
 
   async findMethodDetailsWithProfit(id: string): Promise<any> {
     const methodDto = await this.findOne(id);
-    const redis: Redis = new IORedis(process.env.REDIS_URL as string);
+    const redis = this.redis; // use the singleton instance
 
     // Obtenemos el snapshot de los profits desde Redis
     const rawData = (await redis.call('JSON.GET', 'methodsProfits', '$')) as string | null;
