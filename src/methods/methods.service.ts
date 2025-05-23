@@ -16,6 +16,80 @@ interface Profit {
 }
 type ProfitRecord = Record<string, Profit>;
 
+interface UserInfo {
+  levels: Record<string, number>;
+  quests: Record<string, number>;
+  achievement_diaries: Record<
+    string,
+    {
+      Easy: { complete: boolean; tasks: boolean[] };
+      Medium: { complete: boolean; tasks: boolean[] };
+      Hard: { complete: boolean; tasks: boolean[] };
+      Elite: { complete: boolean; tasks: boolean[] };
+    }
+  >;
+}
+
+export function filterMethodsByUserStats(methods: MethodDto[], userInfo: UserInfo): MethodDto[] {
+  // Mapa de quests en minúsculas para búsqueda rápida
+  const userQuests = Object.entries(userInfo.quests).reduce(
+    (acc, [name, status]) => {
+      acc[name.toLowerCase()] = status;
+      return acc;
+    },
+    {} as Record<string, number>,
+  );
+
+  return methods.reduce<MethodDto[]>((acc, method) => {
+    const validVariants = method.variants.filter((variant) => {
+      // Se especifica el tipo esperado para requirements
+      const req =
+        (variant.requirements as {
+          levels?: Record<string, number>;
+          quests?: Record<string, number>;
+          achievement_diaries?: Record<string, any>;
+        }) || {};
+      const { levels: reqLevels, quests: reqQuests, achievement_diaries: reqDiaries } = req;
+      // 1) Niveles (incluye CombatStats)
+      if (reqLevels) {
+        const { CombatStats, ...other } = reqLevels;
+        for (const skill in other) {
+          if ((userInfo.levels[skill] ?? 0) < other[skill]) return false;
+        }
+        if (CombatStats != null) {
+          for (const stat of ['Strength', 'Defence', 'Attack']) {
+            if ((userInfo.levels[stat] ?? 0) < CombatStats) return false;
+          }
+        }
+      }
+
+      // 2) Quests (1=started, 2=completed)
+      if (reqQuests) {
+        for (const q in reqQuests) {
+          if ((userQuests[q.toLowerCase()] ?? 0) < reqQuests[q]) return false;
+        }
+      }
+
+      // 3) Achievement diaries (1=Easy … 4=Elite)
+      if (reqDiaries) {
+        const levelMap = { 1: 'Easy', 2: 'Medium', 3: 'Hard', 4: 'Elite' } as const;
+        for (const diary in reqDiaries) {
+          const tier = levelMap[reqDiaries[diary] as 1 | 2 | 3 | 4];
+          const info = userInfo.achievement_diaries[diary];
+          if (!info?.[tier]?.complete) return false;
+        }
+      }
+
+      return true;
+    });
+
+    if (validVariants.length) {
+      acc.push({ ...method, variants: validVariants });
+    }
+    return acc;
+  }, []);
+}
+
 @Injectable()
 export class MethodsService {
   constructor(
@@ -107,8 +181,22 @@ export class MethodsService {
     if (result.affected === 0) throw new NotFoundException(`Method ${id} not found`);
   }
 
-  async findAllWithProfit(page = 1, perPage = 10): Promise<{ data: any[]; total: number }> {
+  async findAllWithProfit(
+    page = 1,
+    perPage = 10,
+    userInfo?: any,
+  ): Promise<{ data: any[]; total: number }> {
     const result = await this.findAll(page, perPage);
+
+    // Si se pasó el objeto userLevels, filtramos los métodos antes de enriquecerlos
+    let methodsToProcess = result.data;
+    if (userInfo) {
+      methodsToProcess = filterMethodsByUserStats(result.data, userInfo);
+      console.log('result.data');
+      console.log(JSON.stringify(result.data));
+    }
+
+    // Enriquecemos la lista (filtrada o no) con la información de profit proveniente de Redis
     const redis: Redis = new IORedis(process.env.REDIS_URL as string);
     const rawData = (await redis.call('JSON.GET', 'methodsProfits', '$')) as string | null;
     let allProfits: Record<string, Record<string, { low: number; high: number }>> = {};
@@ -123,7 +211,7 @@ export class MethodsService {
     } catch {
       allProfits = {};
     }
-    const enrichedMethods = result.data.map((method) => {
+    const enrichedMethods = methodsToProcess.map((method) => {
       const methodProfits = allProfits[method.id] ?? {};
       const enrichedVariants = method.variants.map((variant) => {
         const profitKey = method.variants.length === 1 ? method.id : variant.id;
