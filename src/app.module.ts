@@ -1,4 +1,3 @@
-// src/app.module.ts
 import { Module } from '@nestjs/common';
 import { ScheduleModule } from '@nestjs/schedule';
 import { ConfigModule, ConfigService } from '@nestjs/config';
@@ -8,6 +7,7 @@ import { MethodsModule } from './methods/methods.module';
 import { MethodProfitRefresherModule } from './method-profit-refresher/method-profit-refresher.module';
 // Si tienes un PricesModule que se conecta a Redis, impórtalo también aquí:
 import { PricesModule } from './prices/prices.module';
+import { VariantHistoryModule } from './variant-history/variant-history.module';
 
 @Module({
   imports: [
@@ -41,6 +41,9 @@ import { PricesModule } from './prices/prices.module';
 
     // Módulo que refresca beneficios cada minuto:
     MethodProfitRefresherModule,
+
+    // Guardar historial de profits cada 5 minutos:
+    VariantHistoryModule,
 
     // Si antes tenías un PricesModule para Redis, vuelve a importarlo:
     PricesModule,
