@@ -56,7 +56,20 @@ export class VariantHistoryService {
       return;
     }
 
+    console.log('Saving variant history records:', records);
     await this.historyRepo.save(records);
+    console.log('Saved variant history records successfully:', records);
     this.logger.log(`Stored ${records.length} variant profit snapshots`);
+  }
+
+  async getHistory(variantId: string, from?: string, to?: string): Promise<VariantHistory[]> {
+    const qb = this.historyRepo
+      .createQueryBuilder('history')
+      .where('history.variant_id = :variantId', { variantId });
+
+    if (from) qb.andWhere('history.timestamp >= :from', { from });
+    if (to) qb.andWhere('history.timestamp <= :to', { to });
+
+    return qb.orderBy('history.timestamp', 'ASC').getMany();
   }
 }
