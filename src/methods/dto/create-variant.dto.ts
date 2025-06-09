@@ -7,6 +7,11 @@ export class CreateVariantDto {
   @IsString() label: string;
   @IsOptional() @IsNumber() actionsPerHour?: number;
   @IsOptional() xpHour?: object;
+  @IsOptional() @IsNumber() clickIntensity?: number;
+  @IsOptional() @IsNumber() afkiness?: number;
+  @IsOptional() @IsString() riskLevel?: string;
+  @IsOptional() requirements?: object;
+  @IsOptional() recommendations?: object;
 
   @IsArray()
   @ValidateNested({ each: true })

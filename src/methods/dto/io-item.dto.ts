@@ -2,7 +2,7 @@
 import { IsNumber, IsString } from 'class-validator';
 
 export class IoItemDto {
-  @IsNumber() itemId: number;
+  @IsNumber() id: number;
   @IsNumber() quantity: number;
   @IsString() type: 'input' | 'output';
 }

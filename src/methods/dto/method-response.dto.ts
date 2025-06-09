@@ -6,6 +6,11 @@ export class VariantResponseDto {
   label: string;
   xpHour?: object;
   actionsPerHour?: number;
+  clickIntensity?: number;
+  afkiness?: number;
+  riskLevel?: string;
+  requirements?: object;
+  recommendations?: object;
   inputs: IoItemDto[];
   outputs: IoItemDto[];
 }

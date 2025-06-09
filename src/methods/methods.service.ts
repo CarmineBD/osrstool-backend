@@ -126,13 +126,18 @@ export class MethodsService implements OnModuleDestroy {
         label: v.label,
         actionsPerHour: v.actionsPerHour,
         xpHour: v.xpHour,
+        clickIntensity: v.clickIntensity,
+        afkiness: v.afkiness,
+        riskLevel: v.riskLevel,
+        requirements: v.requirements,
+        recommendations: v.recommendations,
       });
       await this.variantRepo.save(variant);
 
       for (const input of v.inputs) {
         const io = this.ioRepo.create({
           variant,
-          itemId: input.itemId,
+          itemId: input.id,
           type: 'input',
           quantity: input.quantity,
         });
@@ -142,7 +147,7 @@ export class MethodsService implements OnModuleDestroy {
       for (const output of v.outputs) {
         const io = this.ioRepo.create({
           variant,
-          itemId: output.itemId,
+          itemId: output.id,
           type: 'output',
           quantity: output.quantity,
         });
