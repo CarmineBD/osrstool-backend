@@ -66,8 +66,21 @@ export class MethodsController {
   }
 
   @Get(':id')
-  async findMethodDetailsWithProfit(@Param('id') id: string) {
-    const method = (await this.svc.findMethodDetailsWithProfit(id)) as object; // Replace 'object' with the actual expected type if available
+  async findMethodDetailsWithProfit(@Param('id') id: string, @Query('username') username?: string) {
+    let userInfo: UserInfo | null = null;
+    if (username) {
+      try {
+        userInfo = (await this.runescapeApi.fetchUserInfo(username)) as UserInfo;
+      } catch (error: unknown) {
+        const err = error instanceof Error ? error : new Error(String(error));
+        console.error('Error fetching levels for username:', username, err.message);
+      }
+    }
+
+    const method = (await this.svc.findMethodDetailsWithProfit(
+      id,
+      userInfo || undefined,
+    )) as object;
     return { data: method };
   }
 
