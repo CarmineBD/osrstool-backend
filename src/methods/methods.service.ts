@@ -222,7 +222,7 @@ export class MethodsService implements OnModuleDestroy {
     const enrichedMethods = methodsToProcess.map((method) => {
       const methodProfits = allProfits[method.id] ?? {};
       const enrichedVariants = method.variants.map((variant) => {
-        const profitKey = method.variants.length === 1 ? method.id : variant.id;
+        const profitKey = variant.id;
         const profit = methodProfits[profitKey] ?? { low: 0, high: 0 };
         const { id, clickIntensity, afkiness, riskLevel, requirements, xpHour, label } = variant;
         return {
@@ -262,10 +262,9 @@ export class MethodsService implements OnModuleDestroy {
       allProfits = {};
     }
 
-    const enrichedVariants = methodDto.variants.map((variant, index: number) => {
+    const enrichedVariants = methodDto.variants.map((variant) => {
       // Si solo hay una variante se utiliza el id del método; de lo contrario se usa una clave compuesta
-      const profitKey =
-        methodDto.variants.length === 1 ? methodDto.id : `${methodDto.variants[index].id}`;
+      const profitKey = variant.id;
       const profit = allProfits[profitKey] ?? { low: 0, high: 0 };
 
       return {
