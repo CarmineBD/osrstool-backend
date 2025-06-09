@@ -90,6 +90,70 @@ export function filterMethodsByUserStats(methods: MethodDto[], userInfo: UserInf
   }, []);
 }
 
+export function computeMissingRequirements(
+  requirements: {
+    levels?: Record<string, number>;
+    quests?: Record<string, number>;
+    achievement_diaries?: Record<string, any>;
+  } | null,
+  userInfo: UserInfo,
+): any | null {
+  if (!requirements) return null;
+  const missing: any = {};
+
+  const { levels, quests, achievement_diaries } = requirements;
+
+  if (levels) {
+    const { CombatStats, ...other } = levels;
+    const levelMissing: Record<string, number> = {};
+    for (const skill in other) {
+      if ((userInfo.levels[skill] ?? 0) < other[skill]) {
+        levelMissing[skill] = other[skill];
+      }
+    }
+    if (CombatStats != null) {
+      for (const stat of ['Strength', 'Defence', 'Attack']) {
+        if ((userInfo.levels[stat] ?? 0) < CombatStats) {
+          levelMissing[stat] = CombatStats;
+        }
+      }
+    }
+    if (Object.keys(levelMissing).length) missing.levels = levelMissing;
+  }
+
+  if (quests) {
+    const userQuests = Object.entries(userInfo.quests).reduce(
+      (acc, [name, status]) => {
+        acc[name.toLowerCase()] = status;
+        return acc;
+      },
+      {} as Record<string, number>,
+    );
+    const questMissing: Record<string, number> = {};
+    for (const q in quests) {
+      if ((userQuests[q.toLowerCase()] ?? 0) < quests[q]) {
+        questMissing[q] = quests[q];
+      }
+    }
+    if (Object.keys(questMissing).length) missing.quests = questMissing;
+  }
+
+  if (achievement_diaries) {
+    const diaryMissing: Record<string, number> = {};
+    const levelMap = { 1: 'Easy', 2: 'Medium', 3: 'Hard', 4: 'Elite' } as const;
+    for (const diary in achievement_diaries) {
+      const tier = levelMap[achievement_diaries[diary] as 1 | 2 | 3 | 4];
+      const info = userInfo.achievement_diaries[diary];
+      if (!info?.[tier]?.complete) {
+        diaryMissing[diary] = achievement_diaries[diary];
+      }
+    }
+    if (Object.keys(diaryMissing).length) missing.achievement_diaries = diaryMissing;
+  }
+
+  return Object.keys(missing).length ? missing : null;
+}
+
 @Injectable()
 export class MethodsService implements OnModuleDestroy {
   private readonly redis: Redis;
@@ -249,7 +313,7 @@ export class MethodsService implements OnModuleDestroy {
     return { data: enrichedMethods, total: result.total };
   }
 
-  async findMethodDetailsWithProfit(id: string): Promise<any> {
+  async findMethodDetailsWithProfit(id: string, userInfo?: UserInfo): Promise<any> {
     const methodDto = await this.findOne(id);
     const redis = this.redis; // use the singleton instance
 
@@ -272,6 +336,17 @@ export class MethodsService implements OnModuleDestroy {
       const profitKey = variant.id;
       const profit = allProfits[profitKey] ?? { low: 0, high: 0 };
 
+      const missingRequirements = userInfo
+        ? computeMissingRequirements(
+            (variant.requirements as {
+              levels?: Record<string, number>;
+              quests?: Record<string, number>;
+              achievement_diaries?: Record<string, any>;
+            }) || null,
+            userInfo,
+          )
+        : null;
+
       return {
         ...variant,
         // Se calculan campos a partir de Redis
@@ -280,6 +355,7 @@ export class MethodsService implements OnModuleDestroy {
         riskLevel: variant.riskLevel,
         requirements: variant.requirements,
         recommendations: variant.recommendations,
+        missingRequirements,
         lowProfit: profit.low,
         highProfit: profit.high,
       };
