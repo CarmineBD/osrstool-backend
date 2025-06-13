@@ -1,11 +1,13 @@
 import { Injectable, NotFoundException, OnModuleDestroy } from '@nestjs/common';
 import { InjectRepository } from '@nestjs/typeorm';
-import { Repository } from 'typeorm';
+import { Repository, In } from 'typeorm';
 import { Method } from './entities/method.entity';
 import { MethodVariant } from './entities/variant.entity';
 import { VariantIoItem } from './entities/io-item.entity';
 import { CreateMethodDto } from './dto/create-method.dto';
 import { UpdateMethodDto } from './dto/update-method.dto';
+import { UpdateMethodBasicDto } from './dto/update-method-basic.dto';
+import { UpdateVariantDto } from './dto/update-variant.dto';
 import { MethodDto } from './dto/method.dto';
 import IORedis, { Redis } from 'ioredis';
 
@@ -251,6 +253,67 @@ export class MethodsService implements OnModuleDestroy {
       relations: ['variants', 'variants.ioItems'],
     });
     return this.toDto(reloaded!);
+  }
+
+  async updateBasic(
+    id: string,
+    updateDto: UpdateMethodBasicDto,
+  ): Promise<MethodDto> {
+    const { variants, ...rest } = updateDto;
+    const method = await this.methodRepo.preload({ id, ...rest });
+    if (!method) {
+      throw new NotFoundException(`Method ${id} not found`);
+    }
+    if (variants) {
+      const variantEntities = await this.variantRepo.find({
+        where: { id: In(variants) },
+      });
+      method.variants = variantEntities;
+    }
+    await this.methodRepo.save(method);
+    const reloaded = await this.methodRepo.findOne({
+      where: { id },
+      relations: ['variants', 'variants.ioItems'],
+    });
+    return this.toDto(reloaded!);
+  }
+
+  async updateVariant(id: string, dto: UpdateVariantDto): Promise<MethodDto> {
+    const variant = await this.variantRepo.findOne({
+      where: { id },
+      relations: ['ioItems', 'method'],
+    });
+    if (!variant) throw new NotFoundException(`Variant ${id} not found`);
+    const { inputs, outputs, ...rest } = dto;
+    Object.assign(variant, rest);
+    if (inputs) {
+      await this.ioRepo.delete({ variant: { id: variant.id }, type: 'input' });
+      for (const input of inputs) {
+        await this.ioRepo.save(
+          this.ioRepo.create({
+            variant,
+            itemId: input.id,
+            type: 'input',
+            quantity: input.quantity,
+          }),
+        );
+      }
+    }
+    if (outputs) {
+      await this.ioRepo.delete({ variant: { id: variant.id }, type: 'output' });
+      for (const output of outputs) {
+        await this.ioRepo.save(
+          this.ioRepo.create({
+            variant,
+            itemId: output.id,
+            type: 'output',
+            quantity: output.quantity,
+          }),
+        );
+      }
+    }
+    await this.variantRepo.save(variant);
+    return this.findOne(variant.method.id);
   }
 
   async remove(id: string): Promise<void> {
