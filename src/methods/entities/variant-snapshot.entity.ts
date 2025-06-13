@@ -9,7 +9,7 @@ import { MethodVariant } from './variant.entity';
 
 @Entity('variant_snapshots')
 export class VariantSnapshot {
-  @PrimaryGeneratedColumn('uuid')
+  @PrimaryGeneratedColumn('uuid', { name: 'snapshot_id' })
   id: string;
 
   @ManyToOne(() => MethodVariant, { onDelete: 'CASCADE' })
