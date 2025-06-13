@@ -241,10 +241,101 @@ export class MethodsService implements OnModuleDestroy {
   }
 
   async update(id: string, updateDto: UpdateMethodDto): Promise<MethodDto> {
-    const method = await this.methodRepo.preload({ id, ...updateDto });
+    const method = await this.methodRepo.findOne({
+      where: { id },
+      relations: ['variants', 'variants.ioItems'],
+    });
     if (!method) {
       throw new NotFoundException(`Method ${id} not found`);
     }
+
+    if (updateDto.name !== undefined) method.name = updateDto.name;
+    if (updateDto.description !== undefined) method.description = updateDto.description;
+    if (updateDto.category !== undefined) method.category = updateDto.category;
+
+    if (updateDto.variants) {
+      for (const v of updateDto.variants) {
+        let variant = method.variants.find((mv) => mv.id === v.id);
+        if (variant) {
+          if (v.label !== undefined) variant.label = v.label;
+          if (v.actionsPerHour !== undefined) variant.actionsPerHour = v.actionsPerHour;
+          if (v.xpHour !== undefined) variant.xpHour = v.xpHour;
+          if (v.clickIntensity !== undefined) variant.clickIntensity = v.clickIntensity;
+          if (v.afkiness !== undefined) variant.afkiness = v.afkiness;
+          if (v.riskLevel !== undefined) variant.riskLevel = v.riskLevel;
+          if (v.requirements !== undefined) variant.requirements = v.requirements;
+          if (v.recommendations !== undefined) variant.recommendations = v.recommendations;
+
+          if (v.inputs || v.outputs) {
+            await this.ioRepo.delete({ variant: { id: variant.id } });
+            const ioItems: VariantIoItem[] = [];
+            for (const input of v.inputs ?? []) {
+              ioItems.push(
+                this.ioRepo.create({
+                  variant,
+                  itemId: input.id,
+                  type: 'input',
+                  quantity: input.quantity,
+                }),
+              );
+            }
+            for (const output of v.outputs ?? []) {
+              ioItems.push(
+                this.ioRepo.create({
+                  variant,
+                  itemId: output.id,
+                  type: 'output',
+                  quantity: output.quantity,
+                }),
+              );
+            }
+            await this.ioRepo.save(ioItems);
+            variant.ioItems = ioItems;
+          }
+
+          await this.variantRepo.save(variant);
+        } else {
+          variant = this.variantRepo.create({
+            method,
+            label: v.label,
+            actionsPerHour: v.actionsPerHour,
+            xpHour: v.xpHour,
+            clickIntensity: v.clickIntensity,
+            afkiness: v.afkiness,
+            riskLevel: v.riskLevel,
+            requirements: v.requirements,
+            recommendations: v.recommendations,
+          });
+          await this.variantRepo.save(variant);
+
+          const ioItems: VariantIoItem[] = [];
+          for (const input of v.inputs ?? []) {
+            ioItems.push(
+              this.ioRepo.create({
+                variant,
+                itemId: input.id,
+                type: 'input',
+                quantity: input.quantity,
+              }),
+            );
+          }
+          for (const output of v.outputs ?? []) {
+            ioItems.push(
+              this.ioRepo.create({
+                variant,
+                itemId: output.id,
+                type: 'output',
+                quantity: output.quantity,
+              }),
+            );
+          }
+          await this.ioRepo.save(ioItems);
+          variant.ioItems = ioItems;
+          method.variants.push(variant);
+        }
+      }
+    }
+
     await this.methodRepo.save(method);
     const reloaded = await this.methodRepo.findOne({
       where: { id },
