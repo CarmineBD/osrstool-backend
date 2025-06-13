@@ -4,9 +4,6 @@ import { Type } from 'class-transformer';
 import { IoItemDto } from './io-item.dto';
 
 export class CreateVariantDto {
-  @IsOptional()
-  @IsString()
-  id?: string;
   @IsString() label: string;
   @IsOptional() @IsNumber() actionsPerHour?: number;
   @IsOptional() xpHour?: object;
