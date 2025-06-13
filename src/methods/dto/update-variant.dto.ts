@@ -13,6 +13,10 @@ export class UpdateVariantDto {
   @IsOptional() requirements?: object;
   @IsOptional() recommendations?: object;
 
+  @IsOptional() @IsString() snapshotName?: string;
+  @IsOptional() @IsString() snapshotDescription?: string;
+  @IsOptional() @IsString() snapshotDate?: string;
+
   @IsOptional()
   @IsArray()
   @ValidateNested({ each: true })

@@ -7,9 +7,13 @@ import { Method } from './entities/method.entity';
 import { MethodVariant } from './entities/variant.entity';
 import { VariantIoItem } from './entities/io-item.entity';
 import { RuneScapeApiService } from './RuneScapeApiService';
+import { VariantSnapshotModule } from '../variant-snapshots/variant-snapshot.module';
 
 @Module({
-  imports: [TypeOrmModule.forFeature([Method, MethodVariant, VariantIoItem])],
+  imports: [
+    TypeOrmModule.forFeature([Method, MethodVariant, VariantIoItem]),
+    VariantSnapshotModule,
+  ],
   providers: [MethodsService, RuneScapeApiService],
   controllers: [MethodsController],
   exports: [MethodsService], // ← añade esta línea

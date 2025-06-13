@@ -1,4 +1,9 @@
-import { Injectable, NotFoundException, OnModuleDestroy } from '@nestjs/common';
+import {
+  Injectable,
+  NotFoundException,
+  OnModuleDestroy,
+  BadRequestException,
+} from '@nestjs/common';
 import { InjectRepository } from '@nestjs/typeorm';
 import { Repository, In } from 'typeorm';
 import { Method } from './entities/method.entity';
@@ -10,6 +15,7 @@ import { UpdateMethodBasicDto } from './dto/update-method-basic.dto';
 import { UpdateVariantDto } from './dto/update-variant.dto';
 import { MethodDto } from './dto/method.dto';
 import IORedis, { Redis } from 'ioredis';
+import { VariantSnapshotService } from '../variant-snapshots/variant-snapshot.service';
 
 // Definimos tipos para mayor seguridad
 interface Profit {
@@ -169,6 +175,8 @@ export class MethodsService implements OnModuleDestroy {
 
     @InjectRepository(VariantIoItem)
     private readonly ioRepo: Repository<VariantIoItem>,
+
+    private readonly snapshotSvc: VariantSnapshotService,
   ) {
     this.redis = new IORedis(process.env.REDIS_URL as string);
   }
@@ -275,13 +283,24 @@ export class MethodsService implements OnModuleDestroy {
     return this.toDto(reloaded!);
   }
 
-  async updateVariant(id: string, dto: UpdateVariantDto): Promise<MethodDto> {
+  async updateVariant(
+    id: string,
+    dto: UpdateVariantDto,
+    generateSnapshot = false,
+  ): Promise<MethodDto> {
     const variant = await this.variantRepo.findOne({
       where: { id },
       relations: ['ioItems', 'method'],
     });
     if (!variant) throw new NotFoundException(`Variant ${id} not found`);
-    const { inputs = [], outputs = [], ...rest } = dto;
+    const {
+      inputs = [],
+      outputs = [],
+      snapshotName,
+      snapshotDescription,
+      snapshotDate,
+      ...rest
+    } = dto;
     Object.assign(variant, rest);
 
     // Remove existing IO items to avoid duplicates
@@ -311,6 +330,21 @@ export class MethodsService implements OnModuleDestroy {
 
     variant.ioItems = newItems;
     await this.variantRepo.save(variant);
+
+    if (generateSnapshot) {
+      if (!snapshotName) {
+        throw new BadRequestException(
+          'snapshotName is required when generateSnapshot is true',
+        );
+      }
+      await this.snapshotSvc.createFromVariant(
+        variant,
+        snapshotName,
+        snapshotDescription,
+        snapshotDate,
+      );
+    }
+
     return this.findOne(variant.method.id);
   }
 

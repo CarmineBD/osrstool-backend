@@ -8,6 +8,7 @@ import { MethodProfitRefresherModule } from './method-profit-refresher/method-pr
 // Si tienes un PricesModule que se conecta a Redis, impórtalo también aquí:
 import { PricesModule } from './prices/prices.module';
 import { VariantHistoryModule } from './variant-history/variant-history.module';
+import { VariantSnapshotModule } from './variant-snapshots/variant-snapshot.module';
 
 @Module({
   imports: [
@@ -44,6 +45,7 @@ import { VariantHistoryModule } from './variant-history/variant-history.module';
 
     // Guardar historial de profits cada 5 minutos:
     VariantHistoryModule,
+    VariantSnapshotModule,
 
     // Si antes tenías un PricesModule para Redis, vuelve a importarlo:
     PricesModule,
