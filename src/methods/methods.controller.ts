@@ -108,13 +108,8 @@ export class MethodsController {
   async updateVariant(
     @Param('id') id: string,
     @Body() dto: UpdateVariantDto,
-    @Query('generateSnapshot') generateSnapshot?: string,
   ) {
-    const updated = await this.svc.updateVariant(
-      id,
-      dto,
-      generateSnapshot === 'true',
-    );
+    const updated = await this.svc.updateVariant(id, dto);
     return { data: updated };
   }
 

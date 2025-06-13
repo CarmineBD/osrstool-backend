@@ -4,7 +4,6 @@ import { Repository, In } from 'typeorm';
 import { Method } from './entities/method.entity';
 import { MethodVariant } from './entities/variant.entity';
 import { VariantIoItem } from './entities/io-item.entity';
-import { VariantSnapshot } from './entities/variant-snapshot.entity';
 import { CreateMethodDto } from './dto/create-method.dto';
 import { UpdateMethodDto } from './dto/update-method.dto';
 import { UpdateMethodBasicDto } from './dto/update-method-basic.dto';
@@ -170,9 +169,6 @@ export class MethodsService implements OnModuleDestroy {
 
     @InjectRepository(VariantIoItem)
     private readonly ioRepo: Repository<VariantIoItem>,
-
-    @InjectRepository(VariantSnapshot)
-    private readonly snapshotRepo: Repository<VariantSnapshot>,
   ) {
     this.redis = new IORedis(process.env.REDIS_URL as string);
   }
@@ -279,24 +275,13 @@ export class MethodsService implements OnModuleDestroy {
     return this.toDto(reloaded!);
   }
 
-  async updateVariant(
-    id: string,
-    dto: UpdateVariantDto,
-    generateSnapshot = false,
-  ): Promise<MethodDto> {
+  async updateVariant(id: string, dto: UpdateVariantDto): Promise<MethodDto> {
     const variant = await this.variantRepo.findOne({
       where: { id },
       relations: ['ioItems', 'method'],
     });
     if (!variant) throw new NotFoundException(`Variant ${id} not found`);
-    const {
-      inputs = [],
-      outputs = [],
-      snapshotName,
-      snapshotDescription,
-      snapshotDate,
-      ...rest
-    } = dto;
+    const { inputs = [], outputs = [], ...rest } = dto;
     Object.assign(variant, rest);
 
     // Remove existing IO items to avoid duplicates
@@ -326,29 +311,6 @@ export class MethodsService implements OnModuleDestroy {
 
     variant.ioItems = newItems;
     await this.variantRepo.save(variant);
-
-    if (generateSnapshot) {
-      if (!snapshotName) {
-        throw new Error('snapshotName is required when generateSnapshot is true');
-      }
-      const snap = this.snapshotRepo.create({
-        variant,
-        label: variant.label,
-        xpHour: variant.xpHour,
-        clickIntensity: variant.clickIntensity,
-        afkiness: variant.afkiness,
-        riskLevel: variant.riskLevel,
-        requirements: variant.requirements,
-        recommendations: variant.recommendations,
-        actionsPerHour: variant.actionsPerHour,
-        createdAt: variant.createdAt,
-        snapshotName,
-        snapshotDescription,
-        snapshotDate: snapshotDate ? new Date(snapshotDate) : new Date(),
-      });
-      await this.snapshotRepo.save(snap);
-    }
-
     return this.findOne(variant.method.id);
   }
 
