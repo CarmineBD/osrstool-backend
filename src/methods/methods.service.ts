@@ -260,17 +260,37 @@ export class MethodsService implements OnModuleDestroy {
     updateDto: UpdateMethodBasicDto,
   ): Promise<MethodDto> {
     const { variants, ...rest } = updateDto;
-    const method = await this.methodRepo.preload({ id, ...rest });
-    if (!method) {
-      throw new NotFoundException(`Method ${id} not found`);
-    }
-    if (variants) {
-      const variantEntities = await this.variantRepo.find({
-        where: { id: In(variants) },
+    const queryRunner = this.methodRepo.manager.connection.createQueryRunner();
+    await queryRunner.connect();
+    await queryRunner.startTransaction();
+    try {
+      const method = await queryRunner.manager.preload(Method, {
+        id,
+        ...rest,
       });
-      method.variants = variantEntities;
+      if (!method) {
+        throw new NotFoundException(`Method ${id} not found`);
+      }
+      if (variants) {
+        const variantRepo = queryRunner.manager.getRepository(MethodVariant);
+        const variantEntities = await variantRepo.find({
+          where: { id: In(variants) },
+          relations: ['ioItems'],
+        });
+        method.variants = variantEntities.map((v) => {
+          v.method = method;
+          return v;
+        });
+        await variantRepo.save(method.variants);
+      }
+      await queryRunner.manager.save(method);
+      await queryRunner.commitTransaction();
+    } catch (err) {
+      await queryRunner.rollbackTransaction();
+      throw err;
+    } finally {
+      await queryRunner.release();
     }
-    await this.methodRepo.save(method);
     const reloaded = await this.methodRepo.findOne({
       where: { id },
       relations: ['variants', 'variants.ioItems'],
@@ -279,18 +299,27 @@ export class MethodsService implements OnModuleDestroy {
   }
 
   async updateVariant(id: string, dto: UpdateVariantDto): Promise<MethodDto> {
-    const variant = await this.variantRepo.findOne({
-      where: { id },
-      relations: ['ioItems', 'method'],
-    });
-    if (!variant) throw new NotFoundException(`Variant ${id} not found`);
-    const { inputs, outputs, ...rest } = dto;
-    Object.assign(variant, rest);
-    if (inputs) {
-      await this.ioRepo.delete({ variant: { id: variant.id }, type: 'input' });
+    const queryRunner = this.variantRepo.manager.connection.createQueryRunner();
+    await queryRunner.connect();
+    await queryRunner.startTransaction();
+    try {
+      const variantRepo = queryRunner.manager.getRepository(MethodVariant);
+      const ioRepo = queryRunner.manager.getRepository(VariantIoItem);
+      const variant = await variantRepo.findOne({
+        where: { id },
+        relations: ['method'],
+      });
+      if (!variant) throw new NotFoundException(`Variant ${id} not found`);
+
+      const { inputs = [], outputs = [], ...rest } = dto;
+      Object.assign(variant, rest);
+
+      await ioRepo.delete({ variant: { id } });
+
+      const ioItems: VariantIoItem[] = [];
       for (const input of inputs) {
-        await this.ioRepo.save(
-          this.ioRepo.create({
+        ioItems.push(
+          ioRepo.create({
             variant,
             itemId: input.id,
             type: 'input',
@@ -298,12 +327,9 @@ export class MethodsService implements OnModuleDestroy {
           }),
         );
       }
-    }
-    if (outputs) {
-      await this.ioRepo.delete({ variant: { id: variant.id }, type: 'output' });
       for (const output of outputs) {
-        await this.ioRepo.save(
-          this.ioRepo.create({
+        ioItems.push(
+          ioRepo.create({
             variant,
             itemId: output.id,
             type: 'output',
@@ -311,9 +337,20 @@ export class MethodsService implements OnModuleDestroy {
           }),
         );
       }
+      await variantRepo.save(variant);
+      if (ioItems.length) await ioRepo.save(ioItems);
+      await queryRunner.commitTransaction();
+      const method = await this.methodRepo.findOne({
+        where: { id: variant.method.id },
+        relations: ['variants', 'variants.ioItems'],
+      });
+      return this.toDto(method!);
+    } catch (err) {
+      await queryRunner.rollbackTransaction();
+      throw err;
+    } finally {
+      await queryRunner.release();
     }
-    await this.variantRepo.save(variant);
-    return this.findOne(variant.method.id);
   }
 
   async remove(id: string): Promise<void> {
