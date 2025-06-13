@@ -1,6 +1,11 @@
 import { Controller, Get, Post, Put, Delete, Param, Body, Query } from '@nestjs/common';
 import { MethodsService } from './methods.service';
-import { CreateMethodDto, UpdateMethodDto } from './dto';
+import {
+  CreateMethodDto,
+  UpdateMethodDto,
+  UpdateMethodBasicDto,
+  UpdateVariantDto,
+} from './dto';
 import { RuneScapeApiService } from './RuneScapeApiService';
 
 interface PaginatedResult {
@@ -87,6 +92,24 @@ export class MethodsController {
   @Put(':id')
   async update(@Param('id') id: string, @Body() dto: UpdateMethodDto) {
     const updated = await this.svc.update(id, dto);
+    return { data: updated };
+  }
+
+  @Put(':id/basic')
+  async updateBasic(
+    @Param('id') id: string,
+    @Body() dto: UpdateMethodBasicDto,
+  ) {
+    const updated = await this.svc.updateBasic(id, dto);
+    return { data: updated };
+  }
+
+  @Put('variant/:id')
+  async updateVariant(
+    @Param('id') id: string,
+    @Body() dto: UpdateVariantDto,
+  ) {
+    const updated = await this.svc.updateVariant(id, dto);
     return { data: updated };
   }
 
