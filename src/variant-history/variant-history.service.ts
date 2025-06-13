@@ -5,6 +5,7 @@ import { Repository } from 'typeorm';
 import Redis from 'ioredis';
 import { VariantHistory } from '../methods/entities/variant-history.entity';
 import { MethodVariant } from '../methods/entities/variant.entity';
+import { VariantSnapshot } from '../methods/entities/variant-snapshot.entity';
 
 @Injectable()
 export class VariantHistoryService {
@@ -14,6 +15,8 @@ export class VariantHistoryService {
   constructor(
     @InjectRepository(VariantHistory)
     private readonly historyRepo: Repository<VariantHistory>,
+    @InjectRepository(VariantSnapshot)
+    private readonly snapshotRepo: Repository<VariantSnapshot>,
   ) {}
 
   @Cron('*/5 * * * *')
@@ -62,7 +65,11 @@ export class VariantHistoryService {
     this.logger.log(`Stored ${records.length} variant profit snapshots`);
   }
 
-  async getHistory(variantId: string, from?: string, to?: string): Promise<VariantHistory[]> {
+  async getHistory(
+    variantId: string,
+    from?: string,
+    to?: string,
+  ): Promise<{ history: VariantHistory[]; snapshots: VariantSnapshot[] }> {
     const qb = this.historyRepo
       .createQueryBuilder('history')
       .where('history.variant_id = :variantId', { variantId });
@@ -70,6 +77,19 @@ export class VariantHistoryService {
     if (from) qb.andWhere('history.timestamp >= :from', { from });
     if (to) qb.andWhere('history.timestamp <= :to', { to });
 
-    return qb.orderBy('history.timestamp', 'ASC').getMany();
+    const history = await qb.orderBy('history.timestamp', 'ASC').getMany();
+
+    const snapshotQb = this.snapshotRepo
+      .createQueryBuilder('snapshot')
+      .where('snapshot.variant_id = :variantId', { variantId });
+
+    if (from) snapshotQb.andWhere('snapshot.snapshotDate >= :from', { from });
+    if (to) snapshotQb.andWhere('snapshot.snapshotDate <= :to', { to });
+
+    const snapshots = await snapshotQb
+      .orderBy('snapshot.snapshotDate', 'ASC')
+      .getMany();
+
+    return { history, snapshots };
   }
 }

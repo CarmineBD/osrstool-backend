@@ -11,7 +11,7 @@ export class VariantHistoryController {
     @Query('from') from?: string,
     @Query('to') to?: string,
   ) {
-    const history = await this.svc.getHistory(variantId, from, to);
-    return { data: history };
+    const { history, snapshots } = await this.svc.getHistory(variantId, from, to);
+    return { data: history, variant_snapshot: snapshots };
   }
 }
