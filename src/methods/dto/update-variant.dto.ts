@@ -24,4 +24,16 @@ export class UpdateVariantDto {
   @ValidateNested({ each: true })
   @Type(() => IoItemDto)
   outputs?: IoItemDto[];
+
+  // Snapshot fields
+  @IsOptional()
+  @IsString()
+  snapshotName?: string;
+
+  @IsOptional()
+  @IsString()
+  snapshotDescription?: string;
+
+  @IsOptional()
+  snapshotDate?: string;
 }
