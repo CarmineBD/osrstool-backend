@@ -255,10 +255,7 @@ export class MethodsService implements OnModuleDestroy {
     return this.toDto(reloaded!);
   }
 
-  async updateBasic(
-    id: string,
-    updateDto: UpdateMethodBasicDto,
-  ): Promise<MethodDto> {
+  async updateBasic(id: string, updateDto: UpdateMethodBasicDto): Promise<MethodDto> {
     const { variants, ...rest } = updateDto;
     const method = await this.methodRepo.preload({ id, ...rest });
     if (!method) {
@@ -284,34 +281,35 @@ export class MethodsService implements OnModuleDestroy {
       relations: ['ioItems', 'method'],
     });
     if (!variant) throw new NotFoundException(`Variant ${id} not found`);
-    const { inputs, outputs, ...rest } = dto;
+    const { inputs = [], outputs = [], ...rest } = dto;
     Object.assign(variant, rest);
-    if (inputs) {
-      await this.ioRepo.delete({ variant: { id: variant.id }, type: 'input' });
-      for (const input of inputs) {
-        await this.ioRepo.save(
-          this.ioRepo.create({
-            variant,
-            itemId: input.id,
-            type: 'input',
-            quantity: input.quantity,
-          }),
-        );
-      }
+
+    // Remove existing IO items to avoid duplicates
+    await this.ioRepo.delete({ variant: { id } });
+
+    const newItems: VariantIoItem[] = [];
+    for (const input of inputs) {
+      newItems.push(
+        this.ioRepo.create({
+          variant,
+          itemId: input.id,
+          type: 'input',
+          quantity: input.quantity,
+        }),
+      );
     }
-    if (outputs) {
-      await this.ioRepo.delete({ variant: { id: variant.id }, type: 'output' });
-      for (const output of outputs) {
-        await this.ioRepo.save(
-          this.ioRepo.create({
-            variant,
-            itemId: output.id,
-            type: 'output',
-            quantity: output.quantity,
-          }),
-        );
-      }
+    for (const output of outputs) {
+      newItems.push(
+        this.ioRepo.create({
+          variant,
+          itemId: output.id,
+          type: 'output',
+          quantity: output.quantity,
+        }),
+      );
     }
+
+    variant.ioItems = newItems;
     await this.variantRepo.save(variant);
     return this.findOne(variant.method.id);
   }
