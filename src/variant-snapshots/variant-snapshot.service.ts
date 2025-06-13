@@ -2,6 +2,7 @@ import { Injectable, NotFoundException } from '@nestjs/common';
 import { InjectRepository } from '@nestjs/typeorm';
 import { Repository } from 'typeorm';
 import { VariantSnapshot } from '../methods/entities/variant-snapshot.entity';
+import { VariantIoItemSnapshot } from '../methods/entities/io-item-snapshot.entity';
 import { MethodVariant } from '../methods/entities/variant.entity';
 
 @Injectable()
@@ -9,6 +10,8 @@ export class VariantSnapshotService {
   constructor(
     @InjectRepository(VariantSnapshot)
     private readonly repo: Repository<VariantSnapshot>,
+    @InjectRepository(VariantIoItemSnapshot)
+    private readonly ioRepo: Repository<VariantIoItemSnapshot>,
   ) {}
 
   async createFromVariant(
@@ -32,7 +35,21 @@ export class VariantSnapshotService {
       snapshotDescription,
       snapshotDate: snapshotDate ? new Date(snapshotDate) : new Date(),
     });
-    return this.repo.save(snapshot);
+    const saved = await this.repo.save(snapshot);
+
+    if (variant.ioItems?.length) {
+      const items = variant.ioItems.map((io) =>
+        this.ioRepo.create({
+          snapshot: saved,
+          itemId: io.itemId,
+          quantity: io.quantity,
+          type: io.type,
+        }),
+      );
+      await this.ioRepo.save(items);
+    }
+
+    return saved;
   }
 
   async remove(id: number): Promise<void> {
