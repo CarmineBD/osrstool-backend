@@ -358,14 +358,15 @@ export class MethodsService implements OnModuleDestroy {
     perPage = 10,
     userInfo?: any,
   ): Promise<{ data: any[]; total: number }> {
-    const result = await this.findAll(page, perPage);
+    // Obtenemos todos los métodos para poder ordenarlos por profit posteriormente
+    const allEntities = await this.methodRepo.find({
+      relations: ['variants', 'variants.ioItems'],
+    });
+    let methodsToProcess = allEntities.map((m) => this.toDto(m));
 
     // Si se pasó el objeto userLevels, filtramos los métodos antes de enriquecerlos
-    let methodsToProcess = result.data;
     if (userInfo) {
-      methodsToProcess = filterMethodsByUserStats(result.data, userInfo as UserInfo);
-      console.log('result.data');
-      console.log(JSON.stringify(result.data));
+      methodsToProcess = filterMethodsByUserStats(methodsToProcess, userInfo as UserInfo);
     }
 
     // Enriquecemos la lista (filtrada o no) con la información de profit proveniente de Redis
@@ -401,11 +402,25 @@ export class MethodsService implements OnModuleDestroy {
           highProfit: profit.high,
         };
       });
+
+      // Elegimos la variante con mayor highProfit
+      const bestVariant = enrichedVariants.sort((a, b) => b.highProfit - a.highProfit)[0];
+
       // Eliminamos 'description' destructurando el objeto
       const { description: _description, ...methodWithoutDescription } = method;
-      return { ...methodWithoutDescription, variants: enrichedVariants };
+      return { ...methodWithoutDescription, variants: [bestVariant] };
     });
-    return { data: enrichedMethods, total: result.total };
+
+    // Ordenamos por el highProfit de la variante seleccionada
+    enrichedMethods.sort(
+      (a, b) => (b.variants[0]?.highProfit ?? 0) - (a.variants[0]?.highProfit ?? 0),
+    );
+
+    const total = enrichedMethods.length;
+    const start = (page - 1) * perPage;
+    const paginated = enrichedMethods.slice(start, start + perPage);
+
+    return { data: paginated, total };
   }
 
   async findMethodDetailsWithProfit(id: string, userInfo?: UserInfo): Promise<any> {
