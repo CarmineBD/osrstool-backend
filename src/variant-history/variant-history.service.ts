@@ -69,7 +69,10 @@ export class VariantHistoryService {
     variantId: string,
     from?: string,
     to?: string,
-  ): Promise<{ history: VariantHistory[]; snapshots: VariantSnapshot[] }> {
+  ): Promise<{
+    history: VariantHistory[];
+    snapshots: Pick<VariantSnapshot, 'snapshotDate' | 'snapshotDescription' | 'snapshotName'>[];
+  }> {
     const qb = this.historyRepo
       .createQueryBuilder('history')
       .where('history.variant_id = :variantId', { variantId });
@@ -86,9 +89,13 @@ export class VariantHistoryService {
     if (from) snapshotQb.andWhere('snapshot.snapshotDate >= :from', { from });
     if (to) snapshotQb.andWhere('snapshot.snapshotDate <= :to', { to });
 
-    const snapshots = await snapshotQb
-      .orderBy('snapshot.snapshotDate', 'ASC')
-      .getMany();
+    const rawSnapshots = await snapshotQb.orderBy('snapshot.snapshotDate', 'ASC').getMany();
+
+    const snapshots = rawSnapshots.map((s) => ({
+      snapshotDate: s.snapshotDate,
+      snapshotDescription: s.snapshotDescription,
+      snapshotName: s.snapshotName,
+    }));
 
     return { history, snapshots };
   }
