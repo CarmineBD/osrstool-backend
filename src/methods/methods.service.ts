@@ -38,6 +38,22 @@ interface UserInfo {
   >;
 }
 
+interface ListFilters {
+  name?: string;
+  categories?: string[];
+  clickIntensity?: number;
+  afkiness?: number;
+  riskLevel?: number;
+  xpHour?: number;
+  skill?: string;
+  showProfitables?: boolean;
+}
+
+interface SortOptions {
+  orderBy?: 'clickIntensity' | 'afkiness' | 'xpHour' | 'highProfit';
+  order?: 'asc' | 'desc';
+}
+
 export function filterMethodsByUserStats(methods: MethodDto[], userInfo: UserInfo): MethodDto[] {
   // Mapa de quests en minúsculas para búsqueda rápida
   const userQuests = Object.entries(userInfo.quests).reduce(
@@ -333,9 +349,7 @@ export class MethodsService implements OnModuleDestroy {
 
     if (generateSnapshot) {
       if (!snapshotName) {
-        throw new BadRequestException(
-          'snapshotName is required when generateSnapshot is true',
-        );
+        throw new BadRequestException('snapshotName is required when generateSnapshot is true');
       }
       await this.snapshotSvc.createFromVariant(
         variant,
@@ -357,6 +371,8 @@ export class MethodsService implements OnModuleDestroy {
     page = 1,
     perPage = 10,
     userInfo?: any,
+    filters: ListFilters = {},
+    sort: SortOptions = { orderBy: 'highProfit', order: 'desc' },
   ): Promise<{ data: any[]; total: number }> {
     // Obtenemos todos los métodos para poder ordenarlos por profit posteriormente
     const allEntities = await this.methodRepo.find({
@@ -384,37 +400,94 @@ export class MethodsService implements OnModuleDestroy {
     } catch {
       allProfits = {};
     }
-    const enrichedMethods = methodsToProcess.map((method) => {
-      const methodProfits = allProfits[method.id] ?? {};
-      const enrichedVariants = method.variants.map((variant) => {
-        const profitKey = variant.id;
-        const profit = methodProfits[profitKey] ?? { low: 0, high: 0 };
-        const { id, clickIntensity, afkiness, riskLevel, requirements, xpHour, label } = variant;
-        return {
-          id,
-          xpHour,
-          label,
-          clickIntensity,
-          afkiness,
-          riskLevel,
-          requirements,
-          lowProfit: profit.low,
-          highProfit: profit.high,
-        };
+    const enrichedMethods = methodsToProcess
+      .map((method) => {
+        const methodProfits = allProfits[method.id] ?? {};
+        let enrichedVariants = method.variants.map((variant) => {
+          const profitKey = variant.id;
+          const profit = methodProfits[profitKey] ?? { low: 0, high: 0 };
+          const { id, clickIntensity, afkiness, riskLevel, requirements, xpHour, label } = variant;
+          return {
+            id,
+            xpHour,
+            label,
+            clickIntensity,
+            afkiness,
+            riskLevel,
+            requirements,
+            lowProfit: profit.low,
+            highProfit: profit.high,
+          };
+        });
+
+        // Filtrado por propiedades de variant
+        enrichedVariants = enrichedVariants.filter((v) => {
+          if (
+            filters.clickIntensity != null &&
+            v.clickIntensity != null &&
+            v.clickIntensity > filters.clickIntensity
+          )
+            return false;
+          if (filters.afkiness != null && v.afkiness != null && v.afkiness > filters.afkiness)
+            return false;
+          if (
+            filters.riskLevel != null &&
+            v.riskLevel != null &&
+            Number(v.riskLevel) > filters.riskLevel
+          )
+            return false;
+          if (filters.xpHour != null) {
+            const hasXp = v.xpHour != null;
+            if ((filters.xpHour === 1 && !hasXp) || (filters.xpHour === 0 && hasXp)) return false;
+          }
+          if (filters.skill && v.xpHour) {
+            const skillNames = Object.keys(v.xpHour).map((s) => s.toLowerCase());
+            if (!skillNames.includes(filters.skill.toLowerCase())) return false;
+          }
+          if (filters.showProfitables && v.highProfit <= 0) return false;
+          return true;
+        });
+
+        return { ...method, variants: enrichedVariants };
+      })
+      .filter((m) => {
+        if (filters.name && !m.name.toLowerCase().includes(filters.name.toLowerCase()))
+          return false;
+        if (
+          filters.categories &&
+          filters.categories.length &&
+          (!m.category || !filters.categories.includes(m.category))
+        )
+          return false;
+        return m.variants.length > 0;
+      })
+      .map((m) => {
+        const bestVariant = m.variants.sort((a, b) => b.highProfit - a.highProfit)[0];
+        const { description: _description, ...methodWithoutDescription } = m;
+        return { ...methodWithoutDescription, variants: [bestVariant] };
       });
 
-      // Elegimos la variante con mayor highProfit
-      const bestVariant = enrichedVariants.sort((a, b) => b.highProfit - a.highProfit)[0];
+    // Ordenamiento según los parámetros recibidos
+    const comparator = (a: number, b: number) => (sort.order === 'asc' ? a - b : b - a);
 
-      // Eliminamos 'description' destructurando el objeto
-      const { description: _description, ...methodWithoutDescription } = method;
-      return { ...methodWithoutDescription, variants: [bestVariant] };
+    const getXpSum = (v: any) =>
+      Object.values(v?.xpHour ?? {}).reduce((acc: number, val: any) => acc + Number(val ?? 0), 0);
+
+    enrichedMethods.sort((a, b) => {
+      const va = a.variants[0];
+      const vb = b.variants[0];
+      switch (sort.orderBy) {
+        case 'clickIntensity':
+          return comparator(va.clickIntensity ?? 0, vb.clickIntensity ?? 0);
+        case 'afkiness':
+          return comparator(va.afkiness ?? 0, vb.afkiness ?? 0);
+        case 'xpHour':
+          return comparator(getXpSum(va), getXpSum(vb));
+        case 'highProfit':
+        default:
+          return comparator(va.highProfit ?? 0, vb.highProfit ?? 0);
+      }
     });
-
-    // Ordenamos por el highProfit de la variante seleccionada
-    enrichedMethods.sort(
-      (a, b) => (b.variants[0]?.highProfit ?? 0) - (a.variants[0]?.highProfit ?? 0),
-    );
 
     const total = enrichedMethods.length;
     const start = (page - 1) * perPage;
