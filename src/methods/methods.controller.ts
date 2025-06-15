@@ -1,11 +1,6 @@
 import { Controller, Get, Post, Put, Delete, Param, Body, Query } from '@nestjs/common';
 import { MethodsService } from './methods.service';
-import {
-  CreateMethodDto,
-  UpdateMethodDto,
-  UpdateMethodBasicDto,
-  UpdateVariantDto,
-} from './dto';
+import { CreateMethodDto, UpdateMethodDto, UpdateMethodBasicDto, UpdateVariantDto } from './dto';
 import { RuneScapeApiService } from './RuneScapeApiService';
 
 interface PaginatedResult {
@@ -38,6 +33,16 @@ export class MethodsController {
     @Query('page') page = '1',
     @Query('perPage') perPage = '10',
     @Query('username') username?: string,
+    @Query('name') name?: string,
+    @Query('category') category?: string | string[],
+    @Query('clickIntensity') clickIntensity?: string,
+    @Query('afkiness') afkiness?: string,
+    @Query('riskLevel') riskLevel?: string,
+    @Query('xpHour') xpHour?: string,
+    @Query('skill') skill?: string,
+    @Query('showProfitables') showProfitables?: string,
+    @Query('orderBy') orderBy = 'highProfit',
+    @Query('order') order = 'desc',
   ) {
     const p = parseInt(page, 10);
     const pp = parseInt(perPage, 10);
@@ -52,8 +57,35 @@ export class MethodsController {
       }
     }
 
-    // Se pasa userInfo (o null) al método findAllWithProfit
-    const result: PaginatedResult = await this.svc.findAllWithProfit(p, pp, userInfo);
+    const filters = {
+      name,
+      categories: Array.isArray(category)
+        ? category
+        : category
+          ? String(category)
+              .split(',')
+              .map((c) => c.trim())
+          : undefined,
+      clickIntensity: clickIntensity ? Number(clickIntensity) : undefined,
+      afkiness: afkiness ? Number(afkiness) : undefined,
+      riskLevel: riskLevel ? Number(riskLevel) : undefined,
+      xpHour: xpHour ? Number(xpHour) : undefined,
+      skill: skill ?? undefined,
+      showProfitables: showProfitables === 'true' || showProfitables === '1',
+    };
+
+    const sortOptions = {
+      orderBy: orderBy as 'clickIntensity' | 'afkiness' | 'xpHour' | 'highProfit',
+      order: (order as 'asc' | 'desc') ?? 'desc',
+    };
+
+    const result: PaginatedResult = await this.svc.findAllWithProfit(
+      p,
+      pp,
+      userInfo,
+      filters,
+      sortOptions,
+    );
 
     return {
       data: result.data,
@@ -96,10 +128,7 @@ export class MethodsController {
   }
 
   @Put(':id/basic')
-  async updateBasic(
-    @Param('id') id: string,
-    @Body() dto: UpdateMethodBasicDto,
-  ) {
+  async updateBasic(@Param('id') id: string, @Body() dto: UpdateMethodBasicDto) {
     const updated = await this.svc.updateBasic(id, dto);
     return { data: updated };
   }
