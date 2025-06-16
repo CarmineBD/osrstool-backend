@@ -470,8 +470,11 @@ export class MethodsService implements OnModuleDestroy {
     // Ordenamiento según los parámetros recibidos
     const comparator = (a: number, b: number) => (sort.order === 'asc' ? a - b : b - a);
 
-    const getXpSum = (v: any) =>
-      Object.values(v?.xpHour ?? {}).reduce((acc: number, val: any) => acc + Number(val ?? 0), 0);
+    const getXpSum = (v: any): number =>
+      (Object.values(v?.xpHour ?? {}) as any[]).reduce(
+        (acc: number, val: any) => acc + Number(val ?? 0),
+        0,
+      );
 
     enrichedMethods.sort((a, b) => {
       const va = a.variants[0];
