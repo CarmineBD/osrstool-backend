@@ -1,4 +1,14 @@
-import { Controller, Get, Post, Put, Delete, Param, Body, Query } from '@nestjs/common';
+import {
+  Controller,
+  Get,
+  Post,
+  Put,
+  Delete,
+  Param,
+  Body,
+  Query,
+  NotFoundException,
+} from '@nestjs/common';
 import { MethodsService } from './methods.service';
 import { CreateMethodDto, UpdateMethodDto, UpdateMethodBasicDto, UpdateVariantDto } from './dto';
 import { RuneScapeApiService } from './RuneScapeApiService';
@@ -47,13 +57,14 @@ export class MethodsController {
     const p = parseInt(page, 10);
     const pp = parseInt(perPage, 10);
 
-    let userInfo: UserInfo | null = null; // Changed type from Record<string, number> to UserInfo
+    let userInfo: UserInfo | null = null;
     if (username) {
       try {
         userInfo = (await this.runescapeApi.fetchUserInfo(username)) as UserInfo;
-      } catch (error: unknown) {
-        const err = error instanceof Error ? error : new Error(String(error));
-        console.error('Error fetching levels for username:', username, err.message);
+      } catch {
+        throw new NotFoundException(
+          `El usuario "${username}" no existe o no se pudo obtener la información.`,
+        );
       }
     }
 
