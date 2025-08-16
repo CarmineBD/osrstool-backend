@@ -16,6 +16,7 @@ import { UpdateVariantDto } from './dto/update-variant.dto';
 import { MethodDto } from './dto/method.dto';
 import IORedis, { Redis } from 'ioredis';
 import { VariantSnapshotService } from '../variant-snapshots/variant-snapshot.service';
+import { VariantRequirements, XpHour } from './types';
 
 // Definimos tipos para mayor seguridad
 interface Profit {
@@ -66,13 +67,7 @@ export function filterMethodsByUserStats(methods: MethodDto[], userInfo: UserInf
 
   return methods.reduce<MethodDto[]>((acc, method) => {
     const validVariants = method.variants.filter((variant) => {
-      // Se especifica el tipo esperado para requirements
-      const req =
-        (variant.requirements as {
-          levels?: Record<string, number>;
-          quests?: Record<string, number>;
-          achievement_diaries?: Record<string, any>;
-        }) || {};
+      const req: VariantRequirements = variant.requirements ?? {};
       const { levels: reqLevels, quests: reqQuests, achievement_diaries: reqDiaries } = req;
       // 1) Niveles (incluye CombatStats)
       if (reqLevels) {
@@ -98,7 +93,7 @@ export function filterMethodsByUserStats(methods: MethodDto[], userInfo: UserInf
       if (reqDiaries) {
         const levelMap = { 1: 'Easy', 2: 'Medium', 3: 'Hard', 4: 'Elite' } as const;
         for (const diary in reqDiaries) {
-          const tier = levelMap[reqDiaries[diary] as 1 | 2 | 3 | 4];
+          const tier = levelMap[reqDiaries[diary]];
           const info = userInfo.achievement_diaries[diary];
           if (!info?.[tier]?.complete) return false;
         }
@@ -115,15 +110,11 @@ export function filterMethodsByUserStats(methods: MethodDto[], userInfo: UserInf
 }
 
 export function computeMissingRequirements(
-  requirements: {
-    levels?: Record<string, number>;
-    quests?: Record<string, number>;
-    achievement_diaries?: Record<string, any>;
-  } | null,
+  requirements: VariantRequirements | null,
   userInfo: UserInfo,
-): any | null {
+): VariantRequirements | null {
   if (!requirements) return null;
-  const missing: any = {};
+  const missing: VariantRequirements = {};
 
   const { levels, quests, achievement_diaries } = requirements;
 
@@ -163,10 +154,10 @@ export function computeMissingRequirements(
   }
 
   if (achievement_diaries) {
-    const diaryMissing: Record<string, number> = {};
+    const diaryMissing: Record<string, 1 | 2 | 3 | 4> = {};
     const levelMap = { 1: 'Easy', 2: 'Medium', 3: 'Hard', 4: 'Elite' } as const;
     for (const diary in achievement_diaries) {
-      const tier = levelMap[achievement_diaries[diary] as 1 | 2 | 3 | 4];
+      const tier = levelMap[achievement_diaries[diary]];
       const info = userInfo.achievement_diaries[diary];
       if (!info?.[tier]?.complete) {
         diaryMissing[diary] = achievement_diaries[diary];
@@ -470,11 +461,8 @@ export class MethodsService implements OnModuleDestroy {
     // Ordenamiento según los parámetros recibidos
     const comparator = (a: number, b: number) => (sort.order === 'asc' ? a - b : b - a);
 
-    const getXpSum = (v: any): number =>
-      (Object.values(v?.xpHour ?? {}) as any[]).reduce(
-        (acc: number, val: any) => acc + Number(val ?? 0),
-        0,
-      );
+    const getXpSum = (v: { xpHour?: XpHour | null }): number =>
+      Object.values(v.xpHour ?? {}).reduce((acc, val) => acc + val, 0);
 
     enrichedMethods.sort((a, b) => {
       const va = a.variants[0];
@@ -523,14 +511,7 @@ export class MethodsService implements OnModuleDestroy {
       const profit = allProfits[profitKey] ?? { low: 0, high: 0 };
 
       const missingRequirements = userInfo
-        ? computeMissingRequirements(
-            (variant.requirements as {
-              levels?: Record<string, number>;
-              quests?: Record<string, number>;
-              achievement_diaries?: Record<string, any>;
-            }) || null,
-            userInfo,
-          )
+        ? computeMissingRequirements(variant.requirements ?? null, userInfo)
         : null;
 
       return {

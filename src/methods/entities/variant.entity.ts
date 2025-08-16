@@ -10,6 +10,7 @@ import {
 } from 'typeorm';
 import { Method } from './method.entity';
 import { VariantIoItem } from './io-item.entity';
+import { XpHour, VariantRequirements } from '../types';
 
 @Entity('method_variants')
 export class MethodVariant {
@@ -29,7 +30,7 @@ export class MethodVariant {
     type: 'jsonb',
     nullable: true,
   })
-  xpHour: any; // { hitpoints:number, combat:number }
+  xpHour: XpHour | null; // { hitpoints:number, combat:number }
 
   // Nuevos campos con tipos y nombres de columna actualizados:
   @Column({ name: 'click_intensity', type: 'int', nullable: true })
@@ -42,10 +43,10 @@ export class MethodVariant {
   riskLevel: string;
 
   @Column({ type: 'jsonb', nullable: true })
-  requirements: any;
+  requirements: VariantRequirements | null;
 
   @Column({ type: 'jsonb', nullable: true })
-  recommendations: any;
+  recommendations: Record<string, unknown> | null;
 
   @Column({
     name: 'actions_per_hour',

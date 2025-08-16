@@ -1,3 +1,5 @@
+import { VariantRequirements, XpHour } from '../types';
+
 export interface VariantDto {
   id: string;
   inputs: { id: number; quantity: number }[];
@@ -7,9 +9,9 @@ export interface VariantDto {
   clickIntensity?: number;
   afkiness?: number;
   riskLevel?: string;
-  requirements?: string;
-  recommendations?: string;
-  xpHour?: string; // <-- Agregado xpHour
+  requirements?: VariantRequirements | null;
+  recommendations?: Record<string, unknown> | null;
+  xpHour?: XpHour | null; // <-- Agregado xpHour
 }
 
 export class MethodDto {
@@ -44,10 +46,10 @@ export class MethodDto {
       clickIntensity: number;
       afkiness: number;
       riskLevel: string;
-      requirements: string;
-      xpHour: string;
+      requirements: VariantRequirements | null;
+      xpHour: XpHour | null;
       ioItems: Array<{ itemId: number; quantity: number; type: 'input' | 'output' }>;
-      recommendations: string;
+      recommendations: Record<string, unknown> | null;
     }>;
   }): MethodDto {
     const variants = e.variants.map((variant) => {

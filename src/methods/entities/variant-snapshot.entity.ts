@@ -1,6 +1,7 @@
 import { Entity, PrimaryGeneratedColumn, Column, ManyToOne, JoinColumn } from 'typeorm';
 import { MethodVariant } from './variant.entity';
 import { Method } from './method.entity';
+import { XpHour, VariantRequirements } from '../types';
 
 @Entity('variant_snapshots')
 export class VariantSnapshot {
@@ -22,7 +23,7 @@ export class VariantSnapshot {
   actionsPerHour?: number;
 
   @Column({ name: 'xp_hour', type: 'jsonb', nullable: true })
-  xpHour?: any;
+  xpHour?: XpHour | null;
 
   @Column({ name: 'click_intensity', type: 'int', nullable: true })
   clickIntensity?: number;
@@ -34,10 +35,10 @@ export class VariantSnapshot {
   riskLevel?: string;
 
   @Column({ type: 'jsonb', nullable: true })
-  requirements?: any;
+  requirements?: VariantRequirements | null;
 
   @Column({ type: 'jsonb', nullable: true })
-  recommendations?: any;
+  recommendations?: Record<string, unknown> | null;
 
   @Column({ name: 'snapshot_title' })
   snapshotName: string;
