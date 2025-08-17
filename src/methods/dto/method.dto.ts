@@ -1,4 +1,4 @@
-import { VariantRequirements, XpHour } from '../types';
+import { VariantRequirements, VariantRecommendations, XpHour } from '../types';
 
 export interface VariantDto {
   id: string;
@@ -6,12 +6,14 @@ export interface VariantDto {
   outputs: { id: number; quantity: number }[];
   actionsPerHour?: number;
   label?: string;
+  description?: string | null;
   clickIntensity?: number;
   afkiness?: number;
   riskLevel?: string;
   requirements?: VariantRequirements | null;
-  recommendations?: Record<string, unknown> | null;
-  xpHour?: XpHour | null; // <-- Agregado xpHour
+  recommendations?: VariantRecommendations | null;
+  xpHour?: XpHour | null;
+  wilderness?: boolean;
 }
 
 export class MethodDto {
@@ -42,6 +44,7 @@ export class MethodDto {
     variants: Array<{
       id: string;
       label: string;
+      description: string | null;
       actionsPerHour: number;
       clickIntensity: number;
       afkiness: number;
@@ -49,7 +52,8 @@ export class MethodDto {
       requirements: VariantRequirements | null;
       xpHour: XpHour | null;
       ioItems: Array<{ itemId: number; quantity: number; type: 'input' | 'output' }>;
-      recommendations: Record<string, unknown> | null;
+      recommendations: VariantRecommendations | null;
+      wilderness: boolean;
     }>;
   }): MethodDto {
     const variants = e.variants.map((variant) => {
@@ -62,6 +66,7 @@ export class MethodDto {
       return {
         id: variant.id,
         label: variant.label,
+        description: variant.description,
         actionsPerHour: variant.actionsPerHour,
         clickIntensity: variant.clickIntensity,
         afkiness: variant.afkiness,
@@ -71,6 +76,7 @@ export class MethodDto {
         inputs,
         outputs,
         recommendations: variant.recommendations,
+        wilderness: variant.wilderness,
       };
     });
     return new MethodDto(e.id, e.name, e.description || '', e.category || '', variants);

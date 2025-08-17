@@ -1,7 +1,7 @@
 import { Entity, PrimaryGeneratedColumn, Column, ManyToOne, JoinColumn } from 'typeorm';
 import { MethodVariant } from './variant.entity';
 import { Method } from './method.entity';
-import { XpHour, VariantRequirements } from '../types';
+import { XpHour, VariantRequirements, VariantRecommendations } from '../types';
 
 @Entity('variant_snapshots')
 export class VariantSnapshot {
@@ -18,6 +18,9 @@ export class VariantSnapshot {
 
   @Column()
   label: string;
+
+  @Column({ type: 'text', nullable: true })
+  description: string | null;
 
   @Column({ name: 'actions_per_hour', type: 'int', nullable: true })
   actionsPerHour?: number;
@@ -38,7 +41,10 @@ export class VariantSnapshot {
   requirements?: VariantRequirements | null;
 
   @Column({ type: 'jsonb', nullable: true })
-  recommendations?: Record<string, unknown> | null;
+  recommendations?: VariantRecommendations | null;
+
+  @Column({ type: 'boolean', default: false })
+  wilderness: boolean;
 
   @Column({ name: 'snapshot_title' })
   snapshotName: string;

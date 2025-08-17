@@ -16,7 +16,13 @@ import { UpdateVariantDto } from './dto/update-variant.dto';
 import { MethodDto } from './dto/method.dto';
 import IORedis, { Redis } from 'ioredis';
 import { VariantSnapshotService } from '../variant-snapshots/variant-snapshot.service';
-import { VariantRequirements, XpHour } from './types';
+import {
+  VariantRequirements,
+  XpHour,
+  RequirementLevel,
+  RequirementQuest,
+  RequirementDiary,
+} from './types';
 
 // Definimos tipos para mayor seguridad
 interface Profit {
@@ -69,32 +75,30 @@ export function filterMethodsByUserStats(methods: MethodDto[], userInfo: UserInf
     const validVariants = method.variants.filter((variant) => {
       const req: VariantRequirements = variant.requirements ?? {};
       const { levels: reqLevels, quests: reqQuests, achievement_diaries: reqDiaries } = req;
-      // 1) Niveles (incluye CombatStats)
+
       if (reqLevels) {
-        const { CombatStats, ...other } = reqLevels;
-        for (const skill in other) {
-          if ((userInfo.levels[skill] ?? 0) < other[skill]) return false;
-        }
-        if (CombatStats != null) {
-          for (const stat of ['Strength', 'Defence', 'Attack']) {
-            if ((userInfo.levels[stat] ?? 0) < CombatStats) return false;
+        for (const lvl of reqLevels) {
+          if (lvl.skill === 'Combat') {
+            for (const stat of ['Strength', 'Defence', 'Attack']) {
+              if ((userInfo.levels[stat] ?? 0) < lvl.level) return false;
+            }
+          } else if ((userInfo.levels[lvl.skill] ?? 0) < lvl.level) {
+            return false;
           }
         }
       }
 
-      // 2) Quests (1=started, 2=completed)
       if (reqQuests) {
-        for (const q in reqQuests) {
-          if ((userQuests[q.toLowerCase()] ?? 0) < reqQuests[q]) return false;
+        for (const q of reqQuests) {
+          if ((userQuests[q.name.toLowerCase()] ?? 0) < q.stage) return false;
         }
       }
 
-      // 3) Achievement diaries (1=Easy … 4=Elite)
       if (reqDiaries) {
         const levelMap = { 1: 'Easy', 2: 'Medium', 3: 'Hard', 4: 'Elite' } as const;
-        for (const diary in reqDiaries) {
-          const tier = levelMap[reqDiaries[diary]];
-          const info = userInfo.achievement_diaries[diary];
+        for (const d of reqDiaries) {
+          const tier = levelMap[d.tier];
+          const info = userInfo.achievement_diaries[d.name];
           if (!info?.[tier]?.complete) return false;
         }
       }
@@ -119,21 +123,19 @@ export function computeMissingRequirements(
   const { levels, quests, achievement_diaries } = requirements;
 
   if (levels) {
-    const { CombatStats, ...other } = levels;
-    const levelMissing: Record<string, number> = {};
-    for (const skill in other) {
-      if ((userInfo.levels[skill] ?? 0) < other[skill]) {
-        levelMissing[skill] = other[skill];
-      }
-    }
-    if (CombatStats != null) {
-      for (const stat of ['Strength', 'Defence', 'Attack']) {
-        if ((userInfo.levels[stat] ?? 0) < CombatStats) {
-          levelMissing[stat] = CombatStats;
+    const levelMissing: RequirementLevel[] = [];
+    for (const lvl of levels) {
+      if (lvl.skill === 'Combat') {
+        for (const stat of ['Strength', 'Defence', 'Attack']) {
+          if ((userInfo.levels[stat] ?? 0) < lvl.level) {
+            levelMissing.push({ skill: stat, level: lvl.level });
+          }
         }
+      } else if ((userInfo.levels[lvl.skill] ?? 0) < lvl.level) {
+        levelMissing.push(lvl);
       }
     }
-    if (Object.keys(levelMissing).length) missing.levels = levelMissing;
+    if (levelMissing.length) missing.levels = levelMissing;
   }
 
   if (quests) {
@@ -144,26 +146,26 @@ export function computeMissingRequirements(
       },
       {} as Record<string, number>,
     );
-    const questMissing: Record<string, number> = {};
-    for (const q in quests) {
-      if ((userQuests[q.toLowerCase()] ?? 0) < quests[q]) {
-        questMissing[q] = quests[q];
+    const questMissing: RequirementQuest[] = [];
+    for (const q of quests) {
+      if ((userQuests[q.name.toLowerCase()] ?? 0) < q.stage) {
+        questMissing.push(q);
       }
     }
-    if (Object.keys(questMissing).length) missing.quests = questMissing;
+    if (questMissing.length) missing.quests = questMissing;
   }
 
   if (achievement_diaries) {
-    const diaryMissing: Record<string, 1 | 2 | 3 | 4> = {};
+    const diaryMissing: RequirementDiary[] = [];
     const levelMap = { 1: 'Easy', 2: 'Medium', 3: 'Hard', 4: 'Elite' } as const;
-    for (const diary in achievement_diaries) {
-      const tier = levelMap[achievement_diaries[diary]];
-      const info = userInfo.achievement_diaries[diary];
+    for (const d of achievement_diaries) {
+      const tier = levelMap[d.tier];
+      const info = userInfo.achievement_diaries[d.name];
       if (!info?.[tier]?.complete) {
-        diaryMissing[diary] = achievement_diaries[diary];
+        diaryMissing.push(d);
       }
     }
-    if (Object.keys(diaryMissing).length) missing.achievement_diaries = diaryMissing;
+    if (diaryMissing.length) missing.achievement_diaries = diaryMissing;
   }
 
   return Object.keys(missing).length ? missing : null;
@@ -210,6 +212,8 @@ export class MethodsService implements OnModuleDestroy {
         clickIntensity: v.clickIntensity,
         afkiness: v.afkiness,
         riskLevel: v.riskLevel,
+        description: v.description ?? null,
+        wilderness: v.wilderness ?? false,
         requirements: v.requirements,
         recommendations: v.recommendations,
       });
@@ -397,15 +401,27 @@ export class MethodsService implements OnModuleDestroy {
         let enrichedVariants = method.variants.map((variant) => {
           const profitKey = variant.id;
           const profit = methodProfits[profitKey] ?? { low: 0, high: 0 };
-          const { id, clickIntensity, afkiness, riskLevel, requirements, xpHour, label } = variant;
-          return {
+          const {
             id,
-            xpHour,
-            label,
             clickIntensity,
             afkiness,
             riskLevel,
             requirements,
+            xpHour,
+            label,
+            description,
+            wilderness,
+          } = variant;
+          return {
+            id,
+            xpHour,
+            label,
+            description,
+            clickIntensity,
+            afkiness,
+            riskLevel,
+            requirements,
+            wilderness,
             lowProfit: profit.low,
             highProfit: profit.high,
           };
@@ -428,11 +444,11 @@ export class MethodsService implements OnModuleDestroy {
           )
             return false;
           if (filters.xpHour != null) {
-            const hasXp = v.xpHour != null;
+            const hasXp = (v.xpHour?.length ?? 0) > 0;
             if ((filters.xpHour === 1 && !hasXp) || (filters.xpHour === 0 && hasXp)) return false;
           }
           if (filters.skill && v.xpHour) {
-            const skillNames = Object.keys(v.xpHour).map((s) => s.toLowerCase());
+            const skillNames = v.xpHour.map((s) => s.skill.toLowerCase());
             if (!skillNames.includes(filters.skill.toLowerCase())) return false;
           }
           if (filters.showProfitables && v.highProfit <= 0) return false;
@@ -462,7 +478,7 @@ export class MethodsService implements OnModuleDestroy {
     const comparator = (a: number, b: number) => (sort.order === 'asc' ? a - b : b - a);
 
     const getXpSum = (v: { xpHour?: XpHour | null }): number =>
-      Object.values(v.xpHour ?? {}).reduce((acc, val) => acc + val, 0);
+      v.xpHour?.reduce((acc, val) => acc + val.experience, 0) ?? 0;
 
     enrichedMethods.sort((a, b) => {
       const va = a.variants[0];

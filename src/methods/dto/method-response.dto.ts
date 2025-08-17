@@ -1,16 +1,19 @@
 // src/methods/dto/method-response.dto.ts
 import { IoItemDto } from './io-item.dto';
+import { XpHour, VariantRecommendations, VariantRequirements } from '../types';
 
 export class VariantResponseDto {
   id: string;
   label: string;
-  xpHour?: object;
+  description?: string;
+  xpHour?: XpHour;
   actionsPerHour?: number;
   clickIntensity?: number;
   afkiness?: number;
   riskLevel?: string;
-  requirements?: object;
-  recommendations?: object;
+  requirements?: VariantRequirements;
+  recommendations?: VariantRecommendations;
+  wilderness?: boolean;
   inputs: IoItemDto[];
   outputs: IoItemDto[];
 }

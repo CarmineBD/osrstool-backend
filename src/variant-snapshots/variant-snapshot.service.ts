@@ -31,6 +31,8 @@ export class VariantSnapshotService {
       riskLevel: variant.riskLevel,
       requirements: variant.requirements,
       recommendations: variant.recommendations,
+      description: variant.description,
+      wilderness: variant.wilderness,
       snapshotName,
       snapshotDescription,
       snapshotDate: snapshotDate ? new Date(snapshotDate) : new Date(),

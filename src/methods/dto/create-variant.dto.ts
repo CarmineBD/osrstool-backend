@@ -1,17 +1,27 @@
 // src/methods/dto/create-variant.dto.ts
-import { IsString, IsOptional, IsNumber, IsArray, ValidateNested } from 'class-validator';
+import {
+  IsString,
+  IsOptional,
+  IsNumber,
+  IsArray,
+  ValidateNested,
+  IsBoolean,
+} from 'class-validator';
 import { Type } from 'class-transformer';
 import { IoItemDto } from './io-item.dto';
+import { XpHour, VariantRecommendations, VariantRequirements } from '../types';
 
 export class CreateVariantDto {
   @IsString() label: string;
   @IsOptional() @IsNumber() actionsPerHour?: number;
-  @IsOptional() xpHour?: object;
+  @IsOptional() xpHour?: XpHour;
   @IsOptional() @IsNumber() clickIntensity?: number;
   @IsOptional() @IsNumber() afkiness?: number;
   @IsOptional() @IsString() riskLevel?: string;
-  @IsOptional() requirements?: object;
-  @IsOptional() recommendations?: object;
+  @IsOptional() @IsString() description?: string;
+  @IsOptional() @IsBoolean() wilderness?: boolean;
+  @IsOptional() requirements?: VariantRequirements;
+  @IsOptional() recommendations?: VariantRecommendations;
 
   @IsArray()
   @ValidateNested({ each: true })
