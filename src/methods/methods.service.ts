@@ -95,9 +95,14 @@ export function filterMethodsByUserStats(methods: MethodDto[], userInfo: UserInf
       }
 
       if (reqDiaries) {
-        const levelMap = { 1: 'Easy', 2: 'Medium', 3: 'Hard', 4: 'Elite' } as const;
+        const tierMap = {
+          easy: 'Easy',
+          medium: 'Medium',
+          hard: 'Hard',
+          elite: 'Elite',
+        } as const;
         for (const d of reqDiaries) {
-          const tier = levelMap[d.tier];
+          const tier = tierMap[d.tier];
           const info = userInfo.achievement_diaries[d.name];
           if (!info?.[tier]?.complete) return false;
         }
@@ -157,9 +162,14 @@ export function computeMissingRequirements(
 
   if (achievement_diaries) {
     const diaryMissing: RequirementDiary[] = [];
-    const levelMap = { 1: 'Easy', 2: 'Medium', 3: 'Hard', 4: 'Elite' } as const;
+    const tierMap = {
+      easy: 'Easy',
+      medium: 'Medium',
+      hard: 'Hard',
+      elite: 'Elite',
+    } as const;
     for (const d of achievement_diaries) {
-      const tier = levelMap[d.tier];
+      const tier = tierMap[d.tier];
       const info = userInfo.achievement_diaries[d.name];
       if (!info?.[tier]?.complete) {
         diaryMissing.push(d);

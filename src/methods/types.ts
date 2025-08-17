@@ -25,7 +25,7 @@ export interface RequirementQuest {
 
 export interface RequirementDiary {
   name: string;
-  tier: 1 | 2 | 3 | 4;
+  tier: 'easy' | 'medium' | 'hard' | 'elite';
   reason?: string;
 }
 
