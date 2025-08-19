@@ -9,6 +9,7 @@ import { MethodProfitRefresherModule } from './method-profit-refresher/method-pr
 import { PricesModule } from './prices/prices.module';
 import { VariantHistoryModule } from './variant-history/variant-history.module';
 import { VariantSnapshotModule } from './variant-snapshots/variant-snapshot.module';
+import { ItemsModule } from './items/items.module';
 
 @Module({
   imports: [
@@ -49,6 +50,7 @@ import { VariantSnapshotModule } from './variant-snapshots/variant-snapshot.modu
 
     // Si antes tenías un PricesModule para Redis, vuelve a importarlo:
     PricesModule,
+    ItemsModule,
   ],
 })
 export class AppModule {}
