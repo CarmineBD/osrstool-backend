@@ -6,7 +6,9 @@ import { firstValueFrom } from 'rxjs';
 
 interface Price {
   high?: number;
+  highTime?: number;
   low: number;
+  lowTime?: number;
 }
 
 @Injectable()
@@ -26,11 +28,11 @@ export class PricesService implements OnModuleInit {
     try {
       // Typed call to return array of strings
       const fullRaw = await this.redis.call('JSON.GET', 'itemsPrices', '$');
-      console.log('⛏️ raw tipo:', typeof fullRaw);
-      console.log(
-        '⛏️ raw primeros 100 chars:',
-        (typeof fullRaw === 'string' ? fullRaw : JSON.stringify(fullRaw)).slice(0, 100),
-      );
+      // console.log('⛏️ raw tipo:', typeof fullRaw);
+      // console.log(
+      //   '⛏️ raw primeros 100 chars:',
+      //   (typeof fullRaw === 'string' ? fullRaw : JSON.stringify(fullRaw)).slice(0, 100),
+      // );
 
       const full = Array.isArray(fullRaw) ? (fullRaw as string[]) : [];
       if (Array.isArray(full) && typeof full[0] === 'string') {
@@ -69,7 +71,13 @@ export class PricesService implements OnModuleInit {
       let hasChanges = false;
       for (const [id, price] of Object.entries(data.data)) {
         const prev = this.lastData[id];
-        if (!prev || prev.low !== price.low || prev.high !== price.high) {
+        if (
+          !prev ||
+          prev.low !== price.low ||
+          prev.high !== price.high ||
+          prev.lowTime !== price.lowTime ||
+          prev.highTime !== price.highTime
+        ) {
           this.lastData[id] = price;
           hasChanges = true;
         }
@@ -96,12 +104,22 @@ export class PricesService implements OnModuleInit {
     }
 
     // raw === '{"2":{…},"6":{…},…}'  ← perfecto
-    const all = JSON.parse(raw) as Record<string, { high?: number; low: number }>;
+    const all = JSON.parse(raw) as Record<
+      string,
+      { high?: number; low: number; highTime?: number; lowTime?: number }
+    >;
 
-    const result: Record<number, { high: number; low: number }> = {};
+    const result: Record<number, { high: number; low: number; highTime: number; lowTime: number }> =
+      {};
     for (const id of ids) {
       const p = all[id];
-      if (p) result[id] = { high: p.high ?? p.low, low: p.low };
+      if (p)
+        result[id] = {
+          high: p.high ?? p.low,
+          low: p.low,
+          highTime: p.highTime ?? 0,
+          lowTime: p.lowTime ?? 0,
+        };
     }
     return result;
   }

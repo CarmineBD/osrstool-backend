@@ -42,10 +42,7 @@ export class MethodProfitRefresherService {
 
     // 2) Traer precios desde Redis
     const raw = await this.pricesService.getMany([...itemIds]);
-    const prices: Record<number, { high?: number; low: number }> = raw as Record<
-      number,
-      { high?: number; low: number }
-    >;
+    const prices: Record<number, { high?: number; low: number }> = raw;
 
     // 3) Calcular profits por variante de cada método
     const profits: Record<string, Record<string, { low: number; high: number }>> = {};

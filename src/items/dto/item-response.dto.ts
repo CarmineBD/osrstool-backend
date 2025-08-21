@@ -15,6 +15,10 @@ export interface ItemResponseDto {
   tradeable: boolean | null;
   members: boolean | null;
   lastSyncedAt: string;
+  highPrice?: number | null;
+  lowPrice?: number | null;
+  highTime?: number | null;
+  lowTime?: number | null;
 }
 
 export interface ItemCompactDto {

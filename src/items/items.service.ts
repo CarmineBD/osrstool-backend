@@ -14,14 +14,28 @@ import {
   ItemResponseDto,
   ItemCompactDto,
 } from './dto';
-
+import { PricesService } from '../prices/prices.service';
 @Injectable()
 export class ItemsService {
-  constructor(@InjectRepository(Item) private readonly repo: Repository<Item>) {}
+  constructor(
+    @InjectRepository(Item) private readonly repo: Repository<Item>,
+    private readonly pricesService: PricesService,
+  ) {}
 
   private buildIconUrl(iconPath: string): string {
-    const base = (process.env.CDN_BASE ?? 'https://cdn.tu-dominio.com/').replace(/\/+$/, '');
-    const path = iconPath.replace(/^\/+/, '');
+    const base = (process.env.CDN_BASE ?? 'https://oldschool.runescape.wiki/images/').replace(
+      /\/+$/,
+      '',
+    );
+
+    // Limpieza del path y formateo personalizado
+    const path = iconPath
+      .replace(/^\/+/, '') // quitar slashes iniciales
+      .replace(/ /g, '_') // espacios -> "_"
+      .replace(/\(/g, '%28') // "(" -> "%28"
+      .replace(/\)/g, '%29') // ")" -> "%29"
+      .replace(/'/g, '%27'); // "'" -> "%27"
+
     return `${base}/${path}`;
   }
 
@@ -70,9 +84,23 @@ export class ItemsService {
   ): Promise<Record<number, Partial<ItemResponseDto>>> {
     if (ids.length === 0) return {};
     const items = await this.repo.findBy({ id: In(ids) });
+    const priceFieldSet = new Set(['highPrice', 'lowPrice', 'highTime', 'lowTime']);
+    const wantPrices = fields?.some((f) => priceFieldSet.has(f)) ?? false;
+    const prices = wantPrices ? await this.pricesService.getMany(items.map((i) => i.id)) : {};
+
     const map: Record<number, Partial<ItemResponseDto>> = {};
     for (const item of items) {
-      map[item.id] = this.filterFields(this.toResponse(item), fields);
+      const base = this.toResponse(item);
+      if (wantPrices) {
+        const p = prices[item.id];
+        if (p) {
+          base.highPrice = p.high;
+          base.lowPrice = p.low;
+          base.highTime = p.highTime;
+          base.lowTime = p.lowTime;
+        }
+      }
+      map[item.id] = this.filterFields(base, fields);
     }
     return map;
   }
