@@ -1,16 +1,7 @@
-import {
-  Controller,
-  Get,
-  Post,
-  Put,
-  Delete,
-  Param,
-  Body,
-  Query,
-  NotFoundException,
-} from '@nestjs/common';
+import { Controller, Get, Post, Put, Delete, Param, Body, Query } from '@nestjs/common';
 import { MethodsService } from './methods.service';
 import { CreateMethodDto, UpdateMethodDto, UpdateMethodBasicDto, UpdateVariantDto } from './dto';
+import { MethodDto } from './dto/method.dto';
 import { RuneScapeApiService } from './RuneScapeApiService';
 
 interface PaginatedResult {
@@ -58,13 +49,17 @@ export class MethodsController {
     const pp = parseInt(perPage, 10);
 
     let userInfo: UserInfo | null = null;
+    const warnings: { code: string; message: string }[] = [];
     if (username) {
       try {
         userInfo = (await this.runescapeApi.fetchUserInfo(username)) as UserInfo;
-      } catch {
-        throw new NotFoundException(
-          `El usuario "${username}" no existe o no se pudo obtener la información.`,
-        );
+      } catch (error: any) {
+        const message = `No se pudo obtener la información del usuario "${username}".`;
+        if (error instanceof Error && error.message.includes('status 404')) {
+          warnings.push({ code: 'USER_NOT_FOUND', message });
+        } else {
+          warnings.push({ code: 'USER_LOOKUP_FAILED', message });
+        }
       }
     }
 
@@ -98,9 +93,18 @@ export class MethodsController {
       sortOptions,
     );
 
+    const meta = {
+      total: result.total,
+      page: p,
+      perPage: pp,
+      ...(username ? { username } : {}),
+    };
+
     return {
-      data: result.data,
-      meta: { total: result.total, page: p, perPage: pp, username },
+      status: warnings.length ? 'partial' : 'ok',
+      data: { methods: result.data, user: userInfo },
+      warnings,
+      meta,
     };
   }
 
@@ -116,20 +120,33 @@ export class MethodsController {
   @Get(':id')
   async findMethodDetailsWithProfit(@Param('id') id: string, @Query('username') username?: string) {
     let userInfo: UserInfo | null = null;
+    const warnings: { code: string; message: string }[] = [];
     if (username) {
       try {
         userInfo = (await this.runescapeApi.fetchUserInfo(username)) as UserInfo;
-      } catch (error: unknown) {
-        const err = error instanceof Error ? error : new Error(String(error));
-        console.error('Error fetching levels for username:', username, err.message);
+      } catch (error: any) {
+        const message = `No se pudo obtener la información del usuario "${username}".`;
+        if (error instanceof Error && error.message.includes('status 404')) {
+          warnings.push({ code: 'USER_NOT_FOUND', message });
+        } else {
+          warnings.push({ code: 'USER_LOOKUP_FAILED', message });
+        }
       }
     }
 
     const method = (await this.svc.findMethodDetailsWithProfit(
       id,
       userInfo || undefined,
-    )) as object;
-    return { data: method };
+    )) as unknown as MethodDto;
+
+    return {
+      status: warnings.length ? 'partial' : 'ok',
+      data: { method, user: userInfo },
+      warnings,
+      meta: {
+        ...(username ? { username } : {}),
+      },
+    };
   }
 
   @Put(':id')
