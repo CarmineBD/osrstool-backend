@@ -5,10 +5,11 @@ import {
   BadRequestException,
 } from '@nestjs/common';
 import { InjectRepository } from '@nestjs/typeorm';
-import { Repository, In } from 'typeorm';
+import { Repository, In, LessThanOrEqual } from 'typeorm';
 import { Method } from './entities/method.entity';
 import { MethodVariant } from './entities/variant.entity';
 import { VariantIoItem } from './entities/io-item.entity';
+import { VariantHistory } from './entities/variant-history.entity';
 import { CreateMethodDto } from './dto/create-method.dto';
 import { UpdateMethodDto } from './dto/update-method.dto';
 import { UpdateMethodBasicDto } from './dto/update-method-basic.dto';
@@ -194,6 +195,9 @@ export class MethodsService implements OnModuleDestroy {
 
     @InjectRepository(VariantIoItem)
     private readonly ioRepo: Repository<VariantIoItem>,
+
+    @InjectRepository(VariantHistory)
+    private readonly historyRepo: Repository<VariantHistory>,
 
     private readonly snapshotSvc: VariantSnapshotService,
   ) {
@@ -513,6 +517,51 @@ export class MethodsService implements OnModuleDestroy {
     return { data: paginated, total };
   }
 
+  private async computeTrend(
+    variantId: string,
+    currentHigh: number,
+  ): Promise<{
+    lastHour: number | null;
+    last24h: number | null;
+    lastWeek: number | null;
+    lastMonth: number | null;
+  }> {
+    const now = new Date();
+    const ranges: Record<string, number> = {
+      lastHour: 60 * 60 * 1000,
+      last24h: 24 * 60 * 60 * 1000,
+      lastWeek: 7 * 24 * 60 * 60 * 1000,
+      lastMonth: 30 * 24 * 60 * 60 * 1000,
+    };
+
+    const trends = {
+      lastHour: null as number | null,
+      last24h: null as number | null,
+      lastWeek: null as number | null,
+      lastMonth: null as number | null,
+    };
+
+    await Promise.all(
+      Object.entries(ranges).map(async ([key, ms]) => {
+        const pastDate = new Date(now.getTime() - ms);
+        const past = await this.historyRepo.findOne({
+          where: {
+            variant: { id: variantId },
+            timestamp: LessThanOrEqual(pastDate),
+          },
+          order: { timestamp: 'DESC' },
+        });
+
+        if (past?.highProfit && Number(past.highProfit) !== 0) {
+          const pastHigh = Number(past.highProfit);
+          (trends as any)[key] = ((currentHigh - pastHigh) / pastHigh) * 100;
+        }
+      }),
+    );
+
+    return trends;
+  }
+
   async findMethodDetailsWithProfit(id: string, userInfo?: UserInfo): Promise<any> {
     const methodDto = await this.findOne(id);
     const redis = this.redis; // use the singleton instance
@@ -531,28 +580,36 @@ export class MethodsService implements OnModuleDestroy {
       allProfits = {};
     }
 
-    const enrichedVariants = methodDto.variants.map((variant) => {
-      // Si solo hay una variante se utiliza el id del método; de lo contrario se usa una clave compuesta
-      const profitKey = variant.id;
-      const profit = allProfits[profitKey] ?? { low: 0, high: 0 };
+    const enrichedVariants = await Promise.all(
+      methodDto.variants.map(async (variant) => {
+        // Si solo hay una variante se utiliza el id del método; de lo contrario se usa una clave compuesta
+        const profitKey = variant.id;
+        const profit = allProfits[profitKey] ?? { low: 0, high: 0 };
 
-      const missingRequirements = userInfo
-        ? computeMissingRequirements(variant.requirements ?? null, userInfo)
-        : null;
+        const trends = await this.computeTrend(variant.id, profit.high);
 
-      return {
-        ...variant,
-        // Se calculan campos a partir de Redis
-        clickIntensity: variant.clickIntensity,
-        afkiness: variant.afkiness,
-        riskLevel: variant.riskLevel,
-        requirements: variant.requirements,
-        recommendations: variant.recommendations,
-        missingRequirements,
-        lowProfit: profit.low,
-        highProfit: profit.high,
-      };
-    });
+        const missingRequirements = userInfo
+          ? computeMissingRequirements(variant.requirements ?? null, userInfo)
+          : null;
+
+        return {
+          ...variant,
+          // Se calculan campos a partir de Redis
+          clickIntensity: variant.clickIntensity,
+          afkiness: variant.afkiness,
+          riskLevel: variant.riskLevel,
+          requirements: variant.requirements,
+          recommendations: variant.recommendations,
+          missingRequirements,
+          lowProfit: profit.low,
+          highProfit: profit.high,
+          trendLastHour: trends.lastHour,
+          trendLast24h: trends.last24h,
+          trendLastWeek: trends.lastWeek,
+          trendLastMonth: trends.lastMonth,
+        };
+      }),
+    );
 
     return {
       id: methodDto.id,
