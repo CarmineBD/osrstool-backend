@@ -417,6 +417,7 @@ export class MethodsService implements OnModuleDestroy {
           const profit = methodProfits[profitKey] ?? { low: 0, high: 0 };
           const {
             id,
+            slug,
             clickIntensity,
             afkiness,
             riskLevel,
@@ -428,6 +429,7 @@ export class MethodsService implements OnModuleDestroy {
           } = variant;
           return {
             id,
+            slug,
             xpHour,
             label,
             description,
@@ -527,18 +529,18 @@ export class MethodsService implements OnModuleDestroy {
     lastMonth: number | null;
   }> {
     const now = new Date();
-    const ranges: Record<string, number> = {
+    const ranges = {
       lastHour: 60 * 60 * 1000,
       last24h: 24 * 60 * 60 * 1000,
       lastWeek: 7 * 24 * 60 * 60 * 1000,
       lastMonth: 30 * 24 * 60 * 60 * 1000,
-    };
+    } as const;
 
-    const trends = {
-      lastHour: null as number | null,
-      last24h: null as number | null,
-      lastWeek: null as number | null,
-      lastMonth: null as number | null,
+    const trends: Record<keyof typeof ranges, number | null> = {
+      lastHour: null,
+      last24h: null,
+      lastWeek: null,
+      lastMonth: null,
     };
 
     await Promise.all(
@@ -554,7 +556,7 @@ export class MethodsService implements OnModuleDestroy {
 
         if (past?.highProfit && Number(past.highProfit) !== 0) {
           const pastHigh = Number(past.highProfit);
-          (trends as any)[key] = ((currentHigh - pastHigh) / pastHigh) * 100;
+          trends[key as keyof typeof ranges] = ((currentHigh - pastHigh) / pastHigh) * 100;
         }
       }),
     );
@@ -614,6 +616,7 @@ export class MethodsService implements OnModuleDestroy {
     return {
       id: methodDto.id,
       name: methodDto.name,
+      slug: methodDto.slug,
       description: methodDto.description,
       category: methodDto.category,
       variants: enrichedVariants,

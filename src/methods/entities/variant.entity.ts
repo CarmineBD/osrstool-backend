@@ -24,6 +24,9 @@ export class MethodVariant {
   @Column()
   label: string;
 
+  @Column({ unique: true })
+  slug: string;
+
   @Column({ type: 'text', nullable: true })
   description: string | null;
 

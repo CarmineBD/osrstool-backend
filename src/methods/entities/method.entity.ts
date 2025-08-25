@@ -10,6 +10,9 @@ export class Method {
   @Column()
   name: string;
 
+  @Column({ unique: true })
+  slug: string;
+
   @Column({ nullable: true, type: 'text' })
   description?: string;
 

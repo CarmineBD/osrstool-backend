@@ -2,6 +2,7 @@ import { VariantRequirements, VariantRecommendations, XpHour } from '../types';
 
 export interface VariantDto {
   id: string;
+  slug: string;
   inputs: { id: number; quantity: number }[];
   outputs: { id: number; quantity: number }[];
   actionsPerHour?: number;
@@ -19,6 +20,7 @@ export interface VariantDto {
 export class MethodDto {
   id: string;
   name: string;
+  slug: string;
   description?: string;
   category?: string;
   variants: VariantDto[];
@@ -26,12 +28,14 @@ export class MethodDto {
   constructor(
     id: string,
     name: string,
+    slug: string,
     description: string,
     category: string,
     variants: VariantDto[],
   ) {
     this.id = id;
     this.name = name;
+    this.slug = slug;
     this.description = description;
     this.category = category;
     this.variants = variants;
@@ -39,10 +43,12 @@ export class MethodDto {
   static fromEntity(e: {
     id: string;
     name: string;
+    slug: string;
     description?: string;
     category?: string;
     variants: Array<{
       id: string;
+      slug: string;
       label: string;
       description: string | null;
       actionsPerHour: number;
@@ -65,6 +71,7 @@ export class MethodDto {
         .map((item) => ({ id: item.itemId, quantity: Number(item.quantity) }));
       return {
         id: variant.id,
+        slug: variant.slug,
         label: variant.label,
         description: variant.description,
         actionsPerHour: variant.actionsPerHour,
@@ -79,6 +86,6 @@ export class MethodDto {
         wilderness: variant.wilderness,
       };
     });
-    return new MethodDto(e.id, e.name, e.description || '', e.category || '', variants);
+    return new MethodDto(e.id, e.name, e.slug, e.description || '', e.category || '', variants);
   }
 }
