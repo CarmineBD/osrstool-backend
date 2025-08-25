@@ -1,5 +1,12 @@
 // src/methods/entities/method.entity.ts
-import { Entity, PrimaryGeneratedColumn, Column, CreateDateColumn, OneToMany } from 'typeorm';
+import {
+  Entity,
+  PrimaryGeneratedColumn,
+  Column,
+  CreateDateColumn,
+  OneToMany,
+  Check,
+} from 'typeorm';
 import { MethodVariant } from './variant.entity';
 
 @Entity('money_making_methods')
@@ -10,7 +17,8 @@ export class Method {
   @Column()
   name: string;
 
-  @Column({ unique: true })
+  @Check("slug ~ '^[a-z0-9]+(?:-[a-z0-9]+)*$'")
+  @Column({ unique: true, length: 160 })
   slug: string;
 
   @Column({ nullable: true, type: 'text' })

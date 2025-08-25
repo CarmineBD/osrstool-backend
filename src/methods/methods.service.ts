@@ -5,7 +5,7 @@ import {
   BadRequestException,
 } from '@nestjs/common';
 import { InjectRepository } from '@nestjs/typeorm';
-import { Repository, In, LessThanOrEqual } from 'typeorm';
+import { Repository, In, LessThanOrEqual, Not } from 'typeorm';
 import { Method } from './entities/method.entity';
 import { MethodVariant } from './entities/variant.entity';
 import { VariantIoItem } from './entities/io-item.entity';
@@ -17,6 +17,7 @@ import { UpdateVariantDto } from './dto/update-variant.dto';
 import { MethodDto } from './dto/method.dto';
 import IORedis, { Redis } from 'ioredis';
 import { VariantSnapshotService } from '../variant-snapshots/variant-snapshot.service';
+import { slugify, fallbackSlug } from '../utils/slug';
 import {
   VariantRequirements,
   XpHour,
@@ -212,9 +213,60 @@ export class MethodsService implements OnModuleDestroy {
     return MethodDto.fromEntity(entity);
   }
 
+  private async generateMethodSlug(name: string, excludeId?: string): Promise<string> {
+    let base = slugify(name);
+    if (!base) {
+      base = fallbackSlug('mmm');
+    }
+    base = base.slice(0, 160);
+    let slug = base;
+    let count = 2;
+    while (
+      await this.methodRepo.count({
+        where: { slug, ...(excludeId ? { id: Not(excludeId) } : {}) },
+      })
+    ) {
+      const suffix = `-${count}`;
+      const trimmed = base.slice(0, 160 - suffix.length);
+      slug = `${trimmed}${suffix}`;
+      count += 1;
+    }
+    return slug;
+  }
+
+  private async generateVariantSlug(
+    methodId: string,
+    label: string,
+    excludeId?: string,
+  ): Promise<string> {
+    let base = slugify(label);
+    if (!base) {
+      base = fallbackSlug('variant');
+    }
+    base = base.slice(0, 160);
+    let slug = base;
+    let count = 2;
+    while (
+      await this.variantRepo.count({
+        where: {
+          method: { id: methodId },
+          slug,
+          ...(excludeId ? { id: Not(excludeId) } : {}),
+        },
+      })
+    ) {
+      const suffix = `-${count}`;
+      const trimmed = base.slice(0, 160 - suffix.length);
+      slug = `${trimmed}${suffix}`;
+      count += 1;
+    }
+    return slug;
+  }
+
   async create(createDto: CreateMethodDto): Promise<MethodDto> {
     const { name, description, category, variants } = createDto;
     const method = this.methodRepo.create({ name, description, category });
+    method.slug = await this.generateMethodSlug(name);
     await this.methodRepo.save(method);
 
     for (const v of variants) {
@@ -231,6 +283,7 @@ export class MethodsService implements OnModuleDestroy {
         requirements: v.requirements,
         recommendations: v.recommendations,
       });
+      variant.slug = await this.generateVariantSlug(method.id, v.label);
       await this.variantRepo.save(variant);
 
       for (const input of v.inputs) {
@@ -294,6 +347,9 @@ export class MethodsService implements OnModuleDestroy {
     if (!method) {
       throw new NotFoundException(`Method ${id} not found`);
     }
+    if (rest.name) {
+      method.slug = await this.generateMethodSlug(rest.name, id);
+    }
     if (variants) {
       const variantEntities = await this.variantRepo.find({
         where: { id: In(variants) },
@@ -327,6 +383,14 @@ export class MethodsService implements OnModuleDestroy {
       ...rest
     } = dto;
     Object.assign(variant, rest);
+
+    if (dto.label) {
+      variant.slug = await this.generateVariantSlug(
+        variant.method.id,
+        dto.label,
+        id,
+      );
+    }
 
     // Remove existing IO items to avoid duplicates
     await this.ioRepo.delete({ variant: { id } });

@@ -7,12 +7,15 @@ import {
   ManyToOne,
   OneToMany,
   JoinColumn,
+  Unique,
+  Check,
 } from 'typeorm';
 import { Method } from './method.entity';
 import { VariantIoItem } from './io-item.entity';
 import { XpHour, VariantRequirements, VariantRecommendations } from '../types';
 
 @Entity('method_variants')
+@Unique('UQ_variant_method_slug', ['method', 'slug'])
 export class MethodVariant {
   @PrimaryGeneratedColumn('uuid')
   id: string;
@@ -24,7 +27,8 @@ export class MethodVariant {
   @Column()
   label: string;
 
-  @Column({ unique: true })
+  @Check("slug ~ '^[a-z0-9]+(?:-[a-z0-9]+)*$'")
+  @Column({ length: 160 })
   slug: string;
 
   @Column({ type: 'text', nullable: true })
