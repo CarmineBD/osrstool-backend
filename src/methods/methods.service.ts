@@ -385,11 +385,7 @@ export class MethodsService implements OnModuleDestroy {
     Object.assign(variant, rest);
 
     if (dto.label) {
-      variant.slug = await this.generateVariantSlug(
-        variant.method.id,
-        dto.label,
-        id,
-      );
+      variant.slug = await this.generateVariantSlug(variant.method.id, dto.label, id);
     }
 
     // Remove existing IO items to avoid duplicates
@@ -451,6 +447,10 @@ export class MethodsService implements OnModuleDestroy {
     const allEntities = await this.methodRepo.find({
       relations: ['variants', 'variants.ioItems'],
     });
+    const variantCounts = allEntities.reduce<Record<string, number>>((acc, method) => {
+      acc[method.id] = method.variants.length;
+      return acc;
+    }, {});
     let methodsToProcess = allEntities.map((m) => this.toDto(m));
 
     // Si se pasó el objeto userLevels, filtramos los métodos antes de enriquecerlos
@@ -549,9 +549,10 @@ export class MethodsService implements OnModuleDestroy {
         return m.variants.length > 0;
       })
       .map((m) => {
+        const variantCount = variantCounts[m.id] ?? 0;
         const bestVariant = m.variants.sort((a, b) => b.highProfit - a.highProfit)[0];
         const { description: _description, ...methodWithoutDescription } = m;
-        return { ...methodWithoutDescription, variants: [bestVariant] };
+        return { ...methodWithoutDescription, variants: [bestVariant], variantCount };
       });
 
     // Ordenamiento según los parámetros recibidos
