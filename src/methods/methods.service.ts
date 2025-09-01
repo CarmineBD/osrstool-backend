@@ -329,16 +329,118 @@ export class MethodsService implements OnModuleDestroy {
   }
 
   async update(id: string, updateDto: UpdateMethodDto): Promise<MethodDto> {
-    const method = await this.methodRepo.preload({ id, ...updateDto });
-    if (!method) {
-      throw new NotFoundException(`Method ${id} not found`);
-    }
-    await this.methodRepo.save(method);
-    const reloaded = await this.methodRepo.findOne({
+    const method = await this.methodRepo.findOne({
       where: { id },
       relations: ['variants', 'variants.ioItems'],
     });
-    return this.toDto(reloaded!);
+    if (!method) {
+      throw new NotFoundException(`Method ${id} not found`);
+    }
+
+    const { variants = [], name, description, category } = updateDto;
+
+    if (name !== undefined) {
+      method.name = name;
+      method.slug = await this.generateMethodSlug(name, id);
+    }
+    if (description !== undefined) method.description = description;
+    if (category !== undefined) method.category = category;
+
+    const existingVariants = new Map(method.variants.map((v) => [v.id, v]));
+    const updatedVariants: MethodVariant[] = [];
+
+    for (const v of variants) {
+      if (v.id && existingVariants.has(v.id)) {
+        const variant = existingVariants.get(v.id)!;
+        const {
+          inputs = [],
+          outputs = [],
+          snapshotName,
+          snapshotDescription,
+          snapshotDate,
+          ...rest
+        } = v;
+        Object.assign(variant, rest);
+
+        if (v.label) {
+          variant.slug = await this.generateVariantSlug(method.id, v.label, v.id);
+        }
+
+        await this.ioRepo.delete({ variant: { id: variant.id } });
+        const newItems: VariantIoItem[] = [];
+        for (const input of inputs) {
+          newItems.push(
+            this.ioRepo.create({
+              variant,
+              itemId: input.id,
+              type: 'input',
+              quantity: input.quantity,
+            }),
+          );
+        }
+        for (const output of outputs) {
+          newItems.push(
+            this.ioRepo.create({
+              variant,
+              itemId: output.id,
+              type: 'output',
+              quantity: output.quantity,
+            }),
+          );
+        }
+        variant.ioItems = newItems;
+        updatedVariants.push(variant);
+      } else {
+        const {
+          inputs = [],
+          outputs = [],
+          label = '',
+          snapshotName,
+          snapshotDescription,
+          snapshotDate,
+          ...rest
+        } = v;
+        const variant = this.variantRepo.create({
+          method,
+          label,
+          ...rest,
+        });
+        variant.slug = await this.generateVariantSlug(method.id, label);
+        const newItems: VariantIoItem[] = [];
+        for (const input of inputs) {
+          newItems.push(
+            this.ioRepo.create({
+              variant,
+              itemId: input.id,
+              type: 'input',
+              quantity: input.quantity,
+            }),
+          );
+        }
+        for (const output of outputs) {
+          newItems.push(
+            this.ioRepo.create({
+              variant,
+              itemId: output.id,
+              type: 'output',
+              quantity: output.quantity,
+            }),
+          );
+        }
+        variant.ioItems = newItems;
+        updatedVariants.push(variant);
+      }
+    }
+
+    const dtoIds = new Set(variants.filter((v) => v.id).map((v) => v.id!));
+    const toRemove = method.variants.filter((v) => !dtoIds.has(v.id));
+    if (toRemove.length) {
+      await this.variantRepo.delete(toRemove.map((v) => v.id));
+    }
+
+    method.variants = updatedVariants;
+    await this.methodRepo.save(method);
+    return this.findOne(id);
   }
 
   async updateBasic(id: string, updateDto: UpdateMethodBasicDto): Promise<MethodDto> {

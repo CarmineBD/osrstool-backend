@@ -1,5 +1,25 @@
 // src/methods/dto/update-method.dto.ts
-import { PartialType } from '@nestjs/swagger';
-import { CreateMethodDto } from './create-method.dto';
+import { IsArray, IsOptional, IsString, ValidateNested } from 'class-validator';
+import { Type } from 'class-transformer';
+import { UpdateMethodVariantDto } from './update-method-variant.dto';
 
-export class UpdateMethodDto extends PartialType(CreateMethodDto) {}
+export class UpdateMethodDto {
+  @IsOptional()
+  @IsString()
+  name?: string;
+
+  @IsOptional()
+  @IsString()
+  description?: string;
+
+  @IsOptional()
+  @IsString()
+  category?: string;
+
+  @IsOptional()
+  @IsArray()
+  @ValidateNested({ each: true })
+  @Type(() => UpdateMethodVariantDto)
+  variants?: UpdateMethodVariantDto[];
+}
+

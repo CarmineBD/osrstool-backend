@@ -6,3 +6,4 @@ export * from './update-method.dto';
 export * from './method-response.dto';
 export * from './update-method-basic.dto';
 export * from './update-variant.dto';
+export * from './update-method-variant.dto';
