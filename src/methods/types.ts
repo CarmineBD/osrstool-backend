@@ -37,3 +37,17 @@ export interface VariantRequirements {
 }
 
 export type VariantRecommendations = VariantRequirements;
+
+export interface UserInfo {
+  levels: Record<string, number>;
+  quests: Record<string, number>;
+  achievement_diaries: Record<
+    string,
+    {
+      Easy: { complete: boolean; tasks: boolean[] };
+      Medium: { complete: boolean; tasks: boolean[] };
+      Hard: { complete: boolean; tasks: boolean[] };
+      Elite: { complete: boolean; tasks: boolean[] };
+    }
+  >;
+}

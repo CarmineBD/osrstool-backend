@@ -22,4 +22,3 @@ export class UpdateMethodDto {
   @Type(() => UpdateMethodVariantDto)
   variants?: UpdateMethodVariantDto[];
 }
-
