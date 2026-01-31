@@ -5,6 +5,7 @@ import { Repository } from 'typeorm';
 import { VariantIoItem } from './entities/io-item.entity';
 import { VariantHistory } from './entities/variant-history.entity';
 import { VariantSnapshotService } from '../variant-snapshots/variant-snapshot.service';
+import { RuneScapeApiService } from './RuneScapeApiService';
 
 const call = jest.fn();
 const quit = jest.fn();
@@ -71,6 +72,7 @@ describe('MethodsService variantCount', () => {
       {} as Repository<VariantIoItem>,
       {} as Repository<VariantHistory>,
       {} as VariantSnapshotService,
+      {} as RuneScapeApiService,
     );
 
     call.mockResolvedValue(

@@ -2,19 +2,10 @@ import { Controller, Get, Post, Put, Delete, Param, Body, Query } from '@nestjs/
 import { ApiOkResponse, ApiOperation, ApiQuery, ApiTags } from '@nestjs/swagger';
 import { MethodsService } from './methods.service';
 import { CreateMethodDto, UpdateMethodDto, UpdateMethodBasicDto, UpdateVariantDto } from './dto';
-import { MethodDto } from './dto/method.dto';
-import { RuneScapeApiService } from './RuneScapeApiService';
 
 interface PaginatedResult {
   data: any[];
   total: number;
-}
-
-// Add new interface to type the user info returned by the API
-interface UserInfo {
-  levels: Record<string, number>;
-  quests: Record<string, number>;
-  achievement_diaries: any;
 }
 
 const METHOD_EXAMPLE = {
@@ -42,10 +33,7 @@ const METHOD_EXAMPLE = {
 @ApiTags('methods')
 @Controller('methods')
 export class MethodsController {
-  constructor(
-    private readonly svc: MethodsService,
-    private readonly runescapeApi: RuneScapeApiService,
-  ) {}
+  constructor(private readonly svc: MethodsService) {}
 
   @Post()
   @ApiOperation({ summary: 'Create method', description: 'Creates a new method.' })
@@ -105,67 +93,21 @@ export class MethodsController {
     @Query('orderBy') orderBy = 'highProfit',
     @Query('order') order = 'desc',
   ) {
-    const p = parseInt(page, 10);
-    const pp = parseInt(perPage, 10);
-
-    let userInfo: UserInfo | null = null;
-    const warnings: { code: string; message: string }[] = [];
-    if (username) {
-      try {
-        userInfo = (await this.runescapeApi.fetchUserInfo(username)) as UserInfo;
-      } catch (error: any) {
-        const message = `No se pudo obtener la información del usuario "${username}".`;
-        if (error instanceof Error && error.message.includes('status 404')) {
-          warnings.push({ code: 'USER_NOT_FOUND', message });
-        } else {
-          warnings.push({ code: 'USER_LOOKUP_FAILED', message });
-        }
-      }
-    }
-
-    const filters = {
+    return this.svc.listWithProfitResponse({
+      page,
+      perPage,
+      username,
       name,
-      categories: Array.isArray(category)
-        ? category
-        : category
-          ? String(category)
-              .split(',')
-              .map((c) => c.trim())
-          : undefined,
-      clickIntensity: clickIntensity ? Number(clickIntensity) : undefined,
-      afkiness: afkiness ? Number(afkiness) : undefined,
-      riskLevel: riskLevel ? Number(riskLevel) : undefined,
-      xpHour: xpHour ? Number(xpHour) : undefined,
-      skill: skill ?? undefined,
-      showProfitables: showProfitables === 'true' || showProfitables === '1',
-    };
-
-    const sortOptions = {
-      orderBy: orderBy as 'clickIntensity' | 'afkiness' | 'xpHour' | 'highProfit',
-      order: (order as 'asc' | 'desc') ?? 'desc',
-    };
-
-    const result: PaginatedResult = await this.svc.findAllWithProfit(
-      p,
-      pp,
-      userInfo,
-      filters,
-      sortOptions,
-    );
-
-    const meta = {
-      total: result.total,
-      page: p,
-      perPage: pp,
-      ...(username ? { username } : {}),
-    };
-
-    return {
-      status: warnings.length ? 'partial' : 'ok',
-      data: { methods: result.data, user: userInfo },
-      warnings,
-      meta,
-    };
+      category,
+      clickIntensity,
+      afkiness,
+      riskLevel,
+      xpHour,
+      skill,
+      showProfitables,
+      orderBy,
+      order,
+    });
   }
 
   // Nuevo endpoint para obtener método con datos actualizados desde Redis
@@ -211,34 +153,7 @@ export class MethodsController {
     },
   })
   async findMethodDetailsWithProfit(@Param('id') id: string, @Query('username') username?: string) {
-    let userInfo: UserInfo | null = null;
-    const warnings: { code: string; message: string }[] = [];
-    if (username) {
-      try {
-        userInfo = (await this.runescapeApi.fetchUserInfo(username)) as UserInfo;
-      } catch (error: any) {
-        const message = `No se pudo obtener la información del usuario "${username}".`;
-        if (error instanceof Error && error.message.includes('status 404')) {
-          warnings.push({ code: 'USER_NOT_FOUND', message });
-        } else {
-          warnings.push({ code: 'USER_LOOKUP_FAILED', message });
-        }
-      }
-    }
-
-    const method = (await this.svc.findMethodDetailsWithProfit(
-      id,
-      userInfo || undefined,
-    )) as unknown as MethodDto;
-
-    return {
-      status: warnings.length ? 'partial' : 'ok',
-      data: { method, user: userInfo },
-      warnings,
-      meta: {
-        ...(username ? { username } : {}),
-      },
-    };
+    return this.svc.methodDetailsWithProfitResponse(id, username);
   }
 
   @Put(':id')

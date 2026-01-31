@@ -7,4 +7,3 @@ export class UpdateMethodVariantDto extends UpdateVariantDto {
   @IsString()
   id?: string;
 }
-
