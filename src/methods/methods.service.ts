@@ -355,9 +355,9 @@ export class MethodsService implements OnModuleDestroy {
         const {
           inputs = [],
           outputs = [],
-          snapshotName,
-          snapshotDescription,
-          snapshotDate,
+          snapshotName: _snapshotName,
+          snapshotDescription: _snapshotDescription,
+          snapshotDate: _snapshotDate,
           ...rest
         } = v;
         Object.assign(variant, rest);
@@ -395,9 +395,9 @@ export class MethodsService implements OnModuleDestroy {
           inputs = [],
           outputs = [],
           label = '',
-          snapshotName,
-          snapshotDescription,
-          snapshotDate,
+          snapshotName: _snapshotName,
+          snapshotDescription: _snapshotDescription,
+          snapshotDate: _snapshotDate,
           ...rest
         } = v;
         const variant = this.variantRepo.create({

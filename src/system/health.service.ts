@@ -31,13 +31,9 @@ export class HealthService {
 
   async getHealth(): Promise<HealthResponse> {
     const timeoutMs = this.getTimeoutMs();
-    const [db, redis] = await Promise.all([
-      this.checkDb(timeoutMs),
-      this.checkRedis(timeoutMs),
-    ]);
+    const [db, redis] = await Promise.all([this.checkDb(timeoutMs), this.checkRedis(timeoutMs)]);
 
-    const status: OverallStatus =
-      db.status === 'ok' && redis.status === 'ok' ? 'ok' : 'degraded';
+    const status: OverallStatus = db.status === 'ok' && redis.status === 'ok' ? 'ok' : 'degraded';
 
     return {
       status,
@@ -104,7 +100,7 @@ export class HealthService {
         })
         .catch((error) => {
           clearTimeout(timer);
-          reject(error);
+          reject(error instanceof Error ? error : new Error('Unknown error'));
         });
     });
   }
