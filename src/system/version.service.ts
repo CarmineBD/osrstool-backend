@@ -17,10 +17,7 @@ export class VersionService {
   constructor(private readonly config: ConfigService) {}
 
   getVersion(): VersionResponse {
-    const version =
-      this.config.get<string>('APP_VERSION') ??
-      this.getPackageVersion() ??
-      'unknown';
+    const version = this.config.get<string>('APP_VERSION') ?? this.getPackageVersion() ?? 'unknown';
     const commit = this.config.get<string>('GIT_COMMIT') ?? 'unknown';
     const buildDate = this.config.get<string>('BUILD_DATE') ?? undefined;
 
