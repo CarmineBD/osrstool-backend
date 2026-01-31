@@ -10,6 +10,7 @@ import { PricesModule } from './prices/prices.module';
 import { VariantHistoryModule } from './variant-history/variant-history.module';
 import { VariantSnapshotModule } from './variant-snapshots/variant-snapshot.module';
 import { ItemsModule } from './items/items.module';
+import { SystemModule } from './system/system.module';
 
 const validateEnv = (config: Record<string, string | undefined>) => {
   const required = ['DB_HOST', 'DB_PORT', 'DB_USER', 'DB_PASS', 'DB_NAME', 'REDIS_URL'];
@@ -78,6 +79,8 @@ const validateEnv = (config: Record<string, string | undefined>) => {
     // Si antes tenías un PricesModule para Redis, vuelve a importarlo:
     PricesModule,
     ItemsModule,
+    SystemModule,
   ],
 })
 export class AppModule {}
+
