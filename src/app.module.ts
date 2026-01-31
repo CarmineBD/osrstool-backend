@@ -11,12 +11,39 @@ import { VariantHistoryModule } from './variant-history/variant-history.module';
 import { VariantSnapshotModule } from './variant-snapshots/variant-snapshot.module';
 import { ItemsModule } from './items/items.module';
 
+const validateEnv = (config: Record<string, string | undefined>) => {
+  const required = ['DB_HOST', 'DB_PORT', 'DB_USER', 'DB_PASS', 'DB_NAME', 'REDIS_URL'];
+  const missing = required.filter((key) => {
+    const value = config[key];
+    return !value || value.trim().length === 0;
+  });
+
+  if (missing.length > 0) {
+    throw new Error(
+      `Missing required environment variables: ${missing.join(', ')}. Check your .env file.`,
+    );
+  }
+
+  const portValue = config.DB_PORT?.trim();
+  if (portValue && Number.isNaN(Number(portValue))) {
+    throw new Error(`DB_PORT must be a number. Received "${config.DB_PORT}".`);
+  }
+
+  const appPortValue = config.PORT?.trim();
+  if (appPortValue && Number.isNaN(Number(appPortValue))) {
+    throw new Error(`PORT must be a number. Received "${config.PORT}".`);
+  }
+
+  return config;
+};
+
 @Module({
   imports: [
     // 1 sola vez, antes de todo lo que inyecte ConfigService:
     ConfigModule.forRoot({
       isGlobal: true,
       envFilePath: '.env',
+      validate: validateEnv,
     }),
 
     // 1 sola vez, configuración de TypeORM:
