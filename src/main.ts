@@ -2,8 +2,11 @@
 import { NestFactory } from '@nestjs/core';
 import { AppModule } from './app.module';
 import { DocumentBuilder, SwaggerModule } from '@nestjs/swagger';
+import { ValidationPipe } from '@nestjs/common';
 // eslint-disable-next-line @typescript-eslint/no-unused-vars
 import { ItemsSeederService } from './items/items-seeder.service';
+import { HttpExceptionFilter } from './common/filters/http-exception.filter';
+import { RequestLoggingInterceptor } from './common/interceptors/request-logging.interceptor';
 
 async function bootstrap() {
   const app = await NestFactory.create(AppModule);
@@ -14,6 +17,16 @@ async function bootstrap() {
     // o para cualquier origen en DEV, simplemente:
     // origin: true,
   });
+
+  app.useGlobalPipes(
+    new ValidationPipe({
+      whitelist: true,
+      transform: true,
+      transformOptions: { enableImplicitConversion: true },
+    }),
+  );
+  app.useGlobalFilters(new HttpExceptionFilter());
+  app.useGlobalInterceptors(new RequestLoggingInterceptor());
 
   // Descomenta la siguiente línea para poblar la tabla de items con datos del GE
   // const seeder = app.get(ItemsSeederService);
