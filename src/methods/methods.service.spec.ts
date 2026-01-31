@@ -6,6 +6,7 @@ import { VariantIoItem } from './entities/io-item.entity';
 import { VariantHistory } from './entities/variant-history.entity';
 import { VariantSnapshotService } from '../variant-snapshots/variant-snapshot.service';
 import { RuneScapeApiService } from './RuneScapeApiService';
+import { buildMethodFixture } from '../testing/fixtures';
 
 const call = jest.fn();
 const quit = jest.fn();
@@ -16,6 +17,10 @@ jest.mock('ioredis', () => ({
 }));
 
 describe('MethodsService variantCount', () => {
+  beforeEach(() => {
+    call.mockReset();
+  });
+
   it('returns total variant count independent of user info', async () => {
     const methodEntity: Method = {
       id: 'm1',
@@ -102,5 +107,46 @@ describe('MethodsService variantCount', () => {
     expect(result.data[0].variantCount).toBe(2);
     expect(result.data[0].variants).toHaveLength(1);
     expect(result.data[0].variants[0].id).toBe('v2');
+  });
+
+  it('filters non-profitable variants when showProfitables is true', async () => {
+    const methodEntity = buildMethodFixture();
+    methodEntity.id = 'm1';
+    methodEntity.variants[0].id = 'v1';
+    methodEntity.variants[1].id = 'v2';
+
+    const methodRepo = {
+      find: jest.fn().mockResolvedValue([methodEntity]),
+    } as unknown as Repository<Method>;
+
+    const service = new MethodsService(
+      methodRepo,
+      {} as Repository<MethodVariant>,
+      {} as Repository<VariantIoItem>,
+      {} as Repository<VariantHistory>,
+      {} as VariantSnapshotService,
+      {} as RuneScapeApiService,
+    );
+
+    call.mockResolvedValue(
+      JSON.stringify([
+        {
+          m1: {
+            v1: { low: 0, high: 0 },
+            v2: { low: -10, high: -5 },
+          },
+        },
+      ]),
+    );
+
+    const result = await service.findAllWithProfit(
+      1,
+      10,
+      undefined,
+      { showProfitables: true },
+      { orderBy: 'highProfit', order: 'desc' },
+    );
+
+    expect(result.data).toHaveLength(0);
   });
 });
