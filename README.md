@@ -42,6 +42,15 @@ Available variables:
 - `DB_USER`: Database user.
 - `DB_PASS`: Database password.
 - `DB_NAME`: Database name.
+- `HEALTH_CHECK_TIMEOUT_MS`: Timeout (ms) for dependency checks in `/health`.
+- `APP_VERSION`: Version label for `/version` (defaults to `package.json`).
+- `GIT_COMMIT`: Commit hash for `/version`.
+- `BUILD_DATE`: Build date for `/version` (ISO 8601 recommended).
+
+## System endpoints
+
+- `GET /health`: Returns service status, uptime, and DB/Redis checks. Responds `503` if a dependency fails.
+- `GET /version`: Returns deploy version/commit metadata.
 
 ## Commands
 
