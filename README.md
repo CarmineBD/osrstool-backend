@@ -1,5 +1,7 @@
 # OSRS Tool Backend
 
+[![CI](https://github.com/CarmineBD/osrstool-backend/actions/workflows/ci.yml/badge.svg?branch=main)](https://github.com/CarmineBD/osrstool-backend/actions/workflows/ci.yml)
+
 Backend API for the OSRS Tool project. Built with NestJS and TypeScript, using PostgreSQL and Redis for persistence and caching.
 
 ## Requirements
