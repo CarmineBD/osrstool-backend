@@ -2,6 +2,14 @@ import { Test, TestingModule } from '@nestjs/testing';
 import { HttpModule } from '@nestjs/axios';
 import { PricesService } from './prices.service';
 
+jest.mock('ioredis', () => ({
+  __esModule: true,
+  default: jest.fn().mockImplementation(() => ({
+    call: jest.fn(),
+    quit: jest.fn(),
+  })),
+}));
+
 describe('PricesService', () => {
   let service: PricesService;
 

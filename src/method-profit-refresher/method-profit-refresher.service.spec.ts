@@ -7,6 +7,8 @@ jest.mock('ioredis', () => ({
 }));
 
 import { MethodProfitRefresherService } from './method-profit-refresher.service';
+import type { MethodsService } from '../methods/methods.service';
+import type { PricesService } from '../prices/prices.service';
 
 describe('MethodProfitRefresherService', () => {
   beforeEach(() => {
@@ -39,8 +41,8 @@ describe('MethodProfitRefresherService', () => {
     };
 
     const service = new MethodProfitRefresherService(
-      methodsService as unknown as { findAll: () => Promise<{ data: unknown[] }> },
-      pricesService as unknown as { getMany: (ids: number[]) => Promise<Record<number, unknown>> },
+      methodsService as unknown as MethodsService,
+      pricesService as unknown as PricesService,
     );
 
     await service.refresh();

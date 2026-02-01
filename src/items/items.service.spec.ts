@@ -34,7 +34,10 @@ describe('ItemsService', () => {
     upsert: jest.fn(),
   };
 
-  const service = new ItemsService(repo as Repository<Item>, pricesService as PricesService);
+  const service = new ItemsService(
+    repo as unknown as Repository<Item>,
+    pricesService as unknown as PricesService,
+  );
 
   beforeEach(() => {
     jest.clearAllMocks();
