@@ -7,7 +7,7 @@ Backend API for the OSRS Tool project. Built with NestJS and TypeScript, using P
 - Node.js 18+ (LTS recommended)
 - npm
 - PostgreSQL 15+ (or use Docker)
-- Redis (optional, if configured)
+- Redis (required; RedisJSON is used via JSON.GET/JSON.SET)
 
 ## Quick start
 
@@ -15,8 +15,8 @@ Backend API for the OSRS Tool project. Built with NestJS and TypeScript, using P
 # install dependencies
 npm install
 
-# start database (optional, if you use Docker)
-docker compose up -d
+# start backend + db + redis (Docker)
+docker compose up --build
 
 # run in watch mode
 npm run start:dev
@@ -36,7 +36,7 @@ Available variables:
 
 - `PORT`: HTTP port for the API.
 - `DATABASE_URL`: Full Postgres connection string (optional if you use the `DB_*` settings).
-- `REDIS_URL`: Redis connection string (optional).
+- `REDIS_URL`: Redis connection string (required).
 - `DB_HOST`: Database host.
 - `DB_PORT`: Database port.
 - `DB_USER`: Database user.
@@ -78,5 +78,5 @@ npm run test:cov
 
 ## Notes
 
-- If you use Docker, the default database credentials are defined in `docker-compose.yml`.
+- If you use Docker, default DB/Redis settings are defined in `docker-compose.yml` and no `.env` is required.
 - Keep `.env` out of version control.
