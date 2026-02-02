@@ -3,6 +3,7 @@ import { Cron } from '@nestjs/schedule';
 import Redis from 'ioredis';
 import { HttpService } from '@nestjs/axios';
 import { firstValueFrom } from 'rxjs';
+import { ConfigService } from '@nestjs/config';
 
 interface Price {
   high?: number;
@@ -14,12 +15,18 @@ interface Price {
 @Injectable()
 export class PricesService implements OnModuleInit {
   private readonly logger = new Logger(PricesService.name);
-  private readonly redis = new Redis(process.env.REDIS_URL!);
+  private readonly redis: Redis;
   private readonly API = 'https://prices.runescape.wiki/api/v1/osrs/latest';
 
   private lastData: Record<string, Price> = {};
 
-  constructor(private readonly http: HttpService) {}
+  constructor(
+    private readonly http: HttpService,
+    private readonly config: ConfigService,
+  ) {
+    const redisUrl = this.config.get<string>('REDIS_URL') as string;
+    this.redis = new Redis(redisUrl);
+  }
 
   /**
    * On init, load snapshot or fetch fresh data
