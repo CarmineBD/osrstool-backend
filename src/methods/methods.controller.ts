@@ -24,7 +24,7 @@ const METHOD_EXAMPLE = {
       clickIntensity: 2,
       afkiness: 2,
       riskLevel: 'low',
-      xpHour: { Cooking: 300000 },
+      xpHour: [{ skill: 'Cooking', experience: 300000 }],
       wilderness: false,
     },
   ],
