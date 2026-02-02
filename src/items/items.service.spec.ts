@@ -3,10 +3,14 @@ import { Repository } from 'typeorm';
 import { PricesService } from '../prices/prices.service';
 import { Item } from './entities/item.entity';
 import { buildItemFixture } from '../testing/fixtures';
+import { ConfigService } from '@nestjs/config';
 
 describe('ItemsService', () => {
   const pricesService: { getMany: jest.MockedFunction<PricesService['getMany']> } = {
     getMany: jest.fn(),
+  };
+  const configService: { get: jest.MockedFunction<ConfigService['get']> } = {
+    get: jest.fn(),
   };
 
   type Repo = Pick<
@@ -37,10 +41,12 @@ describe('ItemsService', () => {
   const service = new ItemsService(
     repo as unknown as Repository<Item>,
     pricesService as unknown as PricesService,
+    configService as unknown as ConfigService,
   );
 
   beforeEach(() => {
     jest.clearAllMocks();
+    configService.get.mockReturnValue(undefined);
   });
 
   it('encodes icon URL when returning a single item', async () => {

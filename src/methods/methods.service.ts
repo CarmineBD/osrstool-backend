@@ -21,6 +21,7 @@ import { slugify, fallbackSlug } from '../utils/slug';
 import { XpHour, UserInfo } from './types';
 import { RuneScapeApiService } from './RuneScapeApiService';
 import { computeMissingRequirements, filterMethodsByUserStats } from './helpers/requirements';
+import { ConfigService } from '@nestjs/config';
 
 // Definimos tipos para mayor seguridad
 interface Profit {
@@ -80,8 +81,10 @@ export class MethodsService implements OnModuleDestroy {
 
     private readonly snapshotSvc: VariantSnapshotService,
     private readonly runescapeApi: RuneScapeApiService,
+    private readonly config: ConfigService,
   ) {
-    this.redis = new IORedis(process.env.REDIS_URL as string);
+    const redisUrl = this.config.get<string>('REDIS_URL') as string;
+    this.redis = new IORedis(redisUrl);
   }
 
   onModuleDestroy() {

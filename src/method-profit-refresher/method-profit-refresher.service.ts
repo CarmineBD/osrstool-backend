@@ -3,6 +3,7 @@ import { Cron } from '@nestjs/schedule';
 import Redis from 'ioredis';
 import { MethodsService } from '../methods/methods.service';
 import { PricesService } from '../prices/prices.service';
+import { ConfigService } from '@nestjs/config';
 
 // interface Price {
 //   high?: number;
@@ -16,12 +17,16 @@ import { PricesService } from '../prices/prices.service';
 @Injectable()
 export class MethodProfitRefresherService {
   private readonly logger = new Logger(MethodProfitRefresherService.name);
-  private readonly redis = new Redis(process.env.REDIS_URL!);
+  private readonly redis: Redis;
 
   constructor(
     private readonly methodsService: MethodsService,
     private readonly pricesService: PricesService,
-  ) {}
+    private readonly config: ConfigService,
+  ) {
+    const redisUrl = this.config.get<string>('REDIS_URL') as string;
+    this.redis = new Redis(redisUrl);
+  }
 
   @Cron('*/1 * * * *') // cada minuto
   async refresh(): Promise<void> {

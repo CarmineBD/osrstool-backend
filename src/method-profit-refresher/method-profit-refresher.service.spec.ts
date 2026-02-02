@@ -9,6 +9,7 @@ jest.mock('ioredis', () => ({
 import { MethodProfitRefresherService } from './method-profit-refresher.service';
 import type { MethodsService } from '../methods/methods.service';
 import type { PricesService } from '../prices/prices.service';
+import type { ConfigService } from '@nestjs/config';
 
 describe('MethodProfitRefresherService', () => {
   beforeEach(() => {
@@ -39,10 +40,14 @@ describe('MethodProfitRefresherService', () => {
         200: { low: 20, high: 25 },
       }),
     };
+    const configService = {
+      get: jest.fn().mockReturnValue('redis://localhost:6379'),
+    };
 
     const service = new MethodProfitRefresherService(
       methodsService as unknown as MethodsService,
       pricesService as unknown as PricesService,
+      configService as unknown as ConfigService,
     );
 
     await service.refresh();

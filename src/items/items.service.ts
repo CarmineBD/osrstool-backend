@@ -6,6 +6,7 @@ import {
 } from '@nestjs/common';
 import { InjectRepository } from '@nestjs/typeorm';
 import { In, Repository } from 'typeorm';
+import { ConfigService } from '@nestjs/config';
 import { Item } from './entities/item.entity';
 import {
   CreateItemDto,
@@ -17,16 +18,22 @@ import {
 import { PricesService } from '../prices/prices.service';
 @Injectable()
 export class ItemsService {
+  private cdnBase?: string;
+
   constructor(
     @InjectRepository(Item) private readonly repo: Repository<Item>,
     private readonly pricesService: PricesService,
+    private readonly config: ConfigService,
   ) {}
 
   private buildIconUrl(iconPath: string): string {
-    const base = (process.env.CDN_BASE ?? 'https://oldschool.runescape.wiki/images/').replace(
-      /\/+$/,
-      '',
-    );
+    if (!this.cdnBase) {
+      const base = (
+        this.config.get<string>('CDN_BASE') ?? 'https://oldschool.runescape.wiki/images/'
+      ).replace(/\/+$/, '');
+      this.cdnBase = base;
+    }
+    const base = this.cdnBase;
 
     // Limpieza del path y formateo personalizado
     const path = iconPath

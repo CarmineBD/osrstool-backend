@@ -6,6 +6,7 @@ import Redis from 'ioredis';
 import { VariantHistory } from '../methods/entities/variant-history.entity';
 import { MethodVariant } from '../methods/entities/variant.entity';
 import { VariantSnapshot } from '../methods/entities/variant-snapshot.entity';
+import { ConfigService } from '@nestjs/config';
 import {
   HistoryAgg,
   HistoryGranularity,
@@ -16,14 +17,18 @@ import {
 @Injectable()
 export class VariantHistoryService {
   private readonly logger = new Logger(VariantHistoryService.name);
-  private readonly redis = new Redis(process.env.REDIS_URL!);
+  private readonly redis: Redis;
 
   constructor(
     @InjectRepository(VariantHistory)
     private readonly historyRepo: Repository<VariantHistory>,
     @InjectRepository(VariantSnapshot)
     private readonly snapshotRepo: Repository<VariantSnapshot>,
-  ) {}
+    private readonly config: ConfigService,
+  ) {
+    const redisUrl = this.config.get<string>('REDIS_URL') as string;
+    this.redis = new Redis(redisUrl);
+  }
 
   @Cron('*/5 * * * *')
   async capture(): Promise<void> {
