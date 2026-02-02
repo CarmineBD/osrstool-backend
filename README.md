@@ -36,6 +36,7 @@ cp .env.example .env
 
 Available variables:
 
+- `NODE_ENV`: `development` or `production`.
 - `PORT`: HTTP port for the API.
 - `DATABASE_URL`: Full Postgres connection string (optional if you use the `DB_*` settings).
 - `REDIS_URL`: Redis connection string (required).
@@ -45,6 +46,11 @@ Available variables:
 - `DB_PASS`: Database password.
 - `DB_NAME`: Database name.
 - `HEALTH_CHECK_TIMEOUT_MS`: Timeout (ms) for dependency checks in `/health`.
+- `RATE_LIMIT_TTL_SECONDS`: Rate limit window in seconds (default `60`).
+- `RATE_LIMIT_LIMIT`: Max requests per window (default `60`).
+- `CORS_ORIGINS`: Comma-separated allowed origins (e.g. `https://example.com,https://app.example.com`).
+- `SWAGGER_ENABLED`: Set to `true` to enable Swagger in production (disabled by default in prod).
+- `CDN_BASE`: Base URL for item icons (defaults to OSRS Wiki).
 - `APP_VERSION`: Version label for `/version` (defaults to `package.json`).
 - `GIT_COMMIT`: Commit hash for `/version`.
 - `BUILD_DATE`: Build date for `/version` (ISO 8601 recommended).
@@ -82,3 +88,10 @@ npm run test:cov
 
 - If you use Docker, default DB/Redis settings are defined in `docker-compose.yml` and no `.env` is required.
 - Keep `.env` out of version control.
+  
+## Production tips
+
+- Set `NODE_ENV=production` to disable Swagger by default.
+- Set `CORS_ORIGINS` explicitly in production.
+- Use `DATABASE_URL` or the `DB_*` fields (either works).
+- Configure `RATE_LIMIT_*` for public deployments.
