@@ -16,10 +16,11 @@ interface Price {
 export class PricesService implements OnModuleInit {
   private readonly logger = new Logger(PricesService.name);
   private readonly redis: Redis;
-  private readonly API = 'https://prices.runescape.wiki/api/v1/osrs/latest';
+  private readonly api = 'https://prices.runescape.wiki/api/v1/osrs/latest';
   private readonly pricesHashKey = 'items:prices';
   private readonly legacyJsonKey = 'itemsPrices';
 
+  // In-memory snapshot used only to detect high/low changes between polls.
   private lastData: Record<string, Price> = {};
 
   constructor(
@@ -30,31 +31,26 @@ export class PricesService implements OnModuleInit {
     this.redis = new Redis(redisUrl);
   }
 
-  /**
-   * On init, load snapshot or fetch fresh data
-   */
   async onModuleInit() {
     try {
-      // Typed call to return array of strings
-      const fullRaw = await this.redis.call('JSON.GET', this.legacyJsonKey, '$');
-
-      const full = Array.isArray(fullRaw) ? (fullRaw as string[]) : [];
-      if (Array.isArray(full) && typeof full[0] === 'string') {
-        const raw = full[0];
-        try {
-          const parsed = JSON.parse(raw) as Record<string, Price> | Array<Record<string, Price>>;
-          this.lastData = Array.isArray(parsed) ? (parsed[0] ?? {}) : parsed;
-          this.logger.log('Initial prices snapshot loaded');
-        } catch (parseErr) {
-          this.logger.warn('Invalid snapshot JSON, fetching fresh data: ', parseErr);
-          await this.fetchPrices();
-        }
-      } else {
-        this.logger.log('No snapshot found, fetching fresh data');
-        await this.fetchPrices();
+      const snapshot = await this.loadSnapshotFromHash();
+      if (Object.keys(snapshot).length > 0) {
+        this.lastData = snapshot;
+        this.logger.log('Initial prices snapshot loaded from items:prices hash');
+        return;
       }
-    } catch (err) {
-      this.logger.error('Error loading initial snapshot, fetching fresh data', err);
+
+      const legacySnapshot = await this.loadSnapshotFromLegacyJson();
+      if (Object.keys(legacySnapshot).length > 0) {
+        this.lastData = legacySnapshot;
+        this.logger.log('Initial prices snapshot loaded from legacy itemsPrices key');
+        return;
+      }
+
+      this.logger.log('No prices snapshot found, fetching fresh data');
+      await this.fetchPrices();
+    } catch (error) {
+      this.logger.error('Error loading initial snapshot, fetching fresh data', error);
       await this.fetchPrices();
     }
   }
@@ -62,35 +58,37 @@ export class PricesService implements OnModuleInit {
   @Cron('*/1 * * * *')
   async fetchPrices() {
     try {
-      const { data } = await firstValueFrom(
-        this.http.get<{ data: Record<string, Price> }>(this.API),
-      );
+      const { data } = await firstValueFrom(this.http.get<{ data: Record<string, Price> }>(this.api));
 
-      let hasChanges = false;
-      for (const [id, price] of Object.entries(data.data)) {
-        const prev = this.lastData[id];
-        if (
-          !prev ||
-          prev.low !== price.low ||
-          prev.high !== price.high ||
-          prev.lowTime !== price.lowTime ||
-          prev.highTime !== price.highTime
-        ) {
-          this.lastData[id] = price;
-          hasChanges = true;
+      const changedEntries: Array<[string, Price]> = [];
+
+      for (const [id, latest] of Object.entries(data.data)) {
+        const previous = this.lastData[id];
+        const hasPriceChanged =
+          !previous || (previous.high ?? previous.low) !== (latest.high ?? latest.low) || previous.low !== latest.low;
+
+        if (hasPriceChanged) {
+          changedEntries.push([id, latest]);
+          this.lastData[id] = latest;
         }
       }
 
-      if (hasChanges) {
-        const payload = JSON.stringify(this.lastData);
-        await this.redis.call('JSON.SET', this.legacyJsonKey, '$', payload);
-        const kbSent = (Buffer.byteLength(payload, 'utf8') / 1024).toFixed(2);
-        this.logger.log(`Snapshot rewritten; commands: 1; bandwidth: ${kbSent} KB`);
-      } else {
-        this.logger.log('No price changes detected');
+      if (changedEntries.length === 0) {
+        this.logger.log('No high/low changes detected');
+        return;
       }
-    } catch (err) {
-      this.logger.error('Error fetching prices', err);
+
+      const pipeline = this.redis.pipeline();
+      for (const [id, price] of changedEntries) {
+        pipeline.hset(this.pricesHashKey, id, JSON.stringify(price));
+      }
+      await pipeline.exec();
+
+      this.logger.log(
+        `Prices updated in ${this.pricesHashKey}: ${changedEntries.length} items changed (high/low)`,
+      );
+    } catch (error) {
+      this.logger.error('Error fetching prices', error);
     }
   }
 
@@ -144,5 +142,45 @@ export class PricesService implements OnModuleInit {
     }
 
     return result;
+  }
+
+  private async loadSnapshotFromHash(): Promise<Record<string, Price>> {
+    const raw = await this.redis.call('HGETALL', this.pricesHashKey);
+    const fields = this.parseRedisHashResult(raw);
+    const snapshot: Record<string, Price> = {};
+
+    for (let i = 0; i < fields.length; i += 2) {
+      const id = fields[i];
+      const value = fields[i + 1];
+      if (!id || typeof value !== 'string') continue;
+
+      try {
+        snapshot[id] = JSON.parse(value) as Price;
+      } catch (error) {
+        this.logger.warn(`Invalid hash payload for item ${id}`, error);
+      }
+    }
+
+    return snapshot;
+  }
+
+  private async loadSnapshotFromLegacyJson(): Promise<Record<string, Price>> {
+    const raw = await this.redis.call('JSON.GET', this.legacyJsonKey);
+    if (typeof raw !== 'string') return {};
+
+    const parsed = JSON.parse(raw) as Record<string, Price>;
+    return parsed ?? {};
+  }
+
+  private parseRedisHashResult(raw: unknown): string[] {
+    if (Array.isArray(raw)) {
+      return raw.map((entry) => (typeof entry === 'string' ? entry : String(entry)));
+    }
+
+    if (raw && typeof raw === 'object') {
+      return Object.entries(raw as Record<string, string>).flatMap(([k, v]) => [k, v]);
+    }
+
+    return [];
   }
 }
