@@ -78,11 +78,11 @@ export class PricesService implements OnModuleInit {
         return;
       }
 
-      const pipeline = this.redis.pipeline();
+      const args: string[] = [];
       for (const [id, price] of changedEntries) {
-        pipeline.hset(this.pricesHashKey, id, JSON.stringify(price));
+        args.push(id, JSON.stringify(price));
       }
-      await pipeline.exec();
+      await this.redis.call('HSET', this.pricesHashKey, ...args);
 
       this.logger.log(
         `Prices updated in ${this.pricesHashKey}: ${changedEntries.length} items changed (high/low)`,
