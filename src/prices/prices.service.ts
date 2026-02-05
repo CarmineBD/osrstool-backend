@@ -145,8 +145,6 @@ export class PricesService implements OnModuleInit {
 
     return result;
   }
-
-
   private isPrice(value: unknown): value is Price {
     if (!value || typeof value !== 'object' || Array.isArray(value)) {
       return false;
@@ -165,5 +163,4 @@ export class PricesService implements OnModuleInit {
   private isUnknownArray(value: unknown): value is unknown[] {
     return Array.isArray(value);
   }
-
 }
