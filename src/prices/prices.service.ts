@@ -58,14 +58,18 @@ export class PricesService implements OnModuleInit {
   @Cron('*/1 * * * *')
   async fetchPrices() {
     try {
-      const { data } = await firstValueFrom(this.http.get<{ data: Record<string, Price> }>(this.api));
+      const { data } = await firstValueFrom(
+        this.http.get<{ data: Record<string, Price> }>(this.api),
+      );
 
       const changedEntries: Array<[string, Price]> = [];
 
       for (const [id, latest] of Object.entries(data.data)) {
         const previous = this.lastData[id];
         const hasPriceChanged =
-          !previous || (previous.high ?? previous.low) !== (latest.high ?? latest.low) || previous.low !== latest.low;
+          !previous ||
+          (previous.high ?? previous.low) !== (latest.high ?? latest.low) ||
+          previous.low !== latest.low;
 
         if (hasPriceChanged) {
           changedEntries.push([id, latest]);
@@ -96,8 +100,8 @@ export class PricesService implements OnModuleInit {
     if (ids.length === 0) return {};
 
     const fields = ids.map(String);
-    const raw = (await this.redis.call('HMGET', this.pricesHashKey, ...fields)) as unknown;
-    const rows = Array.isArray(raw) ? raw : [];
+    const raw: unknown = await this.redis.call('HMGET', this.pricesHashKey, ...fields);
+    const rows = this.isUnknownArray(raw) ? raw : [];
 
     const result: Record<number, { high: number; low: number; highTime: number; lowTime: number }> =
       {};
@@ -108,7 +112,12 @@ export class PricesService implements OnModuleInit {
       if (typeof rawPrice !== 'string') continue;
 
       try {
-        const p = JSON.parse(rawPrice) as Price;
+        const parsed: unknown = JSON.parse(rawPrice);
+        if (!this.isPrice(parsed)) {
+          this.logger.warn(`Invalid price JSON for item ${id}`, parsed);
+          continue;
+        }
+        const p = parsed;
         result[id] = {
           high: p.high ?? p.low,
           low: p.low,
@@ -170,6 +179,25 @@ export class PricesService implements OnModuleInit {
 
     const parsed = JSON.parse(raw) as Record<string, Price>;
     return parsed ?? {};
+  }
+
+  private isPrice(value: unknown): value is Price {
+    if (!value || typeof value !== 'object' || Array.isArray(value)) {
+      return false;
+    }
+
+    const candidate = value as Record<string, unknown>;
+
+    if (typeof candidate.low !== 'number') return false;
+    if (candidate.high !== undefined && typeof candidate.high !== 'number') return false;
+    if (candidate.lowTime !== undefined && typeof candidate.lowTime !== 'number') return false;
+    if (candidate.highTime !== undefined && typeof candidate.highTime !== 'number') return false;
+
+    return true;
+  }
+
+  private isUnknownArray(value: unknown): value is unknown[] {
+    return Array.isArray(value);
   }
 
   private parseRedisHashResult(raw: unknown): string[] {
