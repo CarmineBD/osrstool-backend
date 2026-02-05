@@ -1,15 +1,31 @@
-﻿import { Injectable, Logger, OnModuleInit } from '@nestjs/common';
+import { Injectable, Logger, OnModuleInit } from '@nestjs/common';
 import { Cron } from '@nestjs/schedule';
 import Redis from 'ioredis';
 import { HttpService } from '@nestjs/axios';
 import { firstValueFrom } from 'rxjs';
 import { ConfigService } from '@nestjs/config';
+import { InjectRepository } from '@nestjs/typeorm';
+import { Repository } from 'typeorm';
+import { ItemPriceRule, ItemPriceRuleType } from './entities/item-price-rule.entity';
 
 interface Price {
   high?: number;
   highTime?: number;
   low: number;
   lowTime?: number;
+}
+
+interface RecipeComponent {
+  itemId: number;
+  multipliedBy: number;
+}
+
+interface RecipeRuleParams {
+  components: RecipeComponent[];
+}
+
+interface BestRecipeRuleParams {
+  recipes: RecipeRuleParams[];
 }
 
 @Injectable()
@@ -25,6 +41,8 @@ export class PricesService implements OnModuleInit {
   constructor(
     private readonly http: HttpService,
     private readonly config: ConfigService,
+    @InjectRepository(ItemPriceRule)
+    private readonly priceRuleRepo: Repository<ItemPriceRule>,
   ) {
     const redisUrl = this.config.get<string>('REDIS_URL') as string;
     this.redis = new Redis(redisUrl);
@@ -65,25 +83,42 @@ export class PricesService implements OnModuleInit {
         }
       }
 
+      const untradeableEntries = await this.buildUntradeableEntries(data.data, now);
+
       if (changedEntries.length === 0) {
         const modeLabel = shouldForceFull ? 'full' : 'window';
         this.logger.log(
-          `No recent price changes detected (mode=${modeLabel}, window=${this.changeWindowSeconds}s)`,
+          `No recent tradeable price changes detected (mode=${modeLabel}, window=${this.changeWindowSeconds}s)`,
         );
-        return;
       }
 
-      const args: string[] = [];
-      for (const [id, price] of changedEntries) {
-        args.push(id, JSON.stringify(price));
+      if (changedEntries.length > 0) {
+        const args: string[] = [];
+        for (const [id, price] of changedEntries) {
+          args.push(id, JSON.stringify(price));
+        }
+        await this.redis.call('HSET', this.pricesHashKey, ...args);
+
+        const modeLabel = shouldForceFull ? 'full' : 'window';
+        this.logger.log(
+          `Tradeable prices updated in ${this.pricesHashKey}: ${changedEntries.length} items changed (mode=${modeLabel}, window=${this.changeWindowSeconds}s)`,
+        );
       }
-      await this.redis.call('HSET', this.pricesHashKey, ...args);
+
+      if (untradeableEntries.length > 0) {
+        const args: string[] = [];
+        for (const [id, price] of untradeableEntries) {
+          args.push(id, JSON.stringify(price));
+        }
+        await this.redis.call('HSET', this.pricesHashKey, ...args);
+        this.logger.log(
+          `Untradeable prices updated in ${this.pricesHashKey}: ${untradeableEntries.length} items recalculated`,
+        );
+      } else {
+        this.logger.log('No enabled untradeable price rules produced a value.');
+      }
+
       this.isFirstFetch = false;
-
-      const modeLabel = shouldForceFull ? 'full' : 'window';
-      this.logger.log(
-        `Prices updated in ${this.pricesHashKey}: ${changedEntries.length} items changed (mode=${modeLabel}, window=${this.changeWindowSeconds}s)`,
-      );
     } catch (error) {
       this.logger.error('Error fetching prices', error);
     }
@@ -145,6 +180,242 @@ export class PricesService implements OnModuleInit {
 
     return result;
   }
+
+  private async buildUntradeableEntries(
+    basePrices: Record<string, Price>,
+    timestamp: number,
+  ): Promise<Array<[string, Price]>> {
+    const rules = await this.priceRuleRepo.find({ where: { isEnabled: true } });
+    if (rules.length === 0) {
+      return [];
+    }
+
+    const entries: Array<[string, Price]> = [];
+
+    for (const rule of rules) {
+      const computed = this.computeRulePrice(rule, basePrices, timestamp);
+      if (computed) {
+        entries.push([String(rule.itemId), computed]);
+      }
+    }
+
+    return entries;
+  }
+
+  private computeRulePrice(
+    rule: ItemPriceRule,
+    basePrices: Record<string, Price>,
+    timestamp: number,
+  ): Price | null {
+    switch (rule.ruleType) {
+      case ItemPriceRuleType.FIXED: {
+        const params = this.parseFixedParams(rule);
+        if (!params) return null;
+        return {
+          low: params.low,
+          high: params.high,
+          lowTime: timestamp,
+          highTime: timestamp,
+        };
+      }
+      case ItemPriceRuleType.RECIPE: {
+        const params = this.parseRecipeParams(rule);
+        if (!params) return null;
+        const totals = this.computeRecipeTotals(params.components, basePrices, rule);
+        if (!totals) return null;
+        return {
+          low: totals.low,
+          high: totals.high,
+          lowTime: timestamp,
+          highTime: timestamp,
+        };
+      }
+      case ItemPriceRuleType.BEST_RECIPE: {
+        const params = this.parseBestRecipeParams(rule);
+        if (!params) return null;
+
+        let bestLow: number | null = null;
+        let bestHigh: number | null = null;
+
+        for (const recipe of params.recipes) {
+          const totals = this.computeRecipeTotals(recipe.components, basePrices, rule);
+          if (!totals) continue;
+
+          bestLow = bestLow === null ? totals.low : Math.min(bestLow, totals.low);
+          bestHigh = bestHigh === null ? totals.high : Math.min(bestHigh, totals.high);
+        }
+
+        if (bestLow === null || bestHigh === null) {
+          this.logger.warn(
+            `Price rule ${rule.itemId} (${rule.ruleType}) skipped: no valid recipes`,
+          );
+          return null;
+        }
+
+        return {
+          low: bestLow,
+          high: bestHigh,
+          lowTime: timestamp,
+          highTime: timestamp,
+        };
+      }
+      default: {
+        const ruleType = String(rule.ruleType);
+        this.logger.warn('Unsupported price rule type for item ' + rule.itemId + ': ' + ruleType);
+        return null;
+      }
+    }
+  }
+
+  private parseFixedParams(rule: ItemPriceRule): { low: number; high: number } | null {
+    const params = this.asRecord(rule.params);
+    if (!params) {
+      this.logger.warn(`Price rule ${rule.itemId} (${rule.ruleType}) has invalid params.`);
+      return null;
+    }
+
+    const low = params.low;
+    const high = params.high;
+
+    if (!this.isFiniteNumber(low) || !this.isFiniteNumber(high)) {
+      this.logger.warn(`Price rule ${rule.itemId} (${rule.ruleType}) has invalid fixed values.`);
+      return null;
+    }
+
+    return { low, high };
+  }
+
+  private parseRecipeParams(rule: ItemPriceRule): RecipeRuleParams | null {
+    const params = this.asRecord(rule.params);
+    if (!params) {
+      this.logger.warn(`Price rule ${rule.itemId} (${rule.ruleType}) has invalid params.`);
+      return null;
+    }
+
+    const components = this.parseComponents(params.components, rule);
+    if (!components) return null;
+
+    return { components };
+  }
+
+  private parseBestRecipeParams(rule: ItemPriceRule): BestRecipeRuleParams | null {
+    const params = this.asRecord(rule.params);
+    if (!params) {
+      this.logger.warn(`Price rule ${rule.itemId} (${rule.ruleType}) has invalid params.`);
+      return null;
+    }
+
+    const rawRecipes = params.recipes;
+    if (!Array.isArray(rawRecipes) || rawRecipes.length === 0) {
+      this.logger.warn(`Price rule ${rule.itemId} (${rule.ruleType}) has no recipes.`);
+      return null;
+    }
+
+    const recipes: RecipeRuleParams[] = [];
+
+    rawRecipes.forEach((recipe, index) => {
+      const recipeObj = this.asRecord(recipe);
+      if (!recipeObj) {
+        this.logger.warn(
+          `Price rule ${rule.itemId} (${rule.ruleType}) has invalid recipe at index ${index}.`,
+        );
+        return;
+      }
+
+      const components = this.parseComponents(recipeObj.components, rule, index);
+      if (!components) return;
+
+      recipes.push({ components });
+    });
+
+    if (recipes.length === 0) {
+      this.logger.warn(`Price rule ${rule.itemId} (${rule.ruleType}) has no valid recipes.`);
+      return null;
+    }
+
+    return { recipes };
+  }
+
+  private parseComponents(
+    raw: unknown,
+    rule: ItemPriceRule,
+    recipeIndex?: number,
+  ): RecipeComponent[] | null {
+    if (!Array.isArray(raw) || raw.length === 0) {
+      const recipeLabel = recipeIndex === undefined ? '' : ` recipe ${recipeIndex}`;
+      this.logger.warn(
+        `Price rule ${rule.itemId} (${rule.ruleType}) has no components${recipeLabel}.`,
+      );
+      return null;
+    }
+
+    const components: RecipeComponent[] = [];
+
+    for (const component of raw) {
+      const componentObj = this.asRecord(component);
+      if (!componentObj) {
+        this.logger.warn(`Price rule ${rule.itemId} (${rule.ruleType}) has invalid components.`);
+        return null;
+      }
+
+      const itemId = componentObj.itemId;
+      const multipliedBy = componentObj.multipliedBy;
+
+      if (!this.isFiniteNumber(itemId) || !this.isFiniteNumber(multipliedBy)) {
+        this.logger.warn(`Price rule ${rule.itemId} (${rule.ruleType}) has invalid components.`);
+        return null;
+      }
+
+      components.push({ itemId, multipliedBy });
+    }
+
+    return components;
+  }
+
+  private computeRecipeTotals(
+    components: RecipeComponent[],
+    basePrices: Record<string, Price>,
+    rule: ItemPriceRule,
+  ): { low: number; high: number } | null {
+    let lowTotal = 0;
+    let highTotal = 0;
+
+    for (const component of components) {
+      const base = basePrices[String(component.itemId)];
+      if (!base || !this.isFiniteNumber(base.low)) {
+        this.logger.warn(
+          `Price rule ${rule.itemId} (${rule.ruleType}) skipped: missing base price for component ${component.itemId}.`,
+        );
+        return null;
+      }
+
+      const lowPrice = base.low;
+      const highPrice = this.isFiniteNumber(base.high) ? base.high : base.low;
+
+      lowTotal += lowPrice * component.multipliedBy;
+      highTotal += highPrice * component.multipliedBy;
+    }
+
+    if (!Number.isFinite(lowTotal) || !Number.isFinite(highTotal)) {
+      this.logger.warn(`Price rule ${rule.itemId} (${rule.ruleType}) produced invalid totals.`);
+      return null;
+    }
+
+    return { low: lowTotal, high: highTotal };
+  }
+
+  private asRecord(value: unknown): Record<string, unknown> | null {
+    if (!value || typeof value !== 'object' || Array.isArray(value)) {
+      return null;
+    }
+
+    return value as Record<string, unknown>;
+  }
+
+  private isFiniteNumber(value: unknown): value is number {
+    return typeof value === 'number' && Number.isFinite(value);
+  }
+
   private isPrice(value: unknown): value is Price {
     if (!value || typeof value !== 'object' || Array.isArray(value)) {
       return false;
