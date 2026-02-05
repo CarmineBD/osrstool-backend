@@ -27,7 +27,10 @@ function loadRedisUrlFromEnvFile(): string | undefined {
     if (sepIndex <= 0) continue;
     const key = trimmed.slice(0, sepIndex).trim();
     if (key !== 'REDIS_URL') continue;
-    const value = trimmed.slice(sepIndex + 1).trim().replace(/^['"]|['"]$/g, '');
+    const value = trimmed
+      .slice(sepIndex + 1)
+      .trim()
+      .replace(/^['"]|['"]$/g, '');
     return value || undefined;
   }
 
