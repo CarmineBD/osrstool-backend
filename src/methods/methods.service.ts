@@ -381,6 +381,7 @@ export class MethodsService implements OnModuleDestroy {
           ...rest,
         });
         variant.slug = await this.generateVariantSlug(method.id, label);
+        await this.variantRepo.save(variant);
         const newItems: VariantIoItem[] = [];
         for (const input of inputs) {
           newItems.push(
@@ -403,6 +404,9 @@ export class MethodsService implements OnModuleDestroy {
               reason: output.reason ?? null,
             }),
           );
+        }
+        if (newItems.length) {
+          await this.ioRepo.save(newItems);
         }
         variant.ioItems = newItems;
         updatedVariants.push(variant);
