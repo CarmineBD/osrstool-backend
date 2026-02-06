@@ -180,6 +180,12 @@ export class MethodsService implements OnModuleDestroy {
     };
   }
 
+  async methodDetailsWithProfitResponseBySlug(slug: string, username?: string) {
+    const method = await this.methodRepo.findOne({ where: { slug } });
+    if (!method) throw new NotFoundException(`Method with slug ${slug} not found`);
+    return this.methodDetailsWithProfitResponse(method.id, username);
+  }
+
   private toDto(entity: Method): MethodDto {
     return MethodDto.fromEntity(entity);
   }
