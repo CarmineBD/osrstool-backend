@@ -18,4 +18,7 @@ export class VariantIoItemSnapshot {
 
   @PrimaryColumn({ type: 'text' })
   type: 'input' | 'output';
+
+  @Column({ type: 'text', nullable: true })
+  reasson: string | null;
 }

@@ -18,8 +18,8 @@ const METHOD_EXAMPLE = {
     {
       id: 'v_456',
       slug: 'karambwan-basic',
-      inputs: [{ id: 3144, quantity: 1 }],
-      outputs: [{ id: 3145, quantity: 1 }],
+      inputs: [{ id: 3144, quantity: 1, reasson: null }],
+      outputs: [{ id: 3145, quantity: 1, reasson: null }],
       actionsPerHour: 1200,
       clickIntensity: 2,
       afkiness: 2,
