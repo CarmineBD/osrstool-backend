@@ -20,5 +20,5 @@ export class VariantIoItemSnapshot {
   type: 'input' | 'output';
 
   @Column({ type: 'text', nullable: true })
-  reasson: string | null;
+  reason: string | null;
 }

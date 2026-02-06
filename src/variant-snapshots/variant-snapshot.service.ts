@@ -46,7 +46,7 @@ export class VariantSnapshotService {
           itemId: io.itemId,
           quantity: io.quantity,
           type: io.type,
-          reasson: io.reasson ?? null,
+          reason: io.reason ?? null,
         }),
       );
       await this.ioRepo.save(items);

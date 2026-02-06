@@ -21,5 +21,5 @@ export class VariantIoItem {
   quantity: number;
 
   @Column({ type: 'text', nullable: true })
-  reasson: string | null;
+  reason: string | null;
 }
