@@ -7,5 +7,5 @@ export class IoItemDto {
   @IsString() type: 'input' | 'output';
   @IsOptional()
   @IsString()
-  reasson?: string | null;
+  reason?: string | null;
 }

@@ -3,8 +3,8 @@ import { VariantRequirements, VariantRecommendations, XpHour } from '../types';
 export interface VariantDto {
   id: string;
   slug: string;
-  inputs: { id: number; quantity: number; reasson?: string | null }[];
-  outputs: { id: number; quantity: number; reasson?: string | null }[];
+  inputs: { id: number; quantity: number; reason?: string | null }[];
+  outputs: { id: number; quantity: number; reason?: string | null }[];
   actionsPerHour?: number;
   label?: string;
   description?: string | null;
@@ -61,7 +61,7 @@ export class MethodDto {
         itemId: number;
         quantity: number;
         type: 'input' | 'output';
-        reasson?: string | null;
+        reason?: string | null;
       }>;
       recommendations: VariantRecommendations | null;
       wilderness: boolean;
@@ -73,14 +73,14 @@ export class MethodDto {
         .map((item) => ({
           id: item.itemId,
           quantity: Number(item.quantity),
-          reasson: item.reasson ?? null,
+          reason: item.reason ?? null,
         }));
       const outputs = variant.ioItems
         .filter((item) => item.type === 'output')
         .map((item) => ({
           id: item.itemId,
           quantity: Number(item.quantity),
-          reasson: item.reasson ?? null,
+          reason: item.reason ?? null,
         }));
       return {
         id: variant.id,

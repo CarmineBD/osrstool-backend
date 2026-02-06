@@ -263,7 +263,7 @@ export class MethodsService implements OnModuleDestroy {
           itemId: input.id,
           type: 'input',
           quantity: input.quantity,
-          reasson: input.reasson ?? null,
+          reason: input.reason ?? null,
         });
         await this.ioRepo.save(io);
       }
@@ -274,7 +274,7 @@ export class MethodsService implements OnModuleDestroy {
           itemId: output.id,
           type: 'output',
           quantity: output.quantity,
-          reasson: output.reasson ?? null,
+          reason: output.reason ?? null,
         });
         await this.ioRepo.save(io);
       }
@@ -348,7 +348,7 @@ export class MethodsService implements OnModuleDestroy {
               itemId: input.id,
               type: 'input',
               quantity: input.quantity,
-              reasson: input.reasson ?? null,
+              reason: input.reason ?? null,
             }),
           );
         }
@@ -359,7 +359,7 @@ export class MethodsService implements OnModuleDestroy {
               itemId: output.id,
               type: 'output',
               quantity: output.quantity,
-              reasson: output.reasson ?? null,
+              reason: output.reason ?? null,
             }),
           );
         }
@@ -389,7 +389,7 @@ export class MethodsService implements OnModuleDestroy {
               itemId: input.id,
               type: 'input',
               quantity: input.quantity,
-              reasson: input.reasson ?? null,
+              reason: input.reason ?? null,
             }),
           );
         }
@@ -400,7 +400,7 @@ export class MethodsService implements OnModuleDestroy {
               itemId: output.id,
               type: 'output',
               quantity: output.quantity,
-              reasson: output.reasson ?? null,
+              reason: output.reason ?? null,
             }),
           );
         }
@@ -478,7 +478,7 @@ export class MethodsService implements OnModuleDestroy {
           itemId: input.id,
           type: 'input',
           quantity: input.quantity,
-          reasson: input.reasson ?? null,
+          reason: input.reason ?? null,
         }),
       );
     }
@@ -489,7 +489,7 @@ export class MethodsService implements OnModuleDestroy {
           itemId: output.id,
           type: 'output',
           quantity: output.quantity,
-          reasson: output.reasson ?? null,
+          reason: output.reason ?? null,
         }),
       );
     }
