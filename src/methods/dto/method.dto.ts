@@ -3,8 +3,8 @@ import { VariantRequirements, VariantRecommendations, XpHour } from '../types';
 export interface VariantDto {
   id: string;
   slug: string;
-  inputs: { id: number; quantity: number }[];
-  outputs: { id: number; quantity: number }[];
+  inputs: { id: number; quantity: number; reasson?: string | null }[];
+  outputs: { id: number; quantity: number; reasson?: string | null }[];
   actionsPerHour?: number;
   label?: string;
   description?: string | null;
@@ -57,7 +57,12 @@ export class MethodDto {
       riskLevel: string;
       requirements: VariantRequirements | null;
       xpHour: XpHour | null;
-      ioItems: Array<{ itemId: number; quantity: number; type: 'input' | 'output' }>;
+      ioItems: Array<{
+        itemId: number;
+        quantity: number;
+        type: 'input' | 'output';
+        reasson?: string | null;
+      }>;
       recommendations: VariantRecommendations | null;
       wilderness: boolean;
     }>;
@@ -65,10 +70,18 @@ export class MethodDto {
     const variants = e.variants.map((variant) => {
       const inputs = variant.ioItems
         .filter((item) => item.type === 'input')
-        .map((item) => ({ id: item.itemId, quantity: Number(item.quantity) }));
+        .map((item) => ({
+          id: item.itemId,
+          quantity: Number(item.quantity),
+          reasson: item.reasson ?? null,
+        }));
       const outputs = variant.ioItems
         .filter((item) => item.type === 'output')
-        .map((item) => ({ id: item.itemId, quantity: Number(item.quantity) }));
+        .map((item) => ({
+          id: item.itemId,
+          quantity: Number(item.quantity),
+          reasson: item.reasson ?? null,
+        }));
       return {
         id: variant.id,
         slug: variant.slug,

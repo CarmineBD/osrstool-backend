@@ -19,4 +19,7 @@ export class VariantIoItem {
 
   @Column({ type: 'numeric' })
   quantity: number;
+
+  @Column({ type: 'text', nullable: true })
+  reasson: string | null;
 }

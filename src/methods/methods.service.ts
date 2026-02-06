@@ -263,6 +263,7 @@ export class MethodsService implements OnModuleDestroy {
           itemId: input.id,
           type: 'input',
           quantity: input.quantity,
+          reasson: input.reasson ?? null,
         });
         await this.ioRepo.save(io);
       }
@@ -273,6 +274,7 @@ export class MethodsService implements OnModuleDestroy {
           itemId: output.id,
           type: 'output',
           quantity: output.quantity,
+          reasson: output.reasson ?? null,
         });
         await this.ioRepo.save(io);
       }
@@ -346,6 +348,7 @@ export class MethodsService implements OnModuleDestroy {
               itemId: input.id,
               type: 'input',
               quantity: input.quantity,
+              reasson: input.reasson ?? null,
             }),
           );
         }
@@ -356,6 +359,7 @@ export class MethodsService implements OnModuleDestroy {
               itemId: output.id,
               type: 'output',
               quantity: output.quantity,
+              reasson: output.reasson ?? null,
             }),
           );
         }
@@ -385,6 +389,7 @@ export class MethodsService implements OnModuleDestroy {
               itemId: input.id,
               type: 'input',
               quantity: input.quantity,
+              reasson: input.reasson ?? null,
             }),
           );
         }
@@ -395,6 +400,7 @@ export class MethodsService implements OnModuleDestroy {
               itemId: output.id,
               type: 'output',
               quantity: output.quantity,
+              reasson: output.reasson ?? null,
             }),
           );
         }
@@ -472,6 +478,7 @@ export class MethodsService implements OnModuleDestroy {
           itemId: input.id,
           type: 'input',
           quantity: input.quantity,
+          reasson: input.reasson ?? null,
         }),
       );
     }
@@ -482,6 +489,7 @@ export class MethodsService implements OnModuleDestroy {
           itemId: output.id,
           type: 'output',
           quantity: output.quantity,
+          reasson: output.reasson ?? null,
         }),
       );
     }
