@@ -131,6 +131,34 @@ export class MethodsController {
     return { data: result.data, meta: { total: result.total, page: p, perPage: pp } };
   }
 
+  @Get('slug/:slug')
+  @ApiOperation({
+    summary: 'Get method detail by slug',
+    description: 'Returns a method with profit data and optional user context.',
+  })
+  @ApiQuery({
+    name: 'username',
+    required: false,
+    description: 'RuneScape username for user context',
+  })
+  @ApiOkResponse({
+    description: 'Method detail',
+    schema: {
+      example: {
+        status: 'ok',
+        data: { method: METHOD_EXAMPLE, user: null },
+        warnings: [],
+        meta: {},
+      },
+    },
+  })
+  async findMethodDetailsWithProfitBySlug(
+    @Param('slug') slug: string,
+    @Query('username') username?: string,
+  ) {
+    return this.svc.methodDetailsWithProfitResponseBySlug(slug, username);
+  }
+
   @Get(':id')
   @ApiOperation({
     summary: 'Get method detail',
