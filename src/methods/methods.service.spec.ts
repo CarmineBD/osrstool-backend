@@ -100,7 +100,7 @@ describe('MethodsService variantCount', () => {
       10,
       userInfo,
       {},
-      { orderBy: 'highProfit', order: 'desc' },
+      { sortBy: 'highProfit', order: 'desc' },
     )) as {
       data: Array<{ variantCount: number; variants: Array<{ id: string }> }>;
       total: number;
@@ -147,7 +147,7 @@ describe('MethodsService variantCount', () => {
       10,
       undefined,
       { showProfitables: true },
-      { orderBy: 'highProfit', order: 'desc' },
+      { sortBy: 'highProfit', order: 'desc' },
     );
 
     expect(result.data).toHaveLength(0);

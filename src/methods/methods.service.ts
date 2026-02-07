@@ -32,17 +32,17 @@ type ProfitRecord = Record<string, Profit>;
 
 interface ListFilters {
   name?: string;
-  categories?: string[];
+  category?: string;
   clickIntensity?: number;
   afkiness?: number;
   riskLevel?: number;
-  xpHour?: number;
+  givesExperience?: boolean;
   skill?: string;
   showProfitables?: boolean;
 }
 
 interface SortOptions {
-  orderBy?: 'clickIntensity' | 'afkiness' | 'xpHour' | 'highProfit';
+  sortBy?: 'clickIntensity' | 'afkiness' | 'xpHour' | 'highProfit';
   order?: 'asc' | 'desc';
 }
 
@@ -51,14 +51,14 @@ interface ListQuery {
   perPage?: string;
   username?: string;
   name?: string;
-  category?: string | string[];
+  category?: string;
   clickIntensity?: string;
   afkiness?: string;
   riskLevel?: string;
-  xpHour?: string;
+  givesExperience?: string;
   skill?: string;
   showProfitables?: string;
-  orderBy?: string;
+  sortBy?: string;
   order?: string;
 }
 
@@ -109,30 +109,34 @@ export class MethodsService implements OnModuleDestroy {
   }
 
   private buildListFilters(query: ListQuery): ListFilters {
-    const { name, category, clickIntensity, afkiness, riskLevel, xpHour, skill, showProfitables } =
-      query;
+    const {
+      name,
+      category,
+      clickIntensity,
+      afkiness,
+      riskLevel,
+      givesExperience,
+      skill,
+      showProfitables,
+    } = query;
     return {
       name,
-      categories: Array.isArray(category)
-        ? category
-        : category
-          ? String(category)
-              .split(',')
-              .map((c) => c.trim())
-          : undefined,
+      category: category ?? undefined,
       clickIntensity: clickIntensity ? Number(clickIntensity) : undefined,
       afkiness: afkiness ? Number(afkiness) : undefined,
       riskLevel: riskLevel ? Number(riskLevel) : undefined,
-      xpHour: xpHour ? Number(xpHour) : undefined,
+      givesExperience:
+        givesExperience === 'true' ? true : givesExperience === 'false' ? false : undefined,
       skill: skill ?? undefined,
-      showProfitables: showProfitables === 'true' || showProfitables === '1',
+      showProfitables:
+        showProfitables === 'true' ? true : showProfitables === 'false' ? false : undefined,
     };
   }
 
   private buildSortOptions(query: ListQuery): SortOptions {
-    const { orderBy = 'highProfit', order = 'desc' } = query;
+    const { sortBy = 'highProfit', order = 'desc' } = query;
     return {
-      orderBy: orderBy as 'clickIntensity' | 'afkiness' | 'xpHour' | 'highProfit',
+      sortBy: sortBy as 'clickIntensity' | 'afkiness' | 'xpHour' | 'highProfit',
       order: (order as 'asc' | 'desc') ?? 'desc',
     };
   }
@@ -532,7 +536,7 @@ export class MethodsService implements OnModuleDestroy {
     perPage = 10,
     userInfo?: any,
     filters: ListFilters = {},
-    sort: SortOptions = { orderBy: 'highProfit', order: 'desc' },
+    sort: SortOptions = { sortBy: 'highProfit', order: 'desc' },
   ): Promise<{ data: any[]; total: number }> {
     // Obtenemos todos los métodos para poder ordenarlos por profit posteriormente
     const allEntities = await this.methodRepo.find({
@@ -614,9 +618,10 @@ export class MethodsService implements OnModuleDestroy {
             Number(v.riskLevel) > filters.riskLevel
           )
             return false;
-          if (filters.xpHour != null) {
+          if (filters.givesExperience != null) {
             const hasXp = (v.xpHour?.length ?? 0) > 0;
-            if ((filters.xpHour === 1 && !hasXp) || (filters.xpHour === 0 && hasXp)) return false;
+            if ((filters.givesExperience && !hasXp) || (!filters.givesExperience && hasXp))
+              return false;
           }
           if (filters.skill && v.xpHour) {
             const skillNames = v.xpHour.map((s) => s.skill.toLowerCase());
@@ -632,9 +637,8 @@ export class MethodsService implements OnModuleDestroy {
         if (filters.name && !m.name.toLowerCase().includes(filters.name.toLowerCase()))
           return false;
         if (
-          filters.categories &&
-          filters.categories.length &&
-          (!m.category || !filters.categories.includes(m.category))
+          filters.category &&
+          (!m.category || m.category.toLowerCase() !== filters.category.toLowerCase())
         )
           return false;
         return m.variants.length > 0;
@@ -655,12 +659,13 @@ export class MethodsService implements OnModuleDestroy {
     enrichedMethods.sort((a, b) => {
       const va = a.variants[0];
       const vb = b.variants[0];
-      switch (sort.orderBy) {
+      switch (sort.sortBy) {
         case 'clickIntensity':
           return comparator(va.clickIntensity ?? 0, vb.clickIntensity ?? 0);
         case 'afkiness':
           return comparator(va.afkiness ?? 0, vb.afkiness ?? 0);
         case 'xpHour':
+          // For xpHour sorting, use the total experience sum of the variant.
           return comparator(getXpSum(va), getXpSum(vb));
         case 'highProfit':
         default:
