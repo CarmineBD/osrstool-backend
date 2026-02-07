@@ -58,11 +58,21 @@ export class MethodsController {
   @ApiQuery({
     name: 'category',
     required: false,
-    description: 'Filter by category (comma-separated)',
+    description: 'Filter by a single category',
   })
   @ApiQuery({ name: 'skill', required: false, description: 'Filter by skill' })
   @ApiQuery({
-    name: 'orderBy',
+    name: 'givesExperience',
+    required: false,
+    description: 'true or false',
+  })
+  @ApiQuery({
+    name: 'showProfitables',
+    required: false,
+    description: 'true or false',
+  })
+  @ApiQuery({
+    name: 'sortBy',
     required: false,
     description: 'Sort by highProfit, clickIntensity, afkiness, xpHour',
   })
@@ -83,14 +93,14 @@ export class MethodsController {
     @Query('perPage') perPage = '10',
     @Query('username') username?: string,
     @Query('name') name?: string,
-    @Query('category') category?: string | string[],
+    @Query('category') category?: string,
     @Query('clickIntensity') clickIntensity?: string,
     @Query('afkiness') afkiness?: string,
     @Query('riskLevel') riskLevel?: string,
-    @Query('xpHour') xpHour?: string,
+    @Query('givesExperience') givesExperience?: string,
     @Query('skill') skill?: string,
     @Query('showProfitables') showProfitables?: string,
-    @Query('orderBy') orderBy = 'highProfit',
+    @Query('sortBy') sortBy = 'highProfit',
     @Query('order') order = 'desc',
   ) {
     return this.svc.listWithProfitResponse({
@@ -102,10 +112,10 @@ export class MethodsController {
       clickIntensity,
       afkiness,
       riskLevel,
-      xpHour,
+      givesExperience,
       skill,
       showProfitables,
-      orderBy,
+      sortBy,
       order,
     });
   }
