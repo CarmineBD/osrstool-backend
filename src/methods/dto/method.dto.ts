@@ -23,6 +23,7 @@ export class MethodDto {
   slug: string;
   description?: string;
   category?: string;
+  enabled: boolean;
   variants: VariantDto[];
 
   constructor(
@@ -31,6 +32,7 @@ export class MethodDto {
     slug: string,
     description: string,
     category: string,
+    enabled: boolean,
     variants: VariantDto[],
   ) {
     this.id = id;
@@ -38,6 +40,7 @@ export class MethodDto {
     this.slug = slug;
     this.description = description;
     this.category = category;
+    this.enabled = enabled;
     this.variants = variants;
   }
   static fromEntity(e: {
@@ -46,6 +49,7 @@ export class MethodDto {
     slug: string;
     description?: string;
     category?: string;
+    enabled: boolean;
     variants: Array<{
       id: string;
       slug: string;
@@ -99,6 +103,14 @@ export class MethodDto {
         wilderness: variant.wilderness,
       };
     });
-    return new MethodDto(e.id, e.name, e.slug, e.description || '', e.category || '', variants);
+    return new MethodDto(
+      e.id,
+      e.name,
+      e.slug,
+      e.description || '',
+      e.category || '',
+      e.enabled,
+      variants,
+    );
   }
 }

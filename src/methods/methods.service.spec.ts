@@ -29,6 +29,7 @@ describe('MethodsService variantCount', () => {
       slug: 'method-1',
       description: undefined,
       category: undefined,
+      enabled: true,
       createdAt: new Date(),
       variants: [
         {
@@ -99,7 +100,7 @@ describe('MethodsService variantCount', () => {
       1,
       10,
       userInfo,
-      {},
+      { enabled: true },
       { sortBy: 'highProfit', order: 'desc' },
     )) as {
       data: Array<{ variantCount: number; variants: Array<{ id: string }> }>;
@@ -146,7 +147,7 @@ describe('MethodsService variantCount', () => {
       1,
       10,
       undefined,
-      { showProfitables: true },
+      { showProfitables: true, enabled: true },
       { sortBy: 'highProfit', order: 'desc' },
     );
 
