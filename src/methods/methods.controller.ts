@@ -1,5 +1,6 @@
-import { Controller, Get, Post, Put, Delete, Param, Body, Query } from '@nestjs/common';
+import { Controller, Get, Post, Put, Delete, Param, Body, Query, Req } from '@nestjs/common';
 import { ApiOkResponse, ApiOperation, ApiQuery, ApiTags } from '@nestjs/swagger';
+import type { Request } from 'express';
 import { MethodsService } from './methods.service';
 import { CreateMethodDto, UpdateMethodDto, UpdateMethodBasicDto, UpdateVariantDto } from './dto';
 
@@ -106,9 +107,10 @@ export class MethodsController {
     @Query('givesExperience') givesExperience?: string,
     @Query('skill') skill?: string,
     @Query('showProfitables') showProfitables?: string,
-    @Query('enabled') enabled?: string,
+    @Query('enabled') enabled?: string | boolean,
     @Query('sortBy') sortBy = 'highProfit',
     @Query('order') order = 'desc',
+    @Req() req?: Request,
   ) {
     return this.svc.listWithProfitResponse({
       page,
@@ -125,6 +127,7 @@ export class MethodsController {
       enabled,
       sortBy,
       order,
+      authorization: req?.headers.authorization,
     });
   }
 

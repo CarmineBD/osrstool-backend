@@ -9,10 +9,11 @@ import { VariantIoItem } from './entities/io-item.entity';
 import { VariantHistory } from './entities/variant-history.entity';
 import { RuneScapeApiService } from './RuneScapeApiService';
 import { VariantSnapshotModule } from '../variant-snapshots/variant-snapshot.module';
+import { User } from '../auth/entities/user.entity';
 
 @Module({
   imports: [
-    TypeOrmModule.forFeature([Method, MethodVariant, VariantIoItem, VariantHistory]),
+    TypeOrmModule.forFeature([Method, MethodVariant, VariantIoItem, VariantHistory, User]),
     VariantSnapshotModule,
   ],
   providers: [MethodsService, RuneScapeApiService],
