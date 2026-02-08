@@ -13,10 +13,11 @@ import { VariantHistoryModule } from './variant-history/variant-history.module';
 import { VariantSnapshotModule } from './variant-snapshots/variant-snapshot.module';
 import { ItemsModule } from './items/items.module';
 import { SystemModule } from './system/system.module';
+import { AuthModule } from './auth/auth.module';
 
 const validateEnv = (config: Record<string, string | undefined>) => {
   const hasDatabaseUrl = Boolean(config.DATABASE_URL && config.DATABASE_URL.trim().length > 0);
-  const required = ['REDIS_URL'];
+  const required = ['REDIS_URL', 'SUPABASE_PROJECT_URL'];
   const requiredDb = ['DB_HOST', 'DB_PORT', 'DB_USER', 'DB_PASS', 'DB_NAME'];
   const missing = required.filter((key) => {
     const value = config[key];
@@ -116,6 +117,7 @@ const validateEnv = (config: Record<string, string | undefined>) => {
     PricesModule,
     ItemsModule,
     SystemModule,
+    AuthModule,
   ],
   providers: [
     {

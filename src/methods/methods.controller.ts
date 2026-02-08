@@ -1,7 +1,29 @@
-import { Controller, Get, Post, Put, Delete, Param, Body, Query } from '@nestjs/common';
-import { ApiOkResponse, ApiOperation, ApiQuery, ApiTags } from '@nestjs/swagger';
+import {
+  Controller,
+  Get,
+  Post,
+  Put,
+  Delete,
+  Param,
+  Body,
+  Query,
+  Req,
+  UseGuards,
+} from '@nestjs/common';
+import {
+  ApiBearerAuth,
+  ApiForbiddenResponse,
+  ApiOkResponse,
+  ApiOperation,
+  ApiQuery,
+  ApiTags,
+  ApiUnauthorizedResponse,
+} from '@nestjs/swagger';
+import type { Request } from 'express';
 import { MethodsService } from './methods.service';
 import { CreateMethodDto, UpdateMethodDto, UpdateMethodBasicDto, UpdateVariantDto } from './dto';
+import { SupabaseAuthGuard } from '../auth/supabase-auth.guard';
+import { SuperAdminGuard } from '../auth/super-admin.guard';
 
 interface PaginatedResult {
   data: any[];
@@ -37,8 +59,12 @@ export class MethodsController {
   constructor(private readonly svc: MethodsService) {}
 
   @Post()
+  @UseGuards(SupabaseAuthGuard, SuperAdminGuard)
+  @ApiBearerAuth()
   @ApiOperation({ summary: 'Create method', description: 'Creates a new method.' })
   @ApiOkResponse({ description: 'Method created', schema: { example: { data: METHOD_EXAMPLE } } })
+  @ApiUnauthorizedResponse({ description: 'Missing, invalid, or expired bearer token' })
+  @ApiForbiddenResponse({ description: 'Only super_admin can modify methods and variants' })
   async create(@Body() dto: CreateMethodDto) {
     const created = await this.svc.create(dto);
     return { data: created };
@@ -106,9 +132,10 @@ export class MethodsController {
     @Query('givesExperience') givesExperience?: string,
     @Query('skill') skill?: string,
     @Query('showProfitables') showProfitables?: string,
-    @Query('enabled') enabled?: string,
+    @Query('enabled') enabled?: string | boolean,
     @Query('sortBy') sortBy = 'highProfit',
     @Query('order') order = 'desc',
+    @Req() req?: Request,
   ) {
     return this.svc.listWithProfitResponse({
       page,
@@ -125,6 +152,7 @@ export class MethodsController {
       enabled,
       sortBy,
       order,
+      authorization: req?.headers.authorization,
     });
   }
 
@@ -203,31 +231,43 @@ export class MethodsController {
   }
 
   @Put(':id')
+  @UseGuards(SupabaseAuthGuard, SuperAdminGuard)
+  @ApiBearerAuth()
   @ApiOperation({ summary: 'Update method', description: 'Updates an existing method.' })
   @ApiOkResponse({ description: 'Method updated', schema: { example: { data: METHOD_EXAMPLE } } })
+  @ApiUnauthorizedResponse({ description: 'Missing, invalid, or expired bearer token' })
+  @ApiForbiddenResponse({ description: 'Only super_admin can modify methods and variants' })
   async update(@Param('id') id: string, @Body() dto: UpdateMethodDto) {
     const updated = await this.svc.update(id, dto);
     return { data: updated };
   }
 
   @Put(':id/basic')
+  @UseGuards(SupabaseAuthGuard, SuperAdminGuard)
+  @ApiBearerAuth()
   @ApiOperation({
     summary: 'Update method (basic)',
     description: 'Updates basic method fields (name, description, category).',
   })
   @ApiOkResponse({ description: 'Method updated', schema: { example: { data: METHOD_EXAMPLE } } })
+  @ApiUnauthorizedResponse({ description: 'Missing, invalid, or expired bearer token' })
+  @ApiForbiddenResponse({ description: 'Only super_admin can modify methods and variants' })
   async updateBasic(@Param('id') id: string, @Body() dto: UpdateMethodBasicDto) {
     const updated = await this.svc.updateBasic(id, dto);
     return { data: updated };
   }
 
   @Put('variant/:id')
+  @UseGuards(SupabaseAuthGuard, SuperAdminGuard)
+  @ApiBearerAuth()
   @ApiOperation({
     summary: 'Update method variant',
     description: 'Updates a variant and optionally generates a snapshot.',
   })
   @ApiQuery({ name: 'generateSnapshot', required: false, description: 'true to generate snapshot' })
   @ApiOkResponse({ description: 'Variant updated', schema: { example: { data: METHOD_EXAMPLE } } })
+  @ApiUnauthorizedResponse({ description: 'Missing, invalid, or expired bearer token' })
+  @ApiForbiddenResponse({ description: 'Only super_admin can modify methods and variants' })
   async updateVariant(
     @Param('id') id: string,
     @Body() dto: UpdateVariantDto,
@@ -239,8 +279,12 @@ export class MethodsController {
   }
 
   @Delete(':id')
+  @UseGuards(SupabaseAuthGuard, SuperAdminGuard)
+  @ApiBearerAuth()
   @ApiOperation({ summary: 'Delete method', description: 'Removes a method by id.' })
   @ApiOkResponse({ description: 'Method removed', schema: { example: { data: null } } })
+  @ApiUnauthorizedResponse({ description: 'Missing, invalid, or expired bearer token' })
+  @ApiForbiddenResponse({ description: 'Only super_admin can modify methods and variants' })
   async remove(@Param('id') id: string) {
     await this.svc.remove(id);
     return { data: null };

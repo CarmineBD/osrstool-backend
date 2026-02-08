@@ -10,18 +10,24 @@ import {
   Patch,
   Post,
   Query,
+  UseGuards,
 } from '@nestjs/common';
 import {
+  ApiBearerAuth,
   ApiBadRequestResponse,
   ApiCreatedResponse,
+  ApiForbiddenResponse,
   ApiNoContentResponse,
   ApiOkResponse,
   ApiOperation,
   ApiQuery,
   ApiTags,
+  ApiUnauthorizedResponse,
 } from '@nestjs/swagger';
 import { ItemsService } from './items.service';
 import { BulkUpsertDto, CreateItemDto, UpdateItemDto } from './dto';
+import { SupabaseAuthGuard } from '../auth/supabase-auth.guard';
+import { SuperAdminGuard } from '../auth/super-admin.guard';
 
 const SORT_WHITELIST = new Set([
   'id',
@@ -172,28 +178,42 @@ export class ItemsController {
   }
 
   @Post()
+  @UseGuards(SupabaseAuthGuard, SuperAdminGuard)
+  @ApiBearerAuth()
   @ApiOperation({ summary: 'Create item', description: 'Creates a new item.' })
   @ApiCreatedResponse({ description: 'Item created', schema: { example: ITEM_EXAMPLE } })
+  @ApiUnauthorizedResponse({ description: 'Missing, invalid, or expired bearer token' })
+  @ApiForbiddenResponse({ description: 'Only super_admin can modify items' })
   async create(@Body() dto: CreateItemDto) {
     return this.svc.create(dto);
   }
 
   @Patch(':id')
+  @UseGuards(SupabaseAuthGuard, SuperAdminGuard)
+  @ApiBearerAuth()
   @ApiOperation({ summary: 'Update item', description: 'Updates an existing item.' })
   @ApiOkResponse({ description: 'Item updated', schema: { example: ITEM_EXAMPLE } })
+  @ApiUnauthorizedResponse({ description: 'Missing, invalid, or expired bearer token' })
+  @ApiForbiddenResponse({ description: 'Only super_admin can modify items' })
   async update(@Param('id', ParseIntPipe) id: number, @Body() dto: UpdateItemDto) {
     return this.svc.update(id, dto);
   }
 
   @Delete(':id')
+  @UseGuards(SupabaseAuthGuard, SuperAdminGuard)
+  @ApiBearerAuth()
   @HttpCode(204)
   @ApiOperation({ summary: 'Delete item', description: 'Removes an item by id.' })
   @ApiNoContentResponse({ description: 'Item removed' })
+  @ApiUnauthorizedResponse({ description: 'Missing, invalid, or expired bearer token' })
+  @ApiForbiddenResponse({ description: 'Only super_admin can modify items' })
   async remove(@Param('id', ParseIntPipe) id: number) {
     await this.svc.remove(id);
   }
 
   @Post('bulk-upsert')
+  @UseGuards(SupabaseAuthGuard, SuperAdminGuard)
+  @ApiBearerAuth()
   @ApiOperation({
     summary: 'Bulk upsert items',
     description: 'Creates or updates items in bulk and returns counts.',
@@ -202,6 +222,8 @@ export class ItemsController {
     description: 'Upsert result',
     schema: { example: { created: 10, updated: 5 } },
   })
+  @ApiUnauthorizedResponse({ description: 'Missing, invalid, or expired bearer token' })
+  @ApiForbiddenResponse({ description: 'Only super_admin can modify items' })
   async bulkUpsert(@Body() dto: BulkUpsertDto) {
     return this.svc.bulkUpsert(dto.items, dto.touchLastSyncedAt ?? true);
   }

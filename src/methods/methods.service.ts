@@ -3,6 +3,8 @@ import {
   NotFoundException,
   OnModuleDestroy,
   BadRequestException,
+  UnauthorizedException,
+  ForbiddenException,
 } from '@nestjs/common';
 import { InjectRepository } from '@nestjs/typeorm';
 import { Repository, In, LessThanOrEqual, Not } from 'typeorm';
@@ -22,6 +24,7 @@ import { XpHour, UserInfo } from './types';
 import { RuneScapeApiService } from './RuneScapeApiService';
 import { computeMissingRequirements, filterMethodsByUserStats } from './helpers/requirements';
 import { ConfigService } from '@nestjs/config';
+import { User } from '../auth/entities/user.entity';
 
 // Definimos tipos para mayor seguridad
 interface Profit {
@@ -59,9 +62,10 @@ interface ListQuery {
   givesExperience?: string;
   skill?: string;
   showProfitables?: string;
-  enabled?: string;
+  enabled?: string | boolean;
   sortBy?: string;
   order?: string;
+  authorization?: string;
 }
 
 @Injectable()
@@ -80,6 +84,9 @@ export class MethodsService implements OnModuleDestroy {
 
     @InjectRepository(VariantHistory)
     private readonly historyRepo: Repository<VariantHistory>,
+
+    @InjectRepository(User)
+    private readonly userRepo: Repository<User>,
 
     private readonly snapshotSvc: VariantSnapshotService,
     private readonly runescapeApi: RuneScapeApiService,
@@ -123,9 +130,7 @@ export class MethodsService implements OnModuleDestroy {
       enabled,
     } = query;
 
-    if (enabled != null && enabled !== 'true' && enabled !== 'false') {
-      throw new BadRequestException('enabled must be "true" or "false"');
-    }
+    const enabledParsed = this.parseBooleanQueryParam(enabled, 'enabled');
 
     return {
       name,
@@ -138,8 +143,82 @@ export class MethodsService implements OnModuleDestroy {
       skill: skill ?? undefined,
       showProfitables:
         showProfitables === 'true' ? true : showProfitables === 'false' ? false : undefined,
-      enabled: enabled == null ? true : enabled === 'true',
+      enabled: enabledParsed ?? true,
     };
+  }
+
+  private parseBooleanQueryParam(
+    value: string | boolean | undefined,
+    paramName: string,
+  ): boolean | undefined {
+    if (value == null) return undefined;
+    if (typeof value === 'boolean') return value;
+
+    const normalized = value.trim().toLowerCase();
+    if (normalized === 'true' || normalized === '1') return true;
+    if (normalized === 'false' || normalized === '0') return false;
+
+    throw new BadRequestException(`${paramName} must be a boolean value`);
+  }
+
+  private async verifySupabaseToken(authorization?: string): Promise<string> {
+    if (!authorization) {
+      throw new UnauthorizedException('Missing Authorization header');
+    }
+
+    const [scheme, token] = authorization.split(' ');
+    if (scheme !== 'Bearer' || !token) {
+      throw new UnauthorizedException(
+        'Invalid Authorization header format. Expected: Bearer <token>',
+      );
+    }
+
+    const projectUrlRaw = this.config.get<string>('SUPABASE_PROJECT_URL');
+    if (!projectUrlRaw || projectUrlRaw.trim().length === 0) {
+      throw new UnauthorizedException('Server auth configuration is missing');
+    }
+
+    const projectUrl = projectUrlRaw.replace(/\/+$/, '');
+    const issuer = `${projectUrl}/auth/v1`;
+    const audience = this.config.get<string>('SUPABASE_JWT_AUD')?.trim();
+
+    let jwksUrl: URL;
+    try {
+      jwksUrl = new URL(`${projectUrl}/auth/v1/.well-known/jwks.json`);
+    } catch {
+      throw new UnauthorizedException('Invalid Supabase project URL configuration');
+    }
+
+    const { createRemoteJWKSet, jwtVerify } = await import('jose');
+    const jwks = createRemoteJWKSet(jwksUrl);
+    let payload: Record<string, unknown>;
+    try {
+      const verified = await jwtVerify(token, jwks, {
+        issuer,
+        audience: audience && audience.length > 0 ? audience : undefined,
+      });
+      payload = verified.payload;
+    } catch {
+      throw new UnauthorizedException('Invalid or expired token');
+    }
+
+    const subject = payload.sub;
+    if (!subject || typeof subject !== 'string') {
+      throw new UnauthorizedException('Authenticated token does not include user id');
+    }
+
+    return subject;
+  }
+
+  private async assertSuperAdminForDisabledMethods(authorization?: string): Promise<void> {
+    // Accessing disabled methods is an admin-only capability.
+    // We require a valid Supabase JWT and then enforce role from our DB users table.
+    const userId = await this.verifySupabaseToken(authorization);
+    const user = await this.userRepo.findOne({ where: { id: userId } });
+
+    if (!user || user.role !== 'super_admin') {
+      throw new ForbiddenException('Only super_admin can request enabled=false');
+    }
   }
 
   private buildSortOptions(query: ListQuery): SortOptions {
@@ -157,6 +236,9 @@ export class MethodsService implements OnModuleDestroy {
 
     const { userInfo, warnings } = await this.fetchUserInfo(username);
     const filters = this.buildListFilters(query);
+    if (filters.enabled === false) {
+      await this.assertSuperAdminForDisabledMethods(query.authorization);
+    }
     const sortOptions = this.buildSortOptions(query);
 
     const result = await this.findAllWithProfit(p, pp, userInfo ?? undefined, filters, sortOptions);

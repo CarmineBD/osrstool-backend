@@ -8,6 +8,7 @@ import { VariantSnapshotService } from '../variant-snapshots/variant-snapshot.se
 import { RuneScapeApiService } from './RuneScapeApiService';
 import { buildMethodFixture } from '../testing/fixtures';
 import type { ConfigService } from '@nestjs/config';
+import { User } from '../auth/entities/user.entity';
 
 const call = jest.fn();
 const quit = jest.fn();
@@ -78,6 +79,7 @@ describe('MethodsService variantCount', () => {
       {} as Repository<MethodVariant>,
       {} as Repository<VariantIoItem>,
       {} as Repository<VariantHistory>,
+      {} as Repository<User>,
       {} as VariantSnapshotService,
       {} as RuneScapeApiService,
       { get: jest.fn().mockReturnValue('redis://localhost:6379') } as unknown as ConfigService,
@@ -127,6 +129,7 @@ describe('MethodsService variantCount', () => {
       {} as Repository<MethodVariant>,
       {} as Repository<VariantIoItem>,
       {} as Repository<VariantHistory>,
+      {} as Repository<User>,
       {} as VariantSnapshotService,
       {} as RuneScapeApiService,
       { get: jest.fn().mockReturnValue('redis://localhost:6379') } as unknown as ConfigService,
