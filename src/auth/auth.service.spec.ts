@@ -23,7 +23,7 @@ describe('AuthService', () => {
       plan: 'free',
       role: 'user',
     } as User);
-    repo.save.mockImplementation(async (value) => value as User);
+    repo.save.mockImplementation((value) => Promise.resolve(value as User));
 
     const result = await service.getOrCreateUser({
       id: 'a42cf41b-2e77-4478-aedf-6cb1f8bce205',
@@ -66,7 +66,7 @@ describe('AuthService', () => {
       role: 'user',
     } as User;
     repo.findOne.mockResolvedValue(existing);
-    repo.save.mockImplementation(async (value) => value as User);
+    repo.save.mockImplementation((value) => Promise.resolve(value as User));
 
     const result = await service.getOrCreateUser({
       id: existing.id,
