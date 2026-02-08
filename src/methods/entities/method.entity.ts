@@ -27,6 +27,9 @@ export class Method {
   @Column({ nullable: true })
   category?: string;
 
+  @Column({ type: 'boolean', default: true })
+  enabled: boolean;
+
   @CreateDateColumn({ name: 'created_at' })
   createdAt: Date;
 

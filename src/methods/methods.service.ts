@@ -39,6 +39,7 @@ interface ListFilters {
   givesExperience?: boolean;
   skill?: string;
   showProfitables?: boolean;
+  enabled: boolean;
 }
 
 interface SortOptions {
@@ -58,6 +59,7 @@ interface ListQuery {
   givesExperience?: string;
   skill?: string;
   showProfitables?: string;
+  enabled?: string;
   sortBy?: string;
   order?: string;
 }
@@ -118,7 +120,13 @@ export class MethodsService implements OnModuleDestroy {
       givesExperience,
       skill,
       showProfitables,
+      enabled,
     } = query;
+
+    if (enabled != null && enabled !== 'true' && enabled !== 'false') {
+      throw new BadRequestException('enabled must be "true" or "false"');
+    }
+
     return {
       name,
       category: category ?? undefined,
@@ -130,6 +138,7 @@ export class MethodsService implements OnModuleDestroy {
       skill: skill ?? undefined,
       showProfitables:
         showProfitables === 'true' ? true : showProfitables === 'false' ? false : undefined,
+      enabled: enabled == null ? true : enabled === 'true',
     };
   }
 
@@ -245,8 +254,8 @@ export class MethodsService implements OnModuleDestroy {
   }
 
   async create(createDto: CreateMethodDto): Promise<MethodDto> {
-    const { name, description, category, variants } = createDto;
-    const method = this.methodRepo.create({ name, description, category });
+    const { name, description, category, enabled, variants } = createDto;
+    const method = this.methodRepo.create({ name, description, category, enabled });
     method.slug = await this.generateMethodSlug(name);
     await this.methodRepo.save(method);
 
@@ -320,7 +329,7 @@ export class MethodsService implements OnModuleDestroy {
       throw new NotFoundException(`Method ${id} not found`);
     }
 
-    const { variants = [], name, description, category } = updateDto;
+    const { variants = [], name, description, category, enabled } = updateDto;
 
     if (name !== undefined) {
       method.name = name;
@@ -328,6 +337,7 @@ export class MethodsService implements OnModuleDestroy {
     }
     if (description !== undefined) method.description = description;
     if (category !== undefined) method.category = category;
+    if (enabled !== undefined) method.enabled = enabled;
 
     const existingVariants = new Map(method.variants.map((v) => [v.id, v]));
     const updatedVariants: MethodVariant[] = [];
@@ -535,11 +545,12 @@ export class MethodsService implements OnModuleDestroy {
     page = 1,
     perPage = 10,
     userInfo?: any,
-    filters: ListFilters = {},
+    filters: ListFilters = { enabled: true },
     sort: SortOptions = { sortBy: 'highProfit', order: 'desc' },
   ): Promise<{ data: any[]; total: number }> {
     // Obtenemos todos los métodos para poder ordenarlos por profit posteriormente
     const allEntities = await this.methodRepo.find({
+      where: { enabled: filters.enabled },
       relations: ['variants', 'variants.ioItems'],
     });
     const variantCounts = allEntities.reduce<Record<string, number>>((acc, method) => {
@@ -780,6 +791,7 @@ export class MethodsService implements OnModuleDestroy {
       slug: methodDto.slug,
       description: methodDto.description,
       category: methodDto.category,
+      enabled: methodDto.enabled,
       variants: enrichedVariants,
     };
   }

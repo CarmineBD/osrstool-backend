@@ -14,6 +14,7 @@ const METHOD_EXAMPLE = {
   slug: 'cooked-karambwan',
   description: 'Cook karambwans for profit.',
   category: 'Cooking',
+  enabled: true,
   variants: [
     {
       id: 'v_456',
@@ -72,6 +73,11 @@ export class MethodsController {
     description: 'true or false',
   })
   @ApiQuery({
+    name: 'enabled',
+    required: false,
+    description: 'true or false (default true)',
+  })
+  @ApiQuery({
     name: 'sortBy',
     required: false,
     description: 'Sort by highProfit, clickIntensity, afkiness, xpHour',
@@ -100,6 +106,7 @@ export class MethodsController {
     @Query('givesExperience') givesExperience?: string,
     @Query('skill') skill?: string,
     @Query('showProfitables') showProfitables?: string,
+    @Query('enabled') enabled?: string,
     @Query('sortBy') sortBy = 'highProfit',
     @Query('order') order = 'desc',
   ) {
@@ -115,6 +122,7 @@ export class MethodsController {
       givesExperience,
       skill,
       showProfitables,
+      enabled,
       sortBy,
       order,
     });
