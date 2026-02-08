@@ -54,6 +54,8 @@ Available variables:
 - `APP_VERSION`: Version label for `/version` (defaults to `package.json`).
 - `GIT_COMMIT`: Commit hash for `/version`.
 - `BUILD_DATE`: Build date for `/version` (ISO 8601 recommended).
+- `SUPABASE_PROJECT_URL`: Supabase project URL (e.g. `https://xyzcompany.supabase.co`) used to resolve JWKS and validate issuer.
+- `SUPABASE_JWT_AUD`: Expected JWT audience (optional, defaults to not enforced if empty; common value: `authenticated`).
 
 ## System endpoints
 
@@ -88,6 +90,25 @@ npm run test:cov
 
 - If you use Docker, default DB/Redis settings are defined in `docker-compose.yml` and no `.env` is required.
 - Keep `.env` out of version control.
+
+## Supabase Auth test endpoint
+
+- `GET /me` is protected and expects `Authorization: Bearer <access_token>`.
+- Only `/me` is protected; existing endpoints are unchanged.
+- Token validation is done with Supabase JWKS: `${SUPABASE_PROJECT_URL}/auth/v1/.well-known/jwks.json`.
+- Issuer is validated as `${SUPABASE_PROJECT_URL}/auth/v1`.
+- In frontend, get the token with Supabase Auth:
+
+```ts
+const { data } = await supabase.auth.getSession();
+const token = data.session?.access_token;
+```
+
+- Call backend:
+
+```bash
+curl -H "Authorization: Bearer <access_token>" http://localhost:3000/me
+```
   
 ## Production tips
 
