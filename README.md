@@ -97,11 +97,51 @@ npm run test:cov
 - Only `/me` is protected; existing endpoints are unchanged.
 - Token validation is done with Supabase JWKS: `${SUPABASE_PROJECT_URL}/auth/v1/.well-known/jwks.json`.
 - Issuer is validated as `${SUPABASE_PROJECT_URL}/auth/v1`.
+- `GET /me` auto-upserts the authenticated user in `public.users`:
+  - Creates user if missing with `plan='free'` and `role='user'`.
+  - Returns `{ data: { id, email, plan, role } }`.
+  - If user exists and email changed, updates email and `updated_at`.
+
+## SQL setup for `public.users`
+
+This repository does not include TypeORM migrations yet, so create the table manually in Railway/Postgres:
+
+```sql
+CREATE TABLE IF NOT EXISTS public.users (
+  id uuid PRIMARY KEY,
+  email text NOT NULL,
+  plan text NOT NULL DEFAULT 'free',
+  role text NOT NULL DEFAULT 'user',
+  created_at timestamptz NOT NULL DEFAULT now(),
+  updated_at timestamptz NOT NULL DEFAULT now()
+);
+```
+
+Optional trigger to auto-update `updated_at` on DB-side updates:
+
+```sql
+CREATE OR REPLACE FUNCTION public.set_updated_at()
+RETURNS trigger AS $$
+BEGIN
+  NEW.updated_at = now();
+  RETURN NEW;
+END;
+$$ LANGUAGE plpgsql;
+
+DROP TRIGGER IF EXISTS users_set_updated_at ON public.users;
+CREATE TRIGGER users_set_updated_at
+BEFORE UPDATE ON public.users
+FOR EACH ROW
+EXECUTE FUNCTION public.set_updated_at();
+```
 - In frontend, get the token with Supabase Auth:
 
 ```ts
 const { data } = await supabase.auth.getSession();
 const token = data.session?.access_token;
+const me = await fetch('http://localhost:3000/me', {
+  headers: { Authorization: `Bearer ${token}` },
+}).then((r) => r.json());
 ```
 
 - Call backend:
