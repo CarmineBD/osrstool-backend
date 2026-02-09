@@ -703,8 +703,9 @@ export class MethodsService implements OnModuleDestroy {
             v.clickIntensity > filters.clickIntensity
           )
             return false;
-          if (filters.afkiness != null && v.afkiness != null && v.afkiness > filters.afkiness)
-            return false;
+          if (filters.afkiness != null) {
+            if (v.afkiness == null || v.afkiness <= filters.afkiness) return false;
+          }
           if (
             filters.riskLevel != null &&
             v.riskLevel != null &&
