@@ -9,6 +9,7 @@ import { RuneScapeApiService } from './RuneScapeApiService';
 import { buildMethodFixture } from '../testing/fixtures';
 import type { ConfigService } from '@nestjs/config';
 import { User } from '../auth/entities/user.entity';
+import { ForbiddenException } from '@nestjs/common';
 
 const call = jest.fn();
 const quit = jest.fn();
@@ -200,5 +201,71 @@ describe('MethodsService variantCount', () => {
     expect(result.data).toHaveLength(1);
     expect(result.data[0].variants).toHaveLength(1);
     expect(result.data[0].variants[0].id).toBe('v2');
+  });
+
+  it('throws when username is sent by a non-registered user', async () => {
+    const methodRepo = {
+      find: jest.fn().mockResolvedValue([]),
+    } as unknown as Repository<Method>;
+
+    const userRepo = {
+      findOne: jest.fn().mockResolvedValue(null),
+    } as unknown as Repository<User>;
+
+    const service = new MethodsService(
+      methodRepo,
+      {} as Repository<MethodVariant>,
+      {} as Repository<VariantIoItem>,
+      {} as Repository<VariantHistory>,
+      userRepo,
+      {} as VariantSnapshotService,
+      {} as RuneScapeApiService,
+      { get: jest.fn().mockReturnValue('redis://localhost:6379') } as unknown as ConfigService,
+    );
+
+    jest.spyOn(service as any, 'verifySupabaseToken').mockResolvedValue('user-1');
+
+    await expect(
+      service.listWithProfitResponse({
+        page: '1',
+        perPage: '10',
+        username: 'zezima',
+        authorization: 'Bearer token',
+      }),
+    ).rejects.toBeInstanceOf(ForbiddenException);
+  });
+
+  it('does not require auth when username is not sent', async () => {
+    const methodRepo = {
+      find: jest.fn().mockResolvedValue([]),
+    } as unknown as Repository<Method>;
+
+    const userRepo = {
+      findOne: jest.fn(),
+    } as unknown as Repository<User>;
+
+    const service = new MethodsService(
+      methodRepo,
+      {} as Repository<MethodVariant>,
+      {} as Repository<VariantIoItem>,
+      {} as Repository<VariantHistory>,
+      userRepo,
+      {} as VariantSnapshotService,
+      {} as RuneScapeApiService,
+      { get: jest.fn().mockReturnValue('redis://localhost:6379') } as unknown as ConfigService,
+    );
+
+    const verifyTokenSpy = jest
+      .spyOn(service as any, 'verifySupabaseToken')
+      .mockResolvedValue('user-1');
+
+    const result = await service.listWithProfitResponse({
+      page: '1',
+      perPage: '10',
+      authorization: undefined,
+    });
+
+    expect(verifyTokenSpy).not.toHaveBeenCalled();
+    expect(result.status).toBe('ok');
   });
 });

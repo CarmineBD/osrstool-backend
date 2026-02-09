@@ -201,8 +201,13 @@ export class MethodsController {
   async findMethodDetailsWithProfitBySlug(
     @Param('slug') slug: string,
     @Query('username') username?: string,
+    @Req() req?: Request,
   ) {
-    return this.svc.methodDetailsWithProfitResponseBySlug(slug, username);
+    return this.svc.methodDetailsWithProfitResponseBySlug(
+      slug,
+      username,
+      req?.headers.authorization,
+    );
   }
 
   @Get(':id')
@@ -226,8 +231,12 @@ export class MethodsController {
       },
     },
   })
-  async findMethodDetailsWithProfit(@Param('id') id: string, @Query('username') username?: string) {
-    return this.svc.methodDetailsWithProfitResponse(id, username);
+  async findMethodDetailsWithProfit(
+    @Param('id') id: string,
+    @Query('username') username?: string,
+    @Req() req?: Request,
+  ) {
+    return this.svc.methodDetailsWithProfitResponse(id, username, req?.headers.authorization);
   }
 
   @Put(':id')

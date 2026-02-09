@@ -221,6 +221,20 @@ export class MethodsService implements OnModuleDestroy {
     }
   }
 
+  private async assertRegisteredUserForUsername(
+    username?: string,
+    authorization?: string,
+  ): Promise<void> {
+    if (!username) return;
+
+    const userId = await this.verifySupabaseToken(authorization);
+    const user = await this.userRepo.findOne({ where: { id: userId } });
+
+    if (!user) {
+      throw new ForbiddenException('Only registered users can use username query parameter');
+    }
+  }
+
   private buildSortOptions(query: ListQuery): SortOptions {
     const { sortBy = 'highProfit', order = 'desc' } = query;
     return {
@@ -234,6 +248,7 @@ export class MethodsService implements OnModuleDestroy {
     const p = parseInt(page, 10);
     const pp = parseInt(perPage, 10);
 
+    await this.assertRegisteredUserForUsername(username, query.authorization);
     const { userInfo, warnings } = await this.fetchUserInfo(username);
     const filters = this.buildListFilters(query);
     if (filters.enabled === false) {
@@ -258,7 +273,8 @@ export class MethodsService implements OnModuleDestroy {
     };
   }
 
-  async methodDetailsWithProfitResponse(id: string, username?: string) {
+  async methodDetailsWithProfitResponse(id: string, username?: string, authorization?: string) {
+    await this.assertRegisteredUserForUsername(username, authorization);
     const { userInfo, warnings } = await this.fetchUserInfo(username);
     const method = (await this.findMethodDetailsWithProfit(
       id,
@@ -275,10 +291,14 @@ export class MethodsService implements OnModuleDestroy {
     };
   }
 
-  async methodDetailsWithProfitResponseBySlug(slug: string, username?: string) {
+  async methodDetailsWithProfitResponseBySlug(
+    slug: string,
+    username?: string,
+    authorization?: string,
+  ) {
     const method = await this.methodRepo.findOne({ where: { slug } });
     if (!method) throw new NotFoundException(`Method with slug ${slug} not found`);
-    return this.methodDetailsWithProfitResponse(method.id, username);
+    return this.methodDetailsWithProfitResponse(method.id, username, authorization);
   }
 
   private toDto(entity: Method): MethodDto {
