@@ -1,5 +1,6 @@
 import {
   Controller,
+  ForbiddenException,
   Get,
   Post,
   Put,
@@ -24,11 +25,14 @@ import { MethodsService } from './methods.service';
 import { CreateMethodDto, UpdateMethodDto, UpdateMethodBasicDto, UpdateVariantDto } from './dto';
 import { SupabaseAuthGuard } from '../auth/supabase-auth.guard';
 import { SuperAdminGuard } from '../auth/super-admin.guard';
+import type { AuthenticatedUser } from '../auth/auth.types';
 
 interface PaginatedResult {
   data: any[];
   total: number;
 }
+
+type RequestWithUser = Request & { user?: AuthenticatedUser };
 
 const METHOD_EXAMPLE = {
   id: 'm_123',
@@ -37,6 +41,8 @@ const METHOD_EXAMPLE = {
   description: 'Cook karambwans for profit.',
   category: 'Cooking',
   enabled: true,
+  likes: 120,
+  likedByMe: false,
   variants: [
     {
       id: 'v_456',
@@ -106,7 +112,12 @@ export class MethodsController {
   @ApiQuery({
     name: 'sortBy',
     required: false,
-    description: 'Sort by highProfit, clickIntensity, afkiness, xpHour',
+    description: 'Sort by highProfit, clickIntensity, afkiness, xpHour, likes',
+  })
+  @ApiQuery({
+    name: 'likedByMe',
+    required: false,
+    description: 'true to return only methods liked by the authenticated user',
   })
   @ApiQuery({ name: 'order', required: false, description: 'asc or desc' })
   @ApiOkResponse({
@@ -133,6 +144,7 @@ export class MethodsController {
     @Query('skill') skill?: string,
     @Query('showProfitables') showProfitables?: string,
     @Query('enabled') enabled?: string | boolean,
+    @Query('likedByMe') likedByMe?: string | boolean,
     @Query('sortBy') sortBy = 'highProfit',
     @Query('order') order = 'desc',
     @Req() req?: Request,
@@ -150,13 +162,48 @@ export class MethodsController {
       skill,
       showProfitables,
       enabled,
+      likedByMe,
       sortBy,
       order,
       authorization: req?.headers.authorization,
     });
   }
+  @Post(':methodId/like')
+  @UseGuards(SupabaseAuthGuard)
+  @ApiBearerAuth()
+  @ApiOperation({
+    summary: 'Like method',
+    description: 'Creates a like for the authenticated user. Idempotent if already liked.',
+  })
+  @ApiOkResponse({ description: 'Like created', schema: { example: { data: { liked: true } } } })
+  @ApiUnauthorizedResponse({ description: 'Missing, invalid, or expired bearer token' })
+  async likeMethod(@Param('methodId') methodId: string, @Req() req: RequestWithUser) {
+    if (!req.user?.id) {
+      throw new ForbiddenException('Authenticated user id is required');
+    }
 
-  // Nuevo endpoint para obtener método con datos actualizados desde Redis
+    await this.svc.likeMethod(methodId, req.user.id, req.user.email);
+    return { data: { liked: true } };
+  }
+
+  @Delete(':methodId/like')
+  @UseGuards(SupabaseAuthGuard)
+  @ApiBearerAuth()
+  @ApiOperation({
+    summary: 'Unlike method',
+    description: 'Removes the like for the authenticated user.',
+  })
+  @ApiOkResponse({ description: 'Like removed', schema: { example: { data: { liked: false } } } })
+  @ApiUnauthorizedResponse({ description: 'Missing, invalid, or expired bearer token' })
+  async unlikeMethod(@Param('methodId') methodId: string, @Req() req: RequestWithUser) {
+    if (!req.user?.id) {
+      throw new ForbiddenException('Authenticated user id is required');
+    }
+
+    await this.svc.unlikeMethod(methodId, req.user.id);
+    return { data: { liked: false } };
+  }
+
   @Get('redis')
   @ApiOperation({
     summary: 'List methods (Redis)',
@@ -202,7 +249,7 @@ export class MethodsController {
     @Param('slug') slug: string,
     @Query('username') username?: string,
     @Req() req?: Request,
-  ) {
+  ): Promise<unknown> {
     return this.svc.methodDetailsWithProfitResponseBySlug(
       slug,
       username,
@@ -235,7 +282,7 @@ export class MethodsController {
     @Param('id') id: string,
     @Query('username') username?: string,
     @Req() req?: Request,
-  ) {
+  ): Promise<unknown> {
     return this.svc.methodDetailsWithProfitResponse(id, username, req?.headers.authorization);
   }
 

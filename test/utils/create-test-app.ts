@@ -12,6 +12,8 @@ import { VariantIoItem } from '../../src/methods/entities/io-item.entity';
 import { VariantHistory } from '../../src/methods/entities/variant-history.entity';
 import { VariantSnapshot } from '../../src/methods/entities/variant-snapshot.entity';
 import { VariantIoItemSnapshot } from '../../src/methods/entities/io-item-snapshot.entity';
+import { User } from '../../src/auth/entities/user.entity';
+import { MethodLike } from '../../src/methods/entities/method-like.entity';
 
 export interface TestApp {
   app: INestApplication;
@@ -43,6 +45,8 @@ export const createTestApp = async (): Promise<TestApp> => {
           VariantHistory,
           VariantSnapshot,
           VariantIoItemSnapshot,
+          User,
+          MethodLike,
         ],
         synchronize: true,
         logging: false,

@@ -19,7 +19,7 @@ type RequestWithUser = Request & { user: AuthenticatedUser };
 export class AuthController {
   constructor(private readonly authService: AuthService) {}
 
-  @Get('me')
+  @Get(['me', 'users/me'])
   @UseGuards(SupabaseAuthGuard)
   @ApiBearerAuth()
   @ApiOperation({
@@ -35,6 +35,7 @@ export class AuthController {
           email: 'user@example.com',
           plan: 'free',
           role: 'user',
+          likes: 3,
         },
       },
     },
@@ -50,6 +51,7 @@ export class AuthController {
       id: req.user.id,
       email: req.user.email,
     });
+    const likes = await this.authService.getGivenLikesCount(user.id);
 
     return {
       data: {
@@ -57,6 +59,7 @@ export class AuthController {
         email: user.email,
         plan: user.plan,
         role: user.role,
+        likes,
       },
     };
   }
