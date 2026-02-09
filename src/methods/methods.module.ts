@@ -7,6 +7,7 @@ import { Method } from './entities/method.entity';
 import { MethodVariant } from './entities/variant.entity';
 import { VariantIoItem } from './entities/io-item.entity';
 import { VariantHistory } from './entities/variant-history.entity';
+import { MethodLike } from './entities/method-like.entity';
 import { RuneScapeApiService } from './RuneScapeApiService';
 import { VariantSnapshotModule } from '../variant-snapshots/variant-snapshot.module';
 import { User } from '../auth/entities/user.entity';
@@ -14,7 +15,14 @@ import { AuthModule } from '../auth/auth.module';
 
 @Module({
   imports: [
-    TypeOrmModule.forFeature([Method, MethodVariant, VariantIoItem, VariantHistory, User]),
+    TypeOrmModule.forFeature([
+      Method,
+      MethodVariant,
+      VariantIoItem,
+      VariantHistory,
+      MethodLike,
+      User,
+    ]),
     VariantSnapshotModule,
     AuthModule,
   ],

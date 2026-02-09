@@ -12,6 +12,7 @@ import { Method } from './entities/method.entity';
 import { MethodVariant } from './entities/variant.entity';
 import { VariantIoItem } from './entities/io-item.entity';
 import { VariantHistory } from './entities/variant-history.entity';
+import { MethodLike } from './entities/method-like.entity';
 import { CreateMethodDto } from './dto/create-method.dto';
 import { UpdateMethodDto } from './dto/update-method.dto';
 import { UpdateMethodBasicDto } from './dto/update-method-basic.dto';
@@ -46,7 +47,7 @@ interface ListFilters {
 }
 
 interface SortOptions {
-  sortBy?: 'clickIntensity' | 'afkiness' | 'xpHour' | 'highProfit';
+  sortBy?: 'clickIntensity' | 'afkiness' | 'xpHour' | 'highProfit' | 'likes';
   order?: 'asc' | 'desc';
 }
 
@@ -63,9 +64,27 @@ interface ListQuery {
   skill?: string;
   showProfitables?: string;
   enabled?: string | boolean;
+  likedByMe?: string | boolean;
   sortBy?: string;
   order?: string;
   authorization?: string;
+}
+
+interface ListLikeOptions {
+  likedByUserId?: string;
+  onlyLikedByMe?: boolean;
+}
+
+interface MethodDetailsWithProfit {
+  id: string;
+  name: string;
+  slug: string;
+  description?: string;
+  category?: string;
+  enabled: boolean;
+  likes: number;
+  likedByMe?: boolean;
+  variants: Array<Record<string, unknown>>;
 }
 
 @Injectable()
@@ -84,6 +103,9 @@ export class MethodsService implements OnModuleDestroy {
 
     @InjectRepository(VariantHistory)
     private readonly historyRepo: Repository<VariantHistory>,
+
+    @InjectRepository(MethodLike)
+    private readonly methodLikeRepo: Repository<MethodLike>,
 
     @InjectRepository(User)
     private readonly userRepo: Repository<User>,
@@ -210,6 +232,91 @@ export class MethodsService implements OnModuleDestroy {
     return subject;
   }
 
+  private async resolveAuthenticatedUserId(authorization?: string): Promise<string | null> {
+    if (!authorization) return null;
+    return this.verifySupabaseToken(authorization);
+  }
+
+  private async ensureMethodExists(methodId: string): Promise<void> {
+    const methodExists = await this.methodRepo.exists({ where: { id: methodId } });
+    if (!methodExists) {
+      throw new NotFoundException(`Method ${methodId} not found`);
+    }
+  }
+
+  private async ensureUserExists(userId: string, email?: string | null): Promise<void> {
+    const existingUser = await this.userRepo.findOne({ where: { id: userId } });
+    const normalizedEmail = email ?? '';
+
+    if (!existingUser) {
+      await this.userRepo.save(
+        this.userRepo.create({
+          id: userId,
+          email: normalizedEmail,
+          plan: 'free',
+          role: 'user',
+        }),
+      );
+      return;
+    }
+
+    if (normalizedEmail.length > 0 && existingUser.email !== normalizedEmail) {
+      existingUser.email = normalizedEmail;
+      await this.userRepo.save(existingUser);
+    }
+  }
+
+  private async getLikesCountMap(methodIds: string[]): Promise<Record<string, number>> {
+    if (methodIds.length === 0) return {};
+
+    const rows = await this.methodLikeRepo
+      .createQueryBuilder('method_like')
+      .select('method_like.method_id', 'methodId')
+      .addSelect('COUNT(*)', 'likesCount')
+      .where('method_like.method_id IN (:...methodIds)', { methodIds })
+      .groupBy('method_like.method_id')
+      .getRawMany<{ methodId: string; likesCount: string }>();
+
+    return rows.reduce<Record<string, number>>((acc, row) => {
+      acc[row.methodId] = Number(row.likesCount);
+      return acc;
+    }, {});
+  }
+
+  private async getLikedMethodIdsByUser(userId: string, methodIds: string[]): Promise<Set<string>> {
+    if (methodIds.length === 0) return new Set<string>();
+
+    const rows = await this.methodLikeRepo.find({
+      where: {
+        userId,
+        methodId: In(methodIds),
+      },
+      select: {
+        methodId: true,
+      },
+    });
+
+    return new Set(rows.map((row) => row.methodId));
+  }
+
+  async likeMethod(methodId: string, userId: string, email?: string | null): Promise<void> {
+    await this.ensureMethodExists(methodId);
+    await this.ensureUserExists(userId, email);
+
+    await this.methodLikeRepo
+      .createQueryBuilder()
+      .insert()
+      .into(MethodLike)
+      .values({ methodId, userId, createdAt: new Date() })
+      .orIgnore()
+      .execute();
+  }
+
+  async unlikeMethod(methodId: string, userId: string): Promise<void> {
+    await this.ensureMethodExists(methodId);
+    await this.methodLikeRepo.delete({ methodId, userId });
+  }
+
   private async assertSuperAdminForDisabledMethods(authorization?: string): Promise<void> {
     // Accessing disabled methods is an admin-only capability.
     // We require a valid Supabase JWT and then enforce role from our DB users table.
@@ -224,10 +331,11 @@ export class MethodsService implements OnModuleDestroy {
   private async assertRegisteredUserForUsername(
     username?: string,
     authorization?: string,
+    authenticatedUserId?: string | null,
   ): Promise<void> {
     if (!username) return;
 
-    const userId = await this.verifySupabaseToken(authorization);
+    const userId = authenticatedUserId ?? (await this.verifySupabaseToken(authorization));
     const user = await this.userRepo.findOne({ where: { id: userId } });
 
     if (!user) {
@@ -238,7 +346,7 @@ export class MethodsService implements OnModuleDestroy {
   private buildSortOptions(query: ListQuery): SortOptions {
     const { sortBy = 'highProfit', order = 'desc' } = query;
     return {
-      sortBy: sortBy as 'clickIntensity' | 'afkiness' | 'xpHour' | 'highProfit',
+      sortBy: sortBy as 'clickIntensity' | 'afkiness' | 'xpHour' | 'highProfit' | 'likes',
       order: (order as 'asc' | 'desc') ?? 'desc',
     };
   }
@@ -247,8 +355,14 @@ export class MethodsService implements OnModuleDestroy {
     const { page = '1', perPage = '10', username } = query;
     const p = parseInt(page, 10);
     const pp = parseInt(perPage, 10);
+    const likedByMeFilter = this.parseBooleanQueryParam(query.likedByMe, 'likedByMe');
+    const authenticatedUserId = await this.resolveAuthenticatedUserId(query.authorization);
 
-    await this.assertRegisteredUserForUsername(username, query.authorization);
+    if (likedByMeFilter && !authenticatedUserId) {
+      throw new UnauthorizedException('likedByMe filter requires authentication');
+    }
+
+    await this.assertRegisteredUserForUsername(username, query.authorization, authenticatedUserId);
     const { userInfo, warnings } = await this.fetchUserInfo(username);
     const filters = this.buildListFilters(query);
     if (filters.enabled === false) {
@@ -256,7 +370,17 @@ export class MethodsService implements OnModuleDestroy {
     }
     const sortOptions = this.buildSortOptions(query);
 
-    const result = await this.findAllWithProfit(p, pp, userInfo ?? undefined, filters, sortOptions);
+    const result = await this.findAllWithProfit(
+      p,
+      pp,
+      userInfo ?? undefined,
+      filters,
+      sortOptions,
+      {
+        likedByUserId: authenticatedUserId ?? undefined,
+        onlyLikedByMe: likedByMeFilter === true,
+      },
+    );
 
     const meta = {
       total: result.total,
@@ -274,12 +398,14 @@ export class MethodsService implements OnModuleDestroy {
   }
 
   async methodDetailsWithProfitResponse(id: string, username?: string, authorization?: string) {
-    await this.assertRegisteredUserForUsername(username, authorization);
+    const authenticatedUserId = await this.resolveAuthenticatedUserId(authorization);
+    await this.assertRegisteredUserForUsername(username, authorization, authenticatedUserId);
     const { userInfo, warnings } = await this.fetchUserInfo(username);
-    const method = (await this.findMethodDetailsWithProfit(
+    const method = await this.findMethodDetailsWithProfit(
       id,
       userInfo ?? undefined,
-    )) as unknown as MethodDto;
+      authenticatedUserId ?? undefined,
+    );
 
     return {
       status: warnings.length ? 'partial' : 'ok',
@@ -646,9 +772,10 @@ export class MethodsService implements OnModuleDestroy {
   async findAllWithProfit(
     page = 1,
     perPage = 10,
-    userInfo?: any,
+    userInfo?: UserInfo,
     filters: ListFilters = { enabled: true },
     sort: SortOptions = { sortBy: 'highProfit', order: 'desc' },
+    likeOptions: ListLikeOptions = {},
   ): Promise<{ data: any[]; total: number }> {
     // Obtenemos todos los métodos para poder ordenarlos por profit posteriormente
     const allEntities = await this.methodRepo.find({
@@ -663,7 +790,7 @@ export class MethodsService implements OnModuleDestroy {
 
     // Si se pasó el objeto userLevels, filtramos los métodos antes de enriquecerlos
     if (userInfo) {
-      methodsToProcess = filterMethodsByUserStats(methodsToProcess, userInfo as UserInfo);
+      methodsToProcess = filterMethodsByUserStats(methodsToProcess, userInfo);
     }
 
     // Enriquecemos la lista (filtrada o no) con la información de profit proveniente de Redis
@@ -681,7 +808,7 @@ export class MethodsService implements OnModuleDestroy {
     } catch {
       allProfits = {};
     }
-    const enrichedMethods = methodsToProcess
+    let enrichedMethods = methodsToProcess
       .map((method) => {
         const methodProfits = allProfits[method.id] ?? {};
         let enrichedVariants = method.variants.map((variant) => {
@@ -764,28 +891,72 @@ export class MethodsService implements OnModuleDestroy {
         return { ...methodWithoutDescription, variants: [bestVariant], variantCount };
       });
 
+    const methodIds = enrichedMethods.map((method) => method.id);
+    const likesCountMap = await this.getLikesCountMap(methodIds);
+    const likedMethodIds = likeOptions.likedByUserId
+      ? await this.getLikedMethodIdsByUser(likeOptions.likedByUserId, methodIds)
+      : new Set<string>();
+
+    enrichedMethods = enrichedMethods.map((method) => ({
+      ...method,
+      likes: likesCountMap[method.id] ?? 0,
+      ...(likeOptions.likedByUserId ? { likedByMe: likedMethodIds.has(method.id) } : {}),
+    }));
+
+    if (likeOptions.onlyLikedByMe) {
+      enrichedMethods = enrichedMethods.filter((method) =>
+        likeOptions.likedByUserId ? likedMethodIds.has(method.id) : false,
+      );
+    }
+
     // Ordenamiento según los parámetros recibidos
     const comparator = (a: number, b: number) => (sort.order === 'asc' ? a - b : b - a);
 
     const getXpSum = (v: { xpHour?: XpHour | null }): number =>
       v.xpHour?.reduce((acc, val) => acc + val.experience, 0) ?? 0;
 
-    enrichedMethods.sort((a, b) => {
-      const va = a.variants[0];
-      const vb = b.variants[0];
-      switch (sort.sortBy) {
-        case 'clickIntensity':
-          return comparator(va.clickIntensity ?? 0, vb.clickIntensity ?? 0);
-        case 'afkiness':
-          return comparator(va.afkiness ?? 0, vb.afkiness ?? 0);
-        case 'xpHour':
-          // For xpHour sorting, use the total experience sum of the variant.
-          return comparator(getXpSum(va), getXpSum(vb));
-        case 'highProfit':
-        default:
-          return comparator(va.highProfit ?? 0, vb.highProfit ?? 0);
-      }
-    });
+    enrichedMethods.sort(
+      (
+        a: {
+          likes?: number;
+          variants: Array<{
+            clickIntensity?: number | null;
+            afkiness?: number | null;
+            xpHour?: XpHour | null;
+            highProfit?: number | null;
+          }>;
+        },
+        b: {
+          likes?: number;
+          variants: Array<{
+            clickIntensity?: number | null;
+            afkiness?: number | null;
+            xpHour?: XpHour | null;
+            highProfit?: number | null;
+          }>;
+        },
+      ) => {
+        const va = a.variants[0];
+        const vb = b.variants[0];
+        switch (sort.sortBy) {
+          case 'clickIntensity':
+            return comparator(va.clickIntensity ?? 0, vb.clickIntensity ?? 0);
+          case 'afkiness':
+            return comparator(va.afkiness ?? 0, vb.afkiness ?? 0);
+          case 'xpHour':
+            // For xpHour sorting, use the total experience sum of the variant.
+            return comparator(getXpSum(va), getXpSum(vb));
+          case 'likes': {
+            const likesA = a.likes ?? 0;
+            const likesB = b.likes ?? 0;
+            return comparator(likesA, likesB);
+          }
+          case 'highProfit':
+          default:
+            return comparator(va.highProfit ?? 0, vb.highProfit ?? 0);
+        }
+      },
+    );
 
     const total = enrichedMethods.length;
     const start = (page - 1) * perPage;
@@ -839,7 +1010,11 @@ export class MethodsService implements OnModuleDestroy {
     return trends;
   }
 
-  async findMethodDetailsWithProfit(id: string, userInfo?: UserInfo): Promise<any> {
+  async findMethodDetailsWithProfit(
+    id: string,
+    userInfo?: UserInfo,
+    likedByUserId?: string,
+  ): Promise<MethodDetailsWithProfit> {
     const methodDto = await this.findOne(id);
     const redis = this.redis; // use the singleton instance
 
@@ -887,6 +1062,14 @@ export class MethodsService implements OnModuleDestroy {
         };
       }),
     );
+    const [likes, likedByMe] = await Promise.all([
+      this.methodLikeRepo.count({ where: { methodId: methodDto.id } }),
+      likedByUserId
+        ? this.methodLikeRepo.exists({
+            where: { methodId: methodDto.id, userId: likedByUserId },
+          })
+        : Promise.resolve(false),
+    ]);
 
     return {
       id: methodDto.id,
@@ -895,6 +1078,8 @@ export class MethodsService implements OnModuleDestroy {
       description: methodDto.description,
       category: methodDto.category,
       enabled: methodDto.enabled,
+      likes,
+      ...(likedByUserId ? { likedByMe } : {}),
       variants: enrichedVariants,
     };
   }

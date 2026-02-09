@@ -1,10 +1,12 @@
 import { Repository } from 'typeorm';
 import { AuthService } from './auth.service';
 import { User } from './entities/user.entity';
+import { MethodLike } from '../methods/entities/method-like.entity';
 
 describe('AuthService', () => {
   let service: AuthService;
   let repo: jest.Mocked<Pick<Repository<User>, 'findOne' | 'create' | 'save'>>;
+  let likesRepo: jest.Mocked<Pick<Repository<MethodLike>, 'count'>>;
 
   beforeEach(() => {
     repo = {
@@ -12,7 +14,13 @@ describe('AuthService', () => {
       create: jest.fn(),
       save: jest.fn(),
     };
-    service = new AuthService(repo as unknown as Repository<User>);
+    likesRepo = {
+      count: jest.fn(),
+    };
+    service = new AuthService(
+      repo as unknown as Repository<User>,
+      likesRepo as unknown as Repository<MethodLike>,
+    );
   });
 
   it('creates a new user when it does not exist', async () => {
@@ -75,5 +83,16 @@ describe('AuthService', () => {
 
     expect(repo.save).toHaveBeenCalled();
     expect(result.email).toBe('new@example.com');
+  });
+
+  it('returns number of likes given by user', async () => {
+    likesRepo.count.mockResolvedValue(7);
+
+    const likes = await service.getGivenLikesCount('a42cf41b-2e77-4478-aedf-6cb1f8bce205');
+
+    expect(likesRepo.count).toHaveBeenCalledWith({
+      where: { userId: 'a42cf41b-2e77-4478-aedf-6cb1f8bce205' },
+    });
+    expect(likes).toBe(7);
   });
 });
