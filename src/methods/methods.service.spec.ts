@@ -156,4 +156,49 @@ describe('MethodsService variantCount', () => {
 
     expect(result.data).toHaveLength(0);
   });
+
+  it('filters variants by afkiness using strictly greater-than semantics', async () => {
+    const methodEntity = buildMethodFixture();
+    methodEntity.id = 'm1';
+    methodEntity.variants[0].id = 'v1';
+    methodEntity.variants[1].id = 'v2';
+
+    const methodRepo = {
+      find: jest.fn().mockResolvedValue([methodEntity]),
+    } as unknown as Repository<Method>;
+
+    const service = new MethodsService(
+      methodRepo,
+      {} as Repository<MethodVariant>,
+      {} as Repository<VariantIoItem>,
+      {} as Repository<VariantHistory>,
+      {} as Repository<User>,
+      {} as VariantSnapshotService,
+      {} as RuneScapeApiService,
+      { get: jest.fn().mockReturnValue('redis://localhost:6379') } as unknown as ConfigService,
+    );
+
+    call.mockResolvedValue(
+      JSON.stringify([
+        {
+          m1: {
+            v1: { low: 0, high: 100 },
+            v2: { low: 0, high: 80 },
+          },
+        },
+      ]),
+    );
+
+    const result = await service.findAllWithProfit(
+      1,
+      10,
+      undefined,
+      { afkiness: 3, enabled: true },
+      { sortBy: 'highProfit', order: 'desc' },
+    );
+
+    expect(result.data).toHaveLength(1);
+    expect(result.data[0].variants).toHaveLength(1);
+    expect(result.data[0].variants[0].id).toBe('v2');
+  });
 });
