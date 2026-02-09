@@ -199,8 +199,9 @@ describe('MethodsService variantCount', () => {
     );
 
     expect(result.data).toHaveLength(1);
-    expect(result.data[0].variants).toHaveLength(1);
-    expect(result.data[0].variants[0].id).toBe('v2');
+    const method = result.data[0] as { variants: Array<{ id: string }> };
+    expect(method.variants).toHaveLength(1);
+    expect(method.variants[0].id).toBe('v2');
   });
 
   it('throws when username is sent by a non-registered user', async () => {
