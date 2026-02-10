@@ -12,6 +12,10 @@ import type { ConfigService } from '@nestjs/config';
 import { User } from '../auth/entities/user.entity';
 import { ForbiddenException, UnauthorizedException } from '@nestjs/common';
 
+type MethodDetailsWithProfitResult = Awaited<
+  ReturnType<MethodsService['findMethodDetailsWithProfit']>
+>;
+
 const call = jest.fn();
 const quit = jest.fn();
 
@@ -421,9 +425,17 @@ describe('MethodsService variantCount', () => {
     );
 
     jest.spyOn(service as any, 'verifySupabaseToken').mockResolvedValue('user-1');
+    const methodDetails: MethodDetailsWithProfitResult = {
+      id: 'm1',
+      enabled: false,
+      variants: [],
+      likes: 0,
+      name: 'Method 1',
+      slug: 'method-1',
+    };
     const findDetailsSpy = jest
       .spyOn(service, 'findMethodDetailsWithProfit')
-      .mockResolvedValue({ id: 'm1' } as any);
+      .mockResolvedValue(methodDetails);
 
     await expect(
       service.methodDetailsWithProfitResponse('m1', undefined, 'Bearer token'),
@@ -453,14 +465,15 @@ describe('MethodsService variantCount', () => {
     );
 
     jest.spyOn(service as any, 'verifySupabaseToken').mockResolvedValue('user-1');
-    jest.spyOn(service, 'findMethodDetailsWithProfit').mockResolvedValue({
+    const methodDetails: MethodDetailsWithProfitResult = {
       id: 'm1',
       enabled: false,
       variants: [],
       likes: 0,
       name: 'Method 1',
       slug: 'method-1',
-    } as any);
+    };
+    jest.spyOn(service, 'findMethodDetailsWithProfit').mockResolvedValue(methodDetails);
 
     const result = (await service.methodDetailsWithProfitResponse(
       'm1',
