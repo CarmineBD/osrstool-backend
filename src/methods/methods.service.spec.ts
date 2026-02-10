@@ -398,4 +398,77 @@ describe('MethodsService variantCount', () => {
       likedByMe: false,
     });
   });
+
+  it('denies method detail for disabled method when user is not super_admin', async () => {
+    const methodRepo = {
+      findOne: jest.fn().mockResolvedValue({ id: 'm1', enabled: false }),
+    } as unknown as Repository<Method>;
+
+    const userRepo = {
+      findOne: jest.fn().mockResolvedValue({ id: 'user-1', role: 'user' }),
+    } as unknown as Repository<User>;
+
+    const service = new MethodsService(
+      methodRepo,
+      {} as Repository<MethodVariant>,
+      {} as Repository<VariantIoItem>,
+      {} as Repository<VariantHistory>,
+      createMethodLikeRepo(),
+      userRepo,
+      {} as VariantSnapshotService,
+      {} as RuneScapeApiService,
+      { get: jest.fn().mockReturnValue('redis://localhost:6379') } as unknown as ConfigService,
+    );
+
+    jest.spyOn(service as any, 'verifySupabaseToken').mockResolvedValue('user-1');
+    const findDetailsSpy = jest
+      .spyOn(service, 'findMethodDetailsWithProfit')
+      .mockResolvedValue({ id: 'm1' } as any);
+
+    await expect(
+      service.methodDetailsWithProfitResponse('m1', undefined, 'Bearer token'),
+    ).rejects.toBeInstanceOf(ForbiddenException);
+    expect(findDetailsSpy).not.toHaveBeenCalled();
+  });
+
+  it('allows method detail for disabled method when user is super_admin', async () => {
+    const methodRepo = {
+      findOne: jest.fn().mockResolvedValue({ id: 'm1', enabled: false }),
+    } as unknown as Repository<Method>;
+
+    const userRepo = {
+      findOne: jest.fn().mockResolvedValue({ id: 'user-1', role: 'super_admin' }),
+    } as unknown as Repository<User>;
+
+    const service = new MethodsService(
+      methodRepo,
+      {} as Repository<MethodVariant>,
+      {} as Repository<VariantIoItem>,
+      {} as Repository<VariantHistory>,
+      createMethodLikeRepo(),
+      userRepo,
+      {} as VariantSnapshotService,
+      {} as RuneScapeApiService,
+      { get: jest.fn().mockReturnValue('redis://localhost:6379') } as unknown as ConfigService,
+    );
+
+    jest.spyOn(service as any, 'verifySupabaseToken').mockResolvedValue('user-1');
+    jest.spyOn(service, 'findMethodDetailsWithProfit').mockResolvedValue({
+      id: 'm1',
+      enabled: false,
+      variants: [],
+      likes: 0,
+      name: 'Method 1',
+      slug: 'method-1',
+    } as any);
+
+    const result = (await service.methodDetailsWithProfitResponse(
+      'm1',
+      undefined,
+      'Bearer token',
+    )) as { status: string; data: { method: { id: string } } };
+
+    expect(result.status).toBe('ok');
+    expect(result.data.method.id).toBe('m1');
+  });
 });

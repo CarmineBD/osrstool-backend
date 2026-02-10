@@ -328,6 +328,31 @@ export class MethodsService implements OnModuleDestroy {
     }
   }
 
+  private async assertCanAccessMethodDetails(
+    methodId: string,
+    authorization?: string,
+    authenticatedUserId?: string | null,
+  ): Promise<void> {
+    const method = await this.methodRepo.findOne({
+      where: { id: methodId },
+      select: { id: true, enabled: true },
+    });
+
+    if (!method) {
+      throw new NotFoundException(`Method ${methodId} not found`);
+    }
+
+    if (method.enabled) {
+      return;
+    }
+
+    const userId = authenticatedUserId ?? (await this.verifySupabaseToken(authorization));
+    const user = await this.userRepo.findOne({ where: { id: userId } });
+    if (!user || user.role !== 'super_admin') {
+      throw new ForbiddenException('Only super_admin can access disabled methods');
+    }
+  }
+
   private async assertRegisteredUserForUsername(
     username?: string,
     authorization?: string,
@@ -399,6 +424,7 @@ export class MethodsService implements OnModuleDestroy {
 
   async methodDetailsWithProfitResponse(id: string, username?: string, authorization?: string) {
     const authenticatedUserId = await this.resolveAuthenticatedUserId(authorization);
+    await this.assertCanAccessMethodDetails(id, authorization, authenticatedUserId);
     await this.assertRegisteredUserForUsername(username, authorization, authenticatedUserId);
     const { userInfo, warnings } = await this.fetchUserInfo(username);
     const method = await this.findMethodDetailsWithProfit(
