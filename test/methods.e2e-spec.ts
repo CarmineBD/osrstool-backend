@@ -6,6 +6,10 @@ jest.mock('ioredis', () => ({
   default: jest.fn().mockImplementation(() => ({ call: redisCall, quit: redisQuit })),
   __call: redisCall,
 }));
+jest.mock('jose', () => ({
+  createRemoteJWKSet: jest.fn(),
+  jwtVerify: jest.fn(),
+}));
 
 import { INestApplication } from '@nestjs/common';
 import * as request from 'supertest';

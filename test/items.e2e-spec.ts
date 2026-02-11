@@ -8,6 +8,10 @@ import { Item } from '../src/items/entities/item.entity';
 import { createPgMemAdapter } from './utils/pg-mem';
 
 jest.mock('pg', () => createPgMemAdapter());
+jest.mock('jose', () => ({
+  createRemoteJWKSet: jest.fn(),
+  jwtVerify: jest.fn(),
+}));
 
 describe('Items (e2e)', () => {
   let app: INestApplication;
