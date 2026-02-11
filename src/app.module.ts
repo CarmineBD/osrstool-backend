@@ -14,6 +14,7 @@ import { VariantSnapshotModule } from './variant-snapshots/variant-snapshot.modu
 import { ItemsModule } from './items/items.module';
 import { SystemModule } from './system/system.module';
 import { AuthModule } from './auth/auth.module';
+import { CatalogsModule } from './catalogs/catalogs.module';
 
 const validateEnv = (config: Record<string, string | undefined>) => {
   const hasDatabaseUrl = Boolean(config.DATABASE_URL && config.DATABASE_URL.trim().length > 0);
@@ -118,6 +119,7 @@ const validateEnv = (config: Record<string, string | undefined>) => {
     ItemsModule,
     SystemModule,
     AuthModule,
+    CatalogsModule,
   ],
   providers: [
     {

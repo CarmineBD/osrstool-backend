@@ -14,6 +14,10 @@ import { VariantSnapshot } from '../../src/methods/entities/variant-snapshot.ent
 import { VariantIoItemSnapshot } from '../../src/methods/entities/io-item-snapshot.entity';
 import { User } from '../../src/auth/entities/user.entity';
 import { MethodLike } from '../../src/methods/entities/method-like.entity';
+import { CatalogsModule } from '../../src/catalogs/catalogs.module';
+import { AchievementDiary } from '../../src/catalogs/entities/achievement-diary.entity';
+import { Quest } from '../../src/catalogs/entities/quest.entity';
+import { Skill } from '../../src/catalogs/entities/skill.entity';
 
 export interface TestApp {
   app: INestApplication;
@@ -47,12 +51,16 @@ export const createTestApp = async (): Promise<TestApp> => {
           VariantIoItemSnapshot,
           User,
           MethodLike,
+          AchievementDiary,
+          Quest,
+          Skill,
         ],
         synchronize: true,
         logging: false,
       }),
       MethodsModule,
       ItemsModule,
+      CatalogsModule,
     ],
   })
     .overrideProvider(PricesService)
