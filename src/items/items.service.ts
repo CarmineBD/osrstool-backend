@@ -143,19 +143,31 @@ export class ItemsService {
     };
   }
 
-  async search(q: string, limit: number): Promise<ItemCompactDto[]> {
+  async search(
+    q: string,
+    page: number,
+    pageSize: number,
+  ): Promise<{ data: ItemCompactDto[]; page: number; pageSize: number; total: number }> {
     if (q.length === 0) throw new BadRequestException('q is required');
-    const items = await this.repo
+    const qb = this.repo
       .createQueryBuilder('item')
       .where('item.name ILIKE :q', { q: `%${q}%` })
-      .orderBy('item.name', 'ASC')
-      .take(limit)
+      .orderBy('item.name', 'ASC');
+    const total = await qb.getCount();
+    const items = await qb
+      .skip((page - 1) * pageSize)
+      .take(pageSize)
       .getMany();
-    return items.map((i) => ({
-      id: i.id,
-      name: i.name,
-      iconUrl: this.buildIconUrl(i.iconPath),
-    }));
+    return {
+      data: items.map((i) => ({
+        id: i.id,
+        name: i.name,
+        iconUrl: this.buildIconUrl(i.iconPath),
+      })),
+      page,
+      pageSize,
+      total,
+    };
   }
 
   async create(dto: CreateItemDto): Promise<ItemResponseDto> {

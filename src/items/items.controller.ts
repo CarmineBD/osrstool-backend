@@ -73,20 +73,41 @@ export class ItemsController {
   @Get('search')
   @ApiOperation({
     summary: 'Search items by name',
-    description: 'Returns a compact list of items matching the query string.',
+    description: 'Returns a paginated compact list of items matching the query string.',
   })
   @ApiQuery({ name: 'q', required: true, description: 'Search term (1-100 chars)' })
-  @ApiQuery({ name: 'limit', required: false, description: 'Max results (default 20)' })
+  @ApiQuery({ name: 'page', required: false, description: 'Page number (default 1)' })
+  @ApiQuery({
+    name: 'pageSize',
+    required: false,
+    description: 'Items per page (default 20, max 100)',
+  })
+  @ApiQuery({
+    name: 'limit',
+    required: false,
+    description: 'Deprecated alias for pageSize',
+  })
   @ApiOkResponse({
     description: 'Matching items',
-    schema: { example: [ITEM_COMPACT_EXAMPLE] },
+    schema: { example: { data: [ITEM_COMPACT_EXAMPLE], page: 1, pageSize: 20, total: 153 } },
   })
   @ApiBadRequestResponse({ description: 'Missing or invalid query parameters' })
-  async search(@Query('q') q: string, @Query('limit') limit = '20') {
+  async search(
+    @Query('q') q: string,
+    @Query('page') page = '1',
+    @Query('pageSize') pageSize?: string,
+    @Query('limit') limit?: string,
+  ) {
     if (!q) throw new BadRequestException('q is required');
     if (q.length > 100) throw new BadRequestException('q too long');
-    const lim = Math.min(parseInt(limit, 10) || 20, 100);
-    return this.svc.search(q, lim);
+
+    const p = Math.max(parseInt(page, 10) || 1, 1);
+    const requestedPageSize = pageSize ?? limit ?? '20';
+    const psRaw = parseInt(requestedPageSize, 10) || 20;
+    if (psRaw > 100) throw new BadRequestException('pageSize too large');
+    const ps = Math.min(psRaw, 100);
+
+    return this.svc.search(q, p, ps);
   }
 
   @Get()
