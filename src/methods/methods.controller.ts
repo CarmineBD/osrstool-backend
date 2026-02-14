@@ -70,7 +70,7 @@ export class MethodsController {
   @ApiOperation({ summary: 'Create method', description: 'Creates a new method.' })
   @ApiOkResponse({ description: 'Method created', schema: { example: { data: METHOD_EXAMPLE } } })
   @ApiUnauthorizedResponse({ description: 'Missing, invalid, or expired bearer token' })
-  @ApiForbiddenResponse({ description: 'Only super_admin can modify methods and variants' })
+  @ApiForbiddenResponse({ description: 'Only super_admin can perform this action' })
   async create(@Body() dto: CreateMethodDto) {
     const created = await this.svc.create(dto);
     return { data: created };
@@ -292,7 +292,7 @@ export class MethodsController {
   @ApiOperation({ summary: 'Update method', description: 'Updates an existing method.' })
   @ApiOkResponse({ description: 'Method updated', schema: { example: { data: METHOD_EXAMPLE } } })
   @ApiUnauthorizedResponse({ description: 'Missing, invalid, or expired bearer token' })
-  @ApiForbiddenResponse({ description: 'Only super_admin can modify methods and variants' })
+  @ApiForbiddenResponse({ description: 'Only super_admin can perform this action' })
   async update(@Param('id') id: string, @Body() dto: UpdateMethodDto) {
     const updated = await this.svc.update(id, dto);
     return { data: updated };
@@ -307,7 +307,7 @@ export class MethodsController {
   })
   @ApiOkResponse({ description: 'Method updated', schema: { example: { data: METHOD_EXAMPLE } } })
   @ApiUnauthorizedResponse({ description: 'Missing, invalid, or expired bearer token' })
-  @ApiForbiddenResponse({ description: 'Only super_admin can modify methods and variants' })
+  @ApiForbiddenResponse({ description: 'Only super_admin can perform this action' })
   async updateBasic(@Param('id') id: string, @Body() dto: UpdateMethodBasicDto) {
     const updated = await this.svc.updateBasic(id, dto);
     return { data: updated };
@@ -323,7 +323,7 @@ export class MethodsController {
   @ApiQuery({ name: 'generateSnapshot', required: false, description: 'true to generate snapshot' })
   @ApiOkResponse({ description: 'Variant updated', schema: { example: { data: METHOD_EXAMPLE } } })
   @ApiUnauthorizedResponse({ description: 'Missing, invalid, or expired bearer token' })
-  @ApiForbiddenResponse({ description: 'Only super_admin can modify methods and variants' })
+  @ApiForbiddenResponse({ description: 'Only super_admin can perform this action' })
   async updateVariant(
     @Param('id') id: string,
     @Body() dto: UpdateVariantDto,
@@ -340,7 +340,7 @@ export class MethodsController {
   @ApiOperation({ summary: 'Delete method', description: 'Removes a method by id.' })
   @ApiOkResponse({ description: 'Method removed', schema: { example: { data: null } } })
   @ApiUnauthorizedResponse({ description: 'Missing, invalid, or expired bearer token' })
-  @ApiForbiddenResponse({ description: 'Only super_admin can modify methods and variants' })
+  @ApiForbiddenResponse({ description: 'Only super_admin can perform this action' })
   async remove(@Param('id') id: string) {
     await this.svc.remove(id);
     return { data: null };
