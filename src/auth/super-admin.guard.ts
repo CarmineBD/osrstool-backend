@@ -1,4 +1,10 @@
-import { CanActivate, ExecutionContext, ForbiddenException, Injectable } from '@nestjs/common';
+import {
+  CanActivate,
+  ExecutionContext,
+  ForbiddenException,
+  Injectable,
+  UnauthorizedException,
+} from '@nestjs/common';
 import { InjectRepository } from '@nestjs/typeorm';
 import type { Request } from 'express';
 import { Repository } from 'typeorm';
@@ -18,12 +24,12 @@ export class SuperAdminGuard implements CanActivate {
     const req = context.switchToHttp().getRequest<RequestWithUser>();
     const userId = req.user?.id;
     if (!userId) {
-      throw new ForbiddenException('Authenticated user id is required');
+      throw new UnauthorizedException('Missing authenticated user context');
     }
 
     const user = await this.userRepo.findOne({ where: { id: userId } });
     if (!user || user.role !== 'super_admin') {
-      throw new ForbiddenException('Only super_admin can modify methods and variants');
+      throw new ForbiddenException('Only super_admin can perform this action');
     }
 
     return true;
