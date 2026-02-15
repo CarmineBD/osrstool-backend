@@ -1,0 +1,2 @@
+export const DESCRIPTION_MAX_LENGTH = 5000;
+export const REASON_MAX_LENGTH = 500;
