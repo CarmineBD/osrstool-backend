@@ -1,5 +1,6 @@
-import { INestApplication } from '@nestjs/common';
+import { INestApplication, ValidationPipe } from '@nestjs/common';
 import { Test } from '@nestjs/testing';
+import { ConfigModule } from '@nestjs/config';
 import { TypeOrmModule } from '@nestjs/typeorm';
 import { DataSource } from 'typeorm';
 import { ItemsModule } from '../../src/items/items.module';
@@ -18,6 +19,8 @@ import { CatalogsModule } from '../../src/catalogs/catalogs.module';
 import { AchievementDiary } from '../../src/catalogs/entities/achievement-diary.entity';
 import { Quest } from '../../src/catalogs/entities/quest.entity';
 import { Skill } from '../../src/catalogs/entities/skill.entity';
+import { SupabaseAuthGuard } from '../../src/auth/supabase-auth.guard';
+import { SuperAdminGuard } from '../../src/auth/super-admin.guard';
 
 export interface TestApp {
   app: INestApplication;
@@ -34,6 +37,17 @@ export const createTestApp = async (): Promise<TestApp> => {
 
   const moduleFixture = await Test.createTestingModule({
     imports: [
+      ConfigModule.forRoot({
+        isGlobal: true,
+        ignoreEnvFile: true,
+        load: [
+          () => ({
+            REDIS_URL: 'redis://localhost:6379',
+            SUPABASE_PROJECT_URL: 'https://example.supabase.co',
+            SUPABASE_JWT_AUD: 'authenticated',
+          }),
+        ],
+      }),
       TypeOrmModule.forRoot({
         type: 'postgres',
         host: 'localhost',
@@ -65,9 +79,20 @@ export const createTestApp = async (): Promise<TestApp> => {
   })
     .overrideProvider(PricesService)
     .useValue(pricesService)
+    .overrideGuard(SupabaseAuthGuard)
+    .useValue({ canActivate: () => true })
+    .overrideGuard(SuperAdminGuard)
+    .useValue({ canActivate: () => true })
     .compile();
 
   const app = moduleFixture.createNestApplication();
+  app.useGlobalPipes(
+    new ValidationPipe({
+      whitelist: true,
+      transform: true,
+      transformOptions: { enableImplicitConversion: true },
+    }),
+  );
   await app.init();
   const dataSource = app.get(DataSource);
 
