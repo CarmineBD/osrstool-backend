@@ -24,15 +24,47 @@ describe('Methods (e2e)', () => {
   let app: INestApplication;
   let dataSource: DataSource;
 
-  beforeEach(async () => {
+  const expectUnsafeMarkdownValidationMessage = (body: { message?: unknown }): void => {
+    const messages = Array.isArray(body.message)
+      ? body.message.map(String)
+      : [String(body.message)];
+    expect(
+      messages.some((message) => message.includes('must not contain unsafe markdown/html content')),
+    ).toBe(true);
+  };
+
+  const buildValidCreateMethodPayload = () => ({
+    name: 'Validated method',
+    description: 'Texto **markdown** con [link](https://example.com)',
+    category: 'Skilling',
+    enabled: true,
+    variants: [
+      {
+        label: 'Validated variant',
+        description: 'Lista:\n- item 1\n- item 2',
+        inputs: [{ id: 100, quantity: 1, type: 'input', reason: 'Reason text' }],
+        outputs: [{ id: 200, quantity: 1, type: 'output', reason: 'Reason text' }],
+      },
+    ],
+  });
+
+  beforeAll(async () => {
     const testApp = await createTestApp();
     app = testApp.app;
     dataSource = testApp.dataSource;
+  });
+
+  beforeEach(async () => {
+    await dataSource.query('DELETE FROM "variant_io_items"');
+    await dataSource.query('DELETE FROM "method_variants"');
+    await dataSource.query('DELETE FROM "money_making_methods"');
     redisCall.mockReset();
   });
 
-  afterEach(async () => {
-    await app.close();
+  afterAll(async () => {
+    if (app) {
+      await app.close();
+    }
   });
 
   it('GET /methods returns best variant and variantCount', async () => {
@@ -121,5 +153,62 @@ describe('Methods (e2e)', () => {
     expect(result.variantCount).toBe(2);
     expect(result.variants).toHaveLength(1);
     expect(result.variants[0].id).toBe(variantIds[1]);
+  });
+
+  it('POST /methods rejects unsafe script content in method.description', async () => {
+    const server = app.getHttpServer() as unknown as Server;
+    const payload = buildValidCreateMethodPayload();
+    payload.description = '<script>alert(1)</script>';
+
+    const res = await request(server).post('/methods').send(payload).expect(400);
+    expectUnsafeMarkdownValidationMessage(res.body as { message?: unknown });
+  });
+
+  it('POST /methods rejects unsafe event handler content in variant.description', async () => {
+    const server = app.getHttpServer() as unknown as Server;
+    const payload = buildValidCreateMethodPayload();
+    payload.variants[0].description = '<img src=x onerror=alert(1)>';
+
+    const res = await request(server).post('/methods').send(payload).expect(400);
+    expectUnsafeMarkdownValidationMessage(res.body as { message?: unknown });
+  });
+
+  it('PUT /methods/variant/:id rejects javascript: links in snapshotDescription', async () => {
+    const methodRepo = dataSource.getRepository(Method);
+    const variantRepo = dataSource.getRepository(MethodVariant);
+
+    const savedMethod = await methodRepo.save({
+      name: 'Snapshot method',
+      slug: 'snapshot-method',
+      description: 'Safe markdown',
+      category: 'Skilling',
+      enabled: true,
+    });
+
+    const savedVariant = await variantRepo.save({
+      label: 'Snapshot variant',
+      slug: 'snapshot-variant',
+      description: null,
+      xpHour: null,
+      clickIntensity: 1,
+      afkiness: 1,
+      riskLevel: '1',
+      requirements: null,
+      recommendations: null,
+      wilderness: false,
+      actionsPerHour: 100,
+      method: savedMethod,
+    });
+
+    const server = app.getHttpServer() as unknown as Server;
+    const res = await request(server)
+      .put(`/methods/variant/${savedVariant.id}?generateSnapshot=true`)
+      .send({
+        snapshotName: 'Snapshot title',
+        snapshotDescription: '[x](javascript:alert(1))',
+      })
+      .expect(400);
+
+    expectUnsafeMarkdownValidationMessage(res.body as { message?: unknown });
   });
 });
