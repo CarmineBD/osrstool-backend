@@ -403,6 +403,68 @@ describe('MethodsService variantCount', () => {
     });
   });
 
+  it('includes pageSize and hasNext in list metadata while keeping perPage', async () => {
+    const methodOne = buildMethodFixture();
+    methodOne.id = 'm1';
+    methodOne.variants[0].id = 'm1v1';
+    methodOne.variants[1].id = 'm1v2';
+
+    const methodTwo = buildMethodFixture();
+    methodTwo.id = 'm2';
+    methodTwo.name = 'Method Two';
+    methodTwo.slug = 'method-two';
+    methodTwo.variants[0].id = 'm2v1';
+    methodTwo.variants[1].id = 'm2v2';
+
+    const methodRepo = {
+      find: jest.fn().mockResolvedValue([methodOne, methodTwo]),
+    } as unknown as Repository<Method>;
+
+    const service = new MethodsService(
+      methodRepo,
+      {} as Repository<MethodVariant>,
+      {} as Repository<VariantIoItem>,
+      {} as Repository<VariantHistory>,
+      createMethodLikeRepo(),
+      {} as Repository<User>,
+      {} as VariantSnapshotService,
+      {} as RuneScapeApiService,
+      { get: jest.fn().mockReturnValue('redis://localhost:6379') } as unknown as ConfigService,
+    );
+
+    call.mockResolvedValue(
+      JSON.stringify([
+        {
+          m1: {
+            m1v1: { low: 0, high: 100 },
+            m1v2: { low: 0, high: 50 },
+          },
+          m2: {
+            m2v1: { low: 0, high: 80 },
+            m2v2: { low: 0, high: 60 },
+          },
+        },
+      ]),
+    );
+
+    const result = (await service.listWithProfitResponse({
+      page: '1',
+      perPage: '1',
+    })) as {
+      data: { methods: Array<{ id: string }> };
+      meta: { total: number; page: number; pageSize: number; perPage: number; hasNext: boolean };
+    };
+
+    expect(result.data.methods).toHaveLength(1);
+    expect(result.meta).toMatchObject({
+      total: 2,
+      page: 1,
+      pageSize: 1,
+      perPage: 1,
+      hasNext: true,
+    });
+  });
+
   it('denies method detail for disabled method when user is not super_admin', async () => {
     const methodRepo = {
       findOne: jest.fn().mockResolvedValue({ id: 'm1', enabled: false }),
