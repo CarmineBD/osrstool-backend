@@ -146,9 +146,23 @@ describe('Methods (e2e)', () => {
     const body = res.body as {
       status: string;
       data: { methods: Array<{ variantCount: number; variants: Array<{ id: string }> }> };
+      meta: {
+        total: number;
+        page: number;
+        pageSize: number;
+        perPage: number;
+        hasNext: boolean;
+      };
     };
     expect(body.status).toBe('ok');
     expect(body.data.methods).toHaveLength(1);
+    expect(body.meta).toMatchObject({
+      total: 1,
+      page: 1,
+      pageSize: 10,
+      perPage: 10,
+      hasNext: false,
+    });
     const result = body.data.methods[0];
     expect(result.variantCount).toBe(2);
     expect(result.variants).toHaveLength(1);

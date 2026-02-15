@@ -407,10 +407,14 @@ export class MethodsService implements OnModuleDestroy {
       },
     );
 
+    const hasNext = p * pp < result.total;
+
     const meta = {
       total: result.total,
       page: p,
-      perPage: pp,
+      pageSize: pp,
+      perPage: pp, // Backward-compatible alias for existing clients.
+      hasNext,
       ...(username ? { username } : {}),
     };
 
