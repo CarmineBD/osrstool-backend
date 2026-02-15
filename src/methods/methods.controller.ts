@@ -127,7 +127,7 @@ export class MethodsController {
         status: 'ok',
         data: { methods: [METHOD_EXAMPLE], user: null },
         warnings: [],
-        meta: { total: 1, page: 1, perPage: 10 },
+        meta: { total: 1, page: 1, pageSize: 10, perPage: 10, hasNext: false },
       },
     },
   })
@@ -214,14 +214,26 @@ export class MethodsController {
   @ApiOkResponse({
     description: 'Methods list (Redis)',
     schema: {
-      example: { data: [METHOD_EXAMPLE], meta: { total: 1, page: 1, perPage: 10 } },
+      example: {
+        data: [METHOD_EXAMPLE],
+        meta: { total: 1, page: 1, pageSize: 10, perPage: 10, hasNext: false },
+      },
     },
   })
   async findAllRedis(@Query('page') page = '1', @Query('perPage') perPage = '10') {
     const p = parseInt(page, 10);
     const pp = parseInt(perPage, 10);
     const result: PaginatedResult = await this.svc.findAll(p, pp);
-    return { data: result.data, meta: { total: result.total, page: p, perPage: pp } };
+    return {
+      data: result.data,
+      meta: {
+        total: result.total,
+        page: p,
+        pageSize: pp,
+        perPage: pp,
+        hasNext: p * pp < result.total,
+      },
+    };
   }
 
   @Get('slug/:slug')
