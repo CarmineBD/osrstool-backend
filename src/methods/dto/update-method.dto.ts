@@ -1,7 +1,16 @@
 // src/methods/dto/update-method.dto.ts
-import { IsArray, IsOptional, IsString, ValidateNested, IsBoolean } from 'class-validator';
+import {
+  IsArray,
+  IsOptional,
+  IsString,
+  ValidateNested,
+  IsBoolean,
+  MaxLength,
+} from 'class-validator';
 import { Type } from 'class-transformer';
 import { UpdateMethodVariantDto } from './update-method-variant.dto';
+import { IsSafeMarkdown } from '../../common/validators/is-safe-markdown.validator';
+import { DESCRIPTION_MAX_LENGTH } from './validation.constants';
 
 export class UpdateMethodDto {
   @IsOptional()
@@ -10,6 +19,8 @@ export class UpdateMethodDto {
 
   @IsOptional()
   @IsString()
+  @MaxLength(DESCRIPTION_MAX_LENGTH)
+  @IsSafeMarkdown()
   description?: string;
 
   @IsOptional()
