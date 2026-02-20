@@ -1,4 +1,4 @@
-const redisCall = jest.fn<void, [string, string, string, string]>();
+const redisCall = jest.fn();
 
 jest.mock('ioredis', () => ({
   __esModule: true,
@@ -52,12 +52,18 @@ describe('MethodProfitRefresherService', () => {
 
     await service.refresh();
 
-    expect(redisCall).toHaveBeenCalledTimes(1);
-    const payload = redisCall.mock.calls[0]?.[3] ?? '{}';
-    const parsed = JSON.parse(payload) as {
-      m1: { v1: { low: number; high: number } };
+    expect(redisCall).toHaveBeenCalledTimes(2);
+    const calls = redisCall.mock.calls as unknown[][];
+    expect(calls[0]).toEqual(['DEL', 'methods:profits']);
+    const hsetCall = calls[1] ?? [];
+    expect(hsetCall[0]).toBe('HSET');
+    expect(hsetCall[1]).toBe('methods:profits');
+    expect(hsetCall[2]).toBe('m1');
+    const payload = typeof hsetCall[3] === 'string' ? hsetCall[3] : '{}';
+    const parsed = JSON.parse(payload) as unknown as {
+      v1: { low: number; high: number };
     };
-    expect(parsed.m1.v1.low).toBe(36);
-    expect(parsed.m1.v1.high).toBe(55);
+    expect(parsed.v1.low).toBe(36);
+    expect(parsed.v1.high).toBe(55);
   });
 });
