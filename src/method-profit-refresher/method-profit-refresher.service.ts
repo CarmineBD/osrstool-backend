@@ -5,19 +5,11 @@ import { MethodsService } from '../methods/methods.service';
 import { PricesService } from '../prices/prices.service';
 import { ConfigService } from '@nestjs/config';
 
-// interface Price {
-//   high?: number;
-//   low: number;
-// }
-// interface Profit {
-//   low: number;
-//   high: number;
-// }
-
 @Injectable()
 export class MethodProfitRefresherService {
   private readonly logger = new Logger(MethodProfitRefresherService.name);
   private readonly redis: Redis;
+  private readonly methodsProfitsHashKey = 'methods:profits';
 
   constructor(
     private readonly methodsService: MethodsService,
@@ -32,11 +24,12 @@ export class MethodProfitRefresherService {
   async refresh(): Promise<void> {
     const { data: methods } = await this.methodsService.findAll(1, 1000);
     if (methods.length === 0) {
-      this.logger.log('No hay métodos que refrescar');
+      await this.redis.call('DEL', this.methodsProfitsHashKey);
+      this.logger.log('No hay metodos que refrescar');
       return;
     }
 
-    // 1) Reunir todos los IDs de ítems (de cada variante: inputs y outputs)
+    // 1) Reunir todos los IDs de items (de cada variante: inputs y outputs)
     const itemIds = new Set<number>();
     for (const method of methods) {
       for (const variant of method.variants) {
@@ -49,7 +42,7 @@ export class MethodProfitRefresherService {
     const raw = await this.pricesService.getMany([...itemIds]);
     const prices: Record<number, { high?: number; low: number }> = raw;
 
-    // 3) Calcular profits por variante de cada método
+    // 3) Calcular profits por variante de cada metodo
     const profits: Record<string, Record<string, { low: number; high: number }>> = {};
     for (const method of methods) {
       profits[method.id] = {};
@@ -70,13 +63,21 @@ export class MethodProfitRefresherService {
         const lowProfit = outputsLow - inputsHigh;
         const highProfit = outputsHigh - inputsLow;
 
-        // Usamos directamente el id de la variante
         profits[method.id][variant.id] = { low: lowProfit, high: highProfit };
       });
     }
 
-    // 4) Guardar resultado en Redis
-    await this.redis.call('JSON.SET', 'methodsProfits', '$', JSON.stringify(profits));
-    this.logger.log(`🔄 Actualizado methodsProfits (${methods.length} métodos)`);
+    // 4) Guardar resultado en Redis en un hash por metodo
+    const entries: string[] = [];
+    for (const [methodId, methodProfits] of Object.entries(profits)) {
+      entries.push(methodId, JSON.stringify(methodProfits));
+    }
+
+    await this.redis.call('DEL', this.methodsProfitsHashKey);
+    if (entries.length > 0) {
+      await this.redis.call('HSET', this.methodsProfitsHashKey, ...entries);
+    }
+
+    this.logger.log(`Actualizado ${this.methodsProfitsHashKey} (${methods.length} metodos)`);
   }
 }

@@ -18,6 +18,7 @@ import {
 export class VariantHistoryService {
   private readonly logger = new Logger(VariantHistoryService.name);
   private readonly redis: Redis;
+  private readonly methodsProfitsHashKey = 'methods:profits';
 
   constructor(
     @InjectRepository(VariantHistory)
@@ -30,23 +31,82 @@ export class VariantHistoryService {
     this.redis = new Redis(redisUrl);
   }
 
-  @Cron('*/5 * * * *')
-  async capture(): Promise<void> {
-    const rawData = (await this.redis.call('JSON.GET', 'methodsProfits', '$')) as string | null;
-    if (!rawData) {
-      this.logger.warn('No profits found in Redis');
-      return;
+  private parseProfitRecord(value: unknown): Record<string, { low: number; high: number }> | null {
+    if (!value || typeof value !== 'object' || Array.isArray(value)) {
+      return null;
     }
 
-    let profits: Record<string, Record<string, { low: number; high: number }>> = {};
+    const result: Record<string, { low: number; high: number }> = {};
+    for (const [variantId, candidate] of Object.entries(value as Record<string, unknown>)) {
+      if (!candidate || typeof candidate !== 'object' || Array.isArray(candidate)) {
+        continue;
+      }
+
+      const maybeProfit = candidate as Record<string, unknown>;
+      if (typeof maybeProfit.low !== 'number' || typeof maybeProfit.high !== 'number') {
+        continue;
+      }
+
+      result[variantId] = {
+        low: maybeProfit.low,
+        high: maybeProfit.high,
+      };
+    }
+
+    return result;
+  }
+
+  private parseProfitRecordString(value: unknown): Record<string, { low: number; high: number }> {
+    const rawText =
+      typeof value === 'string' ? value : Buffer.isBuffer(value) ? value.toString('utf8') : null;
+    if (!rawText) return {};
+
     try {
-      const parsed = JSON.parse(rawData) as Record<
-        string,
-        Record<string, { low: number; high: number }>
-      >[];
-      profits = Array.isArray(parsed) ? parsed[0] || {} : parsed;
+      return this.parseProfitRecord(JSON.parse(rawText)) ?? {};
     } catch {
-      this.logger.warn('Invalid profits data in Redis');
+      return {};
+    }
+  }
+
+  private parseHashProfits(
+    raw: unknown,
+  ): Record<string, Record<string, { low: number; high: number }>> {
+    const result: Record<string, Record<string, { low: number; high: number }>> = {};
+
+    if (Array.isArray(raw)) {
+      const entries = raw as unknown[];
+      for (let i = 0; i < entries.length; i += 2) {
+        const field = entries[i];
+        const value = entries[i + 1];
+        if (typeof field !== 'string') continue;
+        result[field] = this.parseProfitRecordString(value);
+      }
+      return result;
+    }
+
+    if (!raw || typeof raw !== 'object') {
+      return result;
+    }
+
+    for (const [field, value] of Object.entries(raw as Record<string, unknown>)) {
+      result[field] = this.parseProfitRecordString(value);
+    }
+
+    return result;
+  }
+
+  private async getAllMethodsProfits(): Promise<
+    Record<string, Record<string, { low: number; high: number }>>
+  > {
+    const hashRaw = await this.redis.call('HGETALL', this.methodsProfitsHashKey);
+    return this.parseHashProfits(hashRaw);
+  }
+
+  @Cron('*/5 * * * *')
+  async capture(): Promise<void> {
+    const profits = await this.getAllMethodsProfits();
+    if (Object.keys(profits).length === 0) {
+      this.logger.warn('No profits found in Redis');
       return;
     }
 

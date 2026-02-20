@@ -90,6 +90,7 @@ interface MethodDetailsWithProfit {
 @Injectable()
 export class MethodsService implements OnModuleDestroy {
   private readonly redis: Redis;
+  private readonly methodsProfitsHashKey = 'methods:profits';
 
   constructor(
     @InjectRepository(Method)
@@ -799,6 +800,80 @@ export class MethodsService implements OnModuleDestroy {
     if (result.affected === 0) throw new NotFoundException(`Method ${id} not found`);
   }
 
+  private parseProfitRecord(value: unknown): ProfitRecord | null {
+    if (!value || typeof value !== 'object' || Array.isArray(value)) {
+      return null;
+    }
+
+    const record = value as Record<string, unknown>;
+    const parsed: ProfitRecord = {};
+
+    for (const [variantId, candidate] of Object.entries(record)) {
+      if (!candidate || typeof candidate !== 'object' || Array.isArray(candidate)) {
+        continue;
+      }
+
+      const maybeProfit = candidate as Record<string, unknown>;
+      if (typeof maybeProfit.low !== 'number' || typeof maybeProfit.high !== 'number') {
+        continue;
+      }
+
+      parsed[variantId] = {
+        low: maybeProfit.low,
+        high: maybeProfit.high,
+      };
+    }
+
+    return parsed;
+  }
+
+  private parseProfitRecordString(raw: unknown): ProfitRecord | null {
+    const rawText =
+      typeof raw === 'string' ? raw : Buffer.isBuffer(raw) ? raw.toString('utf8') : null;
+    if (!rawText) return null;
+
+    try {
+      return this.parseProfitRecord(JSON.parse(rawText));
+    } catch {
+      return null;
+    }
+  }
+
+  private parseHashProfits(raw: unknown): Record<string, ProfitRecord> {
+    const result: Record<string, ProfitRecord> = {};
+
+    if (Array.isArray(raw)) {
+      const entries = raw as unknown[];
+      for (let i = 0; i < entries.length; i += 2) {
+        const field = entries[i];
+        const value = entries[i + 1];
+        if (typeof field !== 'string') continue;
+        result[field] = this.parseProfitRecordString(value) ?? {};
+      }
+      return result;
+    }
+
+    if (!raw || typeof raw !== 'object') {
+      return result;
+    }
+
+    for (const [field, value] of Object.entries(raw as Record<string, unknown>)) {
+      result[field] = this.parseProfitRecordString(value) ?? {};
+    }
+
+    return result;
+  }
+
+  private async getAllMethodsProfits(): Promise<Record<string, ProfitRecord>> {
+    const hashRaw = await this.redis.call('HGETALL', this.methodsProfitsHashKey);
+    return this.parseHashProfits(hashRaw);
+  }
+
+  private async getMethodProfits(methodId: string): Promise<ProfitRecord> {
+    const hashRaw = await this.redis.call('HGET', this.methodsProfitsHashKey, methodId);
+    return this.parseProfitRecordString(hashRaw) ?? {};
+  }
+
   async findAllWithProfit(
     page = 1,
     perPage = 10,
@@ -824,20 +899,7 @@ export class MethodsService implements OnModuleDestroy {
     }
 
     // Enriquecemos la lista (filtrada o no) con la información de profit proveniente de Redis
-    const redis = this.redis; // use the singleton instance
-    const rawData = (await redis.call('JSON.GET', 'methodsProfits', '$')) as string | null;
-    let allProfits: Record<string, Record<string, { low: number; high: number }>> = {};
-    try {
-      if (rawData) {
-        const parsed = JSON.parse(rawData) as Record<
-          string,
-          Record<string, { low: number; high: number }>
-        >[];
-        allProfits = parsed[0] || {};
-      }
-    } catch {
-      allProfits = {};
-    }
+    const allProfits = await this.getAllMethodsProfits();
     let enrichedMethods = methodsToProcess
       .map((method) => {
         const methodProfits = allProfits[method.id] ?? {};
@@ -1046,21 +1108,7 @@ export class MethodsService implements OnModuleDestroy {
     likedByUserId?: string,
   ): Promise<MethodDetailsWithProfit> {
     const methodDto = await this.findOne(id);
-    const redis = this.redis; // use the singleton instance
-
-    // Obtenemos el snapshot de los profits desde Redis
-    const rawData = (await redis.call('JSON.GET', 'methodsProfits', '$')) as string | null;
-    let allProfits: ProfitRecord = {};
-
-    try {
-      if (rawData) {
-        const parsed = JSON.parse(rawData) as Record<string, ProfitRecord>[];
-        // Verifica que el id del método coincide con la clave en Redis
-        allProfits = parsed[0][methodDto.id] ?? {};
-      }
-    } catch {
-      allProfits = {};
-    }
+    const allProfits = await this.getMethodProfits(methodDto.id);
 
     const enrichedVariants = await Promise.all(
       methodDto.variants.map(async (variant) => {
