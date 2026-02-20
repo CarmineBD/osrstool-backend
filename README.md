@@ -48,6 +48,8 @@ Available variables:
 - `HEALTH_CHECK_TIMEOUT_MS`: Timeout (ms) for dependency checks in `/health`.
 - `RATE_LIMIT_TTL_SECONDS`: Rate limit window in seconds (default `60`).
 - `RATE_LIMIT_LIMIT`: Max requests per window (default `60`).
+- `PRICE_CHANGE_WINDOW_SECONDS`: Price-change window in seconds for incremental refresh in `items:prices` (default `120`).
+- `ITEM_VOLUMES_INIT_ENABLED`: Set to `false` to skip item-volumes init backfill on startup (default `true`).
 - `CORS_ORIGINS`: Comma-separated allowed origins (e.g. `https://example.com,https://app.example.com`).
 - `SWAGGER_ENABLED`: Set to `true` to enable Swagger in production (disabled by default in prod).
 - `CDN_BASE`: Base URL for item icons (defaults to OSRS Wiki).
@@ -84,6 +86,9 @@ npm run format
 npm run test
 npm run test:e2e
 npm run test:cov
+
+# force item-volumes backfill (optional: pass a reference unix ts aligned to hour)
+ITEM_VOLUMES_INIT_ENABLED=false npm run item-volumes:backfill -- 1735689600
 ```
 
 ## Notes
