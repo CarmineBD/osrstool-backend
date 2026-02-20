@@ -15,6 +15,7 @@ import { ItemsModule } from './items/items.module';
 import { SystemModule } from './system/system.module';
 import { AuthModule } from './auth/auth.module';
 import { CatalogsModule } from './catalogs/catalogs.module';
+import { ItemVolumesModule } from './item-volumes/item-volumes.module';
 
 const validateEnv = (config: Record<string, string | undefined>) => {
   const hasDatabaseUrl = Boolean(config.DATABASE_URL && config.DATABASE_URL.trim().length > 0);
@@ -116,6 +117,7 @@ const validateEnv = (config: Record<string, string | undefined>) => {
 
     // Si antes tenías un PricesModule para Redis, vuelve a importarlo:
     PricesModule,
+    ItemVolumesModule,
     ItemsModule,
     SystemModule,
     AuthModule,
