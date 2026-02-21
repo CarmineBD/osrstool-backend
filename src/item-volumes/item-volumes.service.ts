@@ -206,6 +206,7 @@ export class ItemVolumesService implements OnModuleInit, OnModuleDestroy {
   async writeRedisVol24hAtomically(volumes: Record<string, ItemVol24h>): Promise<void> {
     const tmpKey = `${this.vol24hHashKey}:tmp:${Date.now()}:${Math.floor(Math.random() * 100000)}`;
     const sentinelField = '__tmp__';
+    let swapped = false;
 
     try {
       await this.redis.call('HSET', tmpKey, sentinelField, '1');
@@ -214,14 +215,14 @@ export class ItemVolumesService implements OnModuleInit, OnModuleDestroy {
       const chunkSize = 500;
       for (let i = 0; i < entries.length; i += chunkSize) {
         const chunk = entries.slice(i, i + chunkSize);
-        const pipeline = this.redis.pipeline();
+        const args: string[] = [];
         for (const [itemId, value] of chunk) {
-          pipeline.hset(tmpKey, itemId, JSON.stringify(value));
+          args.push(itemId, JSON.stringify(value));
         }
-        await pipeline.exec();
+        await this.redis.call('HSET', tmpKey, ...args);
       }
 
-      await this.redis.call(
+      const finalizeResult: unknown = await this.redis.call(
         'EVAL',
         this.finalizeSwapScript,
         2,
@@ -229,14 +230,17 @@ export class ItemVolumesService implements OnModuleInit, OnModuleDestroy {
         this.vol24hHashKey,
         sentinelField,
       );
+      swapped = finalizeResult === 1 || finalizeResult === '1';
     } catch (error) {
       this.logger.error('Error writing items:vol24h atomically', error);
       throw error;
     } finally {
-      try {
-        await this.redis.call('DEL', tmpKey);
-      } catch {
-        // Best effort cleanup for temporary keys.
+      if (!swapped) {
+        try {
+          await this.redis.call('DEL', tmpKey);
+        } catch {
+          // Best effort cleanup for temporary keys.
+        }
       }
     }
   }
