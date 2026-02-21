@@ -214,11 +214,11 @@ export class ItemVolumesService implements OnModuleInit, OnModuleDestroy {
       const chunkSize = 500;
       for (let i = 0; i < entries.length; i += chunkSize) {
         const chunk = entries.slice(i, i + chunkSize);
-        const pipeline = this.redis.pipeline();
+        const args: string[] = [];
         for (const [itemId, value] of chunk) {
-          pipeline.hset(tmpKey, itemId, JSON.stringify(value));
+          args.push(itemId, JSON.stringify(value));
         }
-        await pipeline.exec();
+        await this.redis.call('HSET', tmpKey, ...args);
       }
 
       await this.redis.call(
