@@ -53,6 +53,8 @@ const METHOD_EXAMPLE = {
       clickIntensity: 2,
       afkiness: 2,
       riskLevel: 'low',
+      marketImpactInstant: 0.32,
+      marketImpactSlow: 0.21,
       xpHour: [{ skill: 'Cooking', experience: 300000 }],
       wilderness: false,
     },

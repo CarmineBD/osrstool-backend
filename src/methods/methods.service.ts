@@ -26,6 +26,7 @@ import { RuneScapeApiService } from './RuneScapeApiService';
 import { computeMissingRequirements, filterMethodsByUserStats } from './helpers/requirements';
 import { ConfigService } from '@nestjs/config';
 import { User } from '../auth/entities/user.entity';
+import { calculateMarketImpact } from './market-impact-calculator';
 
 // Definimos tipos para mayor seguridad
 interface Profit {
@@ -33,6 +34,21 @@ interface Profit {
   high: number;
 }
 type ProfitRecord = Record<string, Profit>;
+
+interface ItemPrice {
+  high: number;
+  low: number;
+}
+
+interface ItemVolume24h {
+  high24h?: number;
+  low24h?: number;
+}
+
+interface VariantIoQuantity {
+  id: number;
+  quantity: number;
+}
 
 interface ListFilters {
   name?: string;
@@ -91,6 +107,8 @@ interface MethodDetailsWithProfit {
 export class MethodsService implements OnModuleDestroy {
   private readonly redis: Redis;
   private readonly methodsProfitsHashKey = 'methods:profits';
+  private readonly itemPricesHashKey = 'items:prices';
+  private readonly itemVolumes24hHashKey = 'items:vol24h';
 
   constructor(
     @InjectRepository(Method)
@@ -874,6 +892,137 @@ export class MethodsService implements OnModuleDestroy {
     return this.parseProfitRecordString(hashRaw) ?? {};
   }
 
+  private toNonNegativeNumberOrNull(value: unknown): number | null {
+    if (typeof value === 'number' && Number.isFinite(value)) {
+      return value >= 0 ? value : 0;
+    }
+
+    if (typeof value === 'string') {
+      const parsed = Number.parseFloat(value);
+      if (Number.isFinite(parsed)) {
+        return parsed >= 0 ? parsed : 0;
+      }
+    }
+
+    return null;
+  }
+
+  private parseItemPrice(raw: unknown): ItemPrice | null {
+    if (!raw || typeof raw !== 'object' || Array.isArray(raw)) {
+      return null;
+    }
+
+    const candidate = raw as Record<string, unknown>;
+    const low = this.toNonNegativeNumberOrNull(candidate.low);
+    if (low === null) {
+      return null;
+    }
+
+    const high = this.toNonNegativeNumberOrNull(candidate.high) ?? low;
+    return { high, low };
+  }
+
+  private parseJsonValue(raw: unknown): unknown {
+    const text = typeof raw === 'string' ? raw : Buffer.isBuffer(raw) ? raw.toString('utf8') : null;
+    if (!text) return null;
+
+    try {
+      return JSON.parse(text);
+    } catch {
+      return null;
+    }
+  }
+
+  private async getItemPrices(ids: number[]): Promise<Record<number, ItemPrice>> {
+    if (ids.length === 0) return {};
+
+    const fields = ids.map(String);
+    const hashRaw = await this.redis.call('HMGET', this.itemPricesHashKey, ...fields);
+    const rows: unknown[] = Array.isArray(hashRaw) ? hashRaw : [];
+
+    const result: Record<number, ItemPrice> = {};
+    for (let i = 0; i < ids.length; i += 1) {
+      const parsed = this.parseJsonValue(rows[i]);
+      const price = this.parseItemPrice(parsed);
+      if (!price) continue;
+      result[ids[i]] = price;
+    }
+
+    return result;
+  }
+
+  private parseItemVolume24h(raw: unknown): ItemVolume24h | null {
+    if (!raw || typeof raw !== 'object' || Array.isArray(raw)) {
+      return null;
+    }
+
+    const candidate = raw as Record<string, unknown>;
+    const high24h = this.toNonNegativeNumberOrNull(candidate.high24h);
+    const low24h = this.toNonNegativeNumberOrNull(candidate.low24h);
+
+    if (high24h === null && low24h === null) {
+      return null;
+    }
+
+    return {
+      ...(high24h !== null ? { high24h } : {}),
+      ...(low24h !== null ? { low24h } : {}),
+    };
+  }
+
+  private async getItemVolumes24h(ids: number[]): Promise<Record<number, ItemVolume24h>> {
+    if (ids.length === 0) return {};
+
+    const fields = ids.map(String);
+    const hashRaw = await this.redis.call('HMGET', this.itemVolumes24hHashKey, ...fields);
+    const rows: unknown[] = Array.isArray(hashRaw) ? hashRaw : [];
+
+    const result: Record<number, ItemVolume24h> = {};
+    for (let i = 0; i < ids.length; i += 1) {
+      const parsed = this.parseJsonValue(rows[i]);
+      const itemVolume = this.parseItemVolume24h(parsed);
+      if (!itemVolume) continue;
+      result[ids[i]] = itemVolume;
+    }
+
+    return result;
+  }
+
+  private collectItemIdsFromVariants(
+    variants: Array<{ inputs: VariantIoQuantity[]; outputs: VariantIoQuantity[] }>,
+  ): number[] {
+    const ids = new Set<number>();
+
+    for (const variant of variants) {
+      for (const input of variant.inputs) {
+        if (Number.isInteger(input.id) && input.id > 0) ids.add(input.id);
+      }
+      for (const output of variant.outputs) {
+        if (Number.isInteger(output.id) && output.id > 0) ids.add(output.id);
+      }
+    }
+
+    return [...ids];
+  }
+
+  private collectItemIdsFromMethods(methods: MethodDto[]): number[] {
+    const variants = methods.flatMap((method) => method.variants);
+    return this.collectItemIdsFromVariants(variants);
+  }
+
+  private calculateVariantMarketImpact(
+    variant: { inputs: VariantIoQuantity[]; outputs: VariantIoQuantity[] },
+    pricesByItem: Record<number, ItemPrice>,
+    volumes24hByItem: Record<number, ItemVolume24h>,
+  ): { marketImpactInstant: number; marketImpactSlow: number } {
+    return calculateMarketImpact({
+      inputs: variant.inputs,
+      outputs: variant.outputs,
+      pricesByItem,
+      volumes24hByItem,
+    });
+  }
+
   async findAllWithProfit(
     page = 1,
     perPage = 10,
@@ -899,13 +1048,24 @@ export class MethodsService implements OnModuleDestroy {
     }
 
     // Enriquecemos la lista (filtrada o no) con la información de profit proveniente de Redis
-    const allProfits = await this.getAllMethodsProfits();
+    const itemIds = this.collectItemIdsFromMethods(methodsToProcess);
+    const [allProfits, pricesByItem, volumes24hByItem] = await Promise.all([
+      this.getAllMethodsProfits(),
+      this.getItemPrices(itemIds),
+      this.getItemVolumes24h(itemIds),
+    ]);
+
     let enrichedMethods = methodsToProcess
       .map((method) => {
         const methodProfits = allProfits[method.id] ?? {};
         let enrichedVariants = method.variants.map((variant) => {
           const profitKey = variant.id;
           const profit = methodProfits[profitKey] ?? { low: 0, high: 0 };
+          const marketImpact = this.calculateVariantMarketImpact(
+            variant,
+            pricesByItem,
+            volumes24hByItem,
+          );
           const {
             id,
             slug,
@@ -931,6 +1091,8 @@ export class MethodsService implements OnModuleDestroy {
             wilderness,
             lowProfit: profit.low,
             highProfit: profit.high,
+            marketImpactInstant: marketImpact.marketImpactInstant,
+            marketImpactSlow: marketImpact.marketImpactSlow,
           };
         });
 
@@ -1108,13 +1270,23 @@ export class MethodsService implements OnModuleDestroy {
     likedByUserId?: string,
   ): Promise<MethodDetailsWithProfit> {
     const methodDto = await this.findOne(id);
-    const allProfits = await this.getMethodProfits(methodDto.id);
+    const itemIds = this.collectItemIdsFromVariants(methodDto.variants);
+    const [allProfits, pricesByItem, volumes24hByItem] = await Promise.all([
+      this.getMethodProfits(methodDto.id),
+      this.getItemPrices(itemIds),
+      this.getItemVolumes24h(itemIds),
+    ]);
 
     const enrichedVariants = await Promise.all(
       methodDto.variants.map(async (variant) => {
         // Si solo hay una variante se utiliza el id del método; de lo contrario se usa una clave compuesta
         const profitKey = variant.id;
         const profit = allProfits[profitKey] ?? { low: 0, high: 0 };
+        const marketImpact = this.calculateVariantMarketImpact(
+          variant,
+          pricesByItem,
+          volumes24hByItem,
+        );
 
         const trends = await this.computeTrend(variant.id, profit.high);
 
@@ -1133,6 +1305,8 @@ export class MethodsService implements OnModuleDestroy {
           missingRequirements,
           lowProfit: profit.low,
           highProfit: profit.high,
+          marketImpactInstant: marketImpact.marketImpactInstant,
+          marketImpactSlow: marketImpact.marketImpactSlow,
           trendLastHour: trends.lastHour,
           trendLast24h: trends.last24h,
           trendLastWeek: trends.lastWeek,
