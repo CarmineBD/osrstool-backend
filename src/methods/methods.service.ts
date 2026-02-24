@@ -63,9 +63,18 @@ interface ListFilters {
 }
 
 interface SortOptions {
-  sortBy?: 'clickIntensity' | 'afkiness' | 'xpHour' | 'highProfit' | 'likes';
+  sortBy?:
+    | 'clickIntensity'
+    | 'afkiness'
+    | 'xpHour'
+    | 'highProfit'
+    | 'likes'
+    | 'gpPerXpLow'
+    | 'gpPerXpHigh';
   order?: 'asc' | 'desc';
 }
+
+type VariantsMode = 'best' | 'all';
 
 interface ListQuery {
   page?: string;
@@ -81,6 +90,7 @@ interface ListQuery {
   showProfitables?: string;
   enabled?: string | boolean;
   likedByMe?: string | boolean;
+  variants?: string;
   sortBy?: string;
   order?: string;
   authorization?: string;
@@ -241,6 +251,28 @@ export class MethodsService implements OnModuleDestroy {
     if (normalized === 'false' || normalized === '0') return false;
 
     throw new BadRequestException(`${paramName} must be a boolean value`);
+  }
+
+  private parseVariantsQueryParam(value: string | undefined): VariantsMode {
+    if (value == null) return 'best';
+
+    const normalized = value.trim().toLowerCase();
+    if (normalized === 'best' || normalized === 'all') {
+      return normalized;
+    }
+
+    throw new BadRequestException('variants must be one of: best, all');
+  }
+
+  private getExperienceForSkill(xpHour: XpHour | null | undefined, skill: string): number | null {
+    if (!Array.isArray(xpHour) || skill.length === 0) return null;
+
+    const match = xpHour.find(
+      (entry) => typeof entry.skill === 'string' && entry.skill.trim().toLowerCase() === skill,
+    );
+    const experience = Number(match?.experience);
+    if (!Number.isFinite(experience) || experience <= 0) return null;
+    return experience;
   }
 
   private async verifySupabaseToken(authorization?: string): Promise<string> {
@@ -441,7 +473,14 @@ export class MethodsService implements OnModuleDestroy {
   private buildSortOptions(query: ListQuery): SortOptions {
     const { sortBy = 'highProfit', order = 'desc' } = query;
     return {
-      sortBy: sortBy as 'clickIntensity' | 'afkiness' | 'xpHour' | 'highProfit' | 'likes',
+      sortBy: sortBy as
+        | 'clickIntensity'
+        | 'afkiness'
+        | 'xpHour'
+        | 'highProfit'
+        | 'likes'
+        | 'gpPerXpLow'
+        | 'gpPerXpHigh',
       order: (order as 'asc' | 'desc') ?? 'desc',
     };
   }
@@ -450,6 +489,7 @@ export class MethodsService implements OnModuleDestroy {
     const { page = '1', perPage = '10', username } = query;
     const p = parseInt(page, 10);
     const pp = parseInt(perPage, 10);
+    const variantsMode = this.parseVariantsQueryParam(query.variants);
     const likedByMeFilter = this.parseBooleanQueryParam(query.likedByMe, 'likedByMe');
     const authenticatedUserId = await this.resolveAuthenticatedUserId(query.authorization);
 
@@ -475,6 +515,7 @@ export class MethodsService implements OnModuleDestroy {
         likedByUserId: authenticatedUserId ?? undefined,
         onlyLikedByMe: likedByMeFilter === true,
       },
+      variantsMode,
     );
 
     const hasNext = p * pp < result.total;
@@ -1292,6 +1333,7 @@ export class MethodsService implements OnModuleDestroy {
     filters: ListFilters = { enabled: true },
     sort: SortOptions = { sortBy: 'highProfit', order: 'desc' },
     likeOptions: ListLikeOptions = {},
+    variantsMode: VariantsMode = 'best',
   ): Promise<{ data: any[]; total: number }> {
     // Obtenemos todos los métodos para poder ordenarlos por profit posteriormente
     const allEntities = await this.methodRepo.find({
@@ -1316,6 +1358,7 @@ export class MethodsService implements OnModuleDestroy {
       this.getItemPrices(itemIds),
       this.getItemVolumes24h(itemIds),
     ]);
+    const selectedSkill = filters.skill?.trim().toLowerCase() || undefined;
 
     let enrichedMethods = methodsToProcess
       .map((method) => {
@@ -1340,7 +1383,7 @@ export class MethodsService implements OnModuleDestroy {
             description,
             wilderness,
           } = variant;
-          return {
+          const enrichedVariant = {
             id,
             slug,
             xpHour,
@@ -1356,6 +1399,19 @@ export class MethodsService implements OnModuleDestroy {
             marketImpactInstant: marketImpact.marketImpactInstant,
             marketImpactSlow: marketImpact.marketImpactSlow,
           };
+
+          if (selectedSkill) {
+            const experienceForSkill = this.getExperienceForSkill(xpHour, selectedSkill);
+            if (experienceForSkill != null) {
+              return {
+                ...enrichedVariant,
+                gpPerXpHigh: profit.high / experienceForSkill,
+                gpPerXpLow: profit.low / experienceForSkill,
+              };
+            }
+          }
+
+          return enrichedVariant;
         });
 
         // Filtrado por propiedades de variant
@@ -1380,9 +1436,9 @@ export class MethodsService implements OnModuleDestroy {
             if ((filters.givesExperience && !hasXp) || (!filters.givesExperience && hasXp))
               return false;
           }
-          if (filters.skill && v.xpHour) {
-            const skillNames = v.xpHour.map((s) => s.skill.toLowerCase());
-            if (!skillNames.includes(filters.skill.toLowerCase())) return false;
+          if (selectedSkill) {
+            const experienceForSkill = this.getExperienceForSkill(v.xpHour, selectedSkill);
+            if (experienceForSkill == null) return false;
           }
           if (filters.showProfitables && v.highProfit <= 0) return false;
           return true;
@@ -1399,13 +1455,26 @@ export class MethodsService implements OnModuleDestroy {
         )
           return false;
         return m.variants.length > 0;
-      })
-      .map((m) => {
-        const variantCount = variantCounts[m.id] ?? 0;
-        const bestVariant = m.variants.sort((a, b) => b.highProfit - a.highProfit)[0];
-        const { description: _description, ...methodWithoutDescription } = m;
+      });
+
+    if (variantsMode === 'all') {
+      enrichedMethods = enrichedMethods.flatMap((method) => {
+        const variantCount = variantCounts[method.id] ?? 0;
+        const { description: _description, ...methodWithoutDescription } = method;
+        return method.variants.map((variant) => ({
+          ...methodWithoutDescription,
+          variants: [variant],
+          variantCount,
+        }));
+      });
+    } else {
+      enrichedMethods = enrichedMethods.map((method) => {
+        const variantCount = variantCounts[method.id] ?? 0;
+        const bestVariant = [...method.variants].sort((a, b) => b.highProfit - a.highProfit)[0];
+        const { description: _description, ...methodWithoutDescription } = method;
         return { ...methodWithoutDescription, variants: [bestVariant], variantCount };
       });
+    }
 
     const methodIds = enrichedMethods.map((method) => method.id);
     const likesCountMap = await this.getLikesCountMap(methodIds);
@@ -1440,6 +1509,8 @@ export class MethodsService implements OnModuleDestroy {
             afkiness?: number | null;
             xpHour?: XpHour | null;
             highProfit?: number | null;
+            gpPerXpLow?: number | null;
+            gpPerXpHigh?: number | null;
           }>;
         },
         b: {
@@ -1449,6 +1520,8 @@ export class MethodsService implements OnModuleDestroy {
             afkiness?: number | null;
             xpHour?: XpHour | null;
             highProfit?: number | null;
+            gpPerXpLow?: number | null;
+            gpPerXpHigh?: number | null;
           }>;
         },
       ) => {
@@ -1467,6 +1540,10 @@ export class MethodsService implements OnModuleDestroy {
             const likesB = b.likes ?? 0;
             return comparator(likesA, likesB);
           }
+          case 'gpPerXpLow':
+            return comparator(va.gpPerXpLow ?? 0, vb.gpPerXpLow ?? 0);
+          case 'gpPerXpHigh':
+            return comparator(va.gpPerXpHigh ?? 0, vb.gpPerXpHigh ?? 0);
           case 'highProfit':
           default:
             return comparator(va.highProfit ?? 0, vb.highProfit ?? 0);
