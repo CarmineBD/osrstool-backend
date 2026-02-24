@@ -1,4 +1,5 @@
 import {
+  BadRequestException,
   Controller,
   ForbiddenException,
   Get,
@@ -170,6 +171,54 @@ export class MethodsController {
       authorization: req?.headers.authorization,
     });
   }
+
+  @Get('skills/summary')
+  @ApiOperation({
+    summary: 'Get skill summaries',
+    description:
+      'Returns bestProfit, bestAfk and bestXp methods per skill. Only username and enabled query parameters are allowed. username requires a registered user and enabled requires super_admin.',
+  })
+  @ApiQuery({
+    name: 'username',
+    required: false,
+    description: 'RuneScape username for user context',
+  })
+  @ApiQuery({
+    name: 'enabled',
+    required: false,
+    description: 'true or false (default true)',
+  })
+  @ApiOkResponse({
+    description: 'Skill summaries',
+    schema: {
+      example: {
+        data: {
+          magic: {
+            bestProfit: METHOD_EXAMPLE,
+            bestAfk: METHOD_EXAMPLE,
+            bestXp: METHOD_EXAMPLE,
+          },
+        },
+        meta: { username: 'zezima', computedAt: 1771459200 },
+      },
+    },
+  })
+  async findSkillsSummary(
+    @Query('username') username?: string,
+    @Query('enabled') enabled?: string | boolean,
+    @Query() query?: Record<string, string | undefined>,
+    @Req() req?: Request,
+  ): Promise<unknown> {
+    const disallowedQueryParams = Object.keys(query ?? {}).filter(
+      (key) => key !== 'username' && key !== 'enabled',
+    );
+    if (disallowedQueryParams.length > 0) {
+      throw new BadRequestException('Only username and enabled query parameters are allowed');
+    }
+
+    return this.svc.skillsSummaryWithProfitResponse(username, req?.headers.authorization, enabled);
+  }
+
   @Post(':methodId/like')
   @UseGuards(SupabaseAuthGuard)
   @ApiBearerAuth()

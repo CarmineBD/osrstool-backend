@@ -232,6 +232,137 @@ describe('MethodsService variantCount', () => {
     expect(method.variants[0].id).toBe('v2');
   });
 
+  it('builds skill summaries using only variants that grant xp to that skill', async () => {
+    const methodOne: Method = {
+      id: 'm1',
+      name: 'Magic method',
+      slug: 'magic-method',
+      description: undefined,
+      category: 'Skilling',
+      enabled: true,
+      createdAt: new Date(),
+      variants: [
+        {
+          id: 'v1',
+          slug: 'v1',
+          label: 'Magic xp variant',
+          description: null,
+          xpHour: [
+            { skill: 'Magic', experience: 100000 },
+            { skill: 'Crafting', experience: 200000 },
+          ],
+          clickIntensity: 5,
+          afkiness: 10,
+          riskLevel: '1',
+          requirements: null,
+          recommendations: null,
+          wilderness: false,
+          actionsPerHour: 800,
+          createdAt: new Date(),
+          ioItems: [],
+          method: {} as Method,
+        } as MethodVariant,
+        {
+          id: 'v2',
+          slug: 'v2',
+          label: 'Magic profit variant',
+          description: null,
+          xpHour: [{ skill: 'Magic', experience: 50000 }],
+          clickIntensity: 4,
+          afkiness: 20,
+          riskLevel: '1',
+          requirements: null,
+          recommendations: null,
+          wilderness: false,
+          actionsPerHour: 600,
+          createdAt: new Date(),
+          ioItems: [],
+          method: {} as Method,
+        } as MethodVariant,
+      ],
+    };
+
+    const methodTwo: Method = {
+      id: 'm2',
+      name: 'Crafting method',
+      slug: 'crafting-method',
+      description: undefined,
+      category: 'Skilling',
+      enabled: true,
+      createdAt: new Date(),
+      variants: [
+        {
+          id: 'v3',
+          slug: 'v3',
+          label: 'Crafting afk variant',
+          description: null,
+          xpHour: [{ skill: 'Crafting', experience: 150000 }],
+          clickIntensity: 2,
+          afkiness: 30,
+          riskLevel: '1',
+          requirements: null,
+          recommendations: null,
+          wilderness: false,
+          actionsPerHour: 500,
+          createdAt: new Date(),
+          ioItems: [],
+          method: {} as Method,
+        } as MethodVariant,
+      ],
+    };
+
+    const methodRepo = {
+      find: jest.fn().mockResolvedValue([methodOne, methodTwo]),
+    } as unknown as Repository<Method>;
+
+    const service = new MethodsService(
+      methodRepo,
+      {} as Repository<MethodVariant>,
+      {} as Repository<VariantIoItem>,
+      {} as Repository<VariantHistory>,
+      createMethodLikeRepo(),
+      {} as Repository<User>,
+      {} as VariantSnapshotService,
+      {} as RuneScapeApiService,
+      { get: jest.fn().mockReturnValue('redis://localhost:6379') } as unknown as ConfigService,
+    );
+
+    call.mockImplementation((command: string) => {
+      if (command === 'HGETALL') {
+        return {
+          m1: JSON.stringify({
+            v1: { low: 0, high: 500 },
+            v2: { low: 0, high: 800 },
+          }),
+          m2: JSON.stringify({
+            v3: { low: 0, high: 1000 },
+          }),
+        };
+      }
+      return null;
+    });
+
+    const result = (await service.skillsSummaryWithProfitResponse()) as {
+      data: Record<
+        string,
+        {
+          bestProfit: { variants: Array<{ id: string }> };
+          bestAfk: { variants: Array<{ id: string }> };
+          bestXp: { variants: Array<{ id: string }> };
+        }
+      >;
+      meta: { computedAt: number };
+    };
+
+    expect(result.data.magic.bestXp.variants[0].id).toBe('v1');
+    expect(result.data.magic.bestProfit.variants[0].id).toBe('v2');
+    expect(result.data.magic.bestAfk.variants[0].id).toBe('v2');
+    expect(result.data.crafting.bestXp.variants[0].id).toBe('v1');
+    expect(result.data.crafting.bestProfit.variants[0].id).toBe('v3');
+    expect(result.data.crafting.bestAfk.variants[0].id).toBe('v3');
+    expect(Number.isInteger(result.meta.computedAt)).toBe(true);
+  });
+
   it('throws when username is sent by a non-registered user', async () => {
     const methodRepo = {
       find: jest.fn().mockResolvedValue([]),
@@ -298,6 +429,96 @@ describe('MethodsService variantCount', () => {
 
     expect(verifyTokenSpy).not.toHaveBeenCalled();
     expect(result.status).toBe('ok');
+  });
+
+  it('throws on skill summaries when username is sent by a non-registered user', async () => {
+    const methodRepo = {
+      find: jest.fn().mockResolvedValue([]),
+    } as unknown as Repository<Method>;
+
+    const userRepo = {
+      findOne: jest.fn().mockResolvedValue(null),
+    } as unknown as Repository<User>;
+
+    const service = new MethodsService(
+      methodRepo,
+      {} as Repository<MethodVariant>,
+      {} as Repository<VariantIoItem>,
+      {} as Repository<VariantHistory>,
+      createMethodLikeRepo(),
+      userRepo,
+      {} as VariantSnapshotService,
+      {} as RuneScapeApiService,
+      { get: jest.fn().mockReturnValue('redis://localhost:6379') } as unknown as ConfigService,
+    );
+
+    jest.spyOn(service as any, 'verifySupabaseToken').mockResolvedValue('user-1');
+
+    await expect(
+      service.skillsSummaryWithProfitResponse('zezima', 'Bearer token'),
+    ).rejects.toBeInstanceOf(ForbiddenException);
+  });
+
+  it('supports enabled=false on skill summaries for super admins', async () => {
+    const findMock = jest.fn().mockResolvedValue([]);
+    const methodRepo = {
+      find: findMock,
+    } as unknown as Repository<Method>;
+
+    const userRepo = {
+      findOne: jest.fn().mockResolvedValue({ id: 'user-1', role: 'super_admin' }),
+    } as unknown as Repository<User>;
+
+    const service = new MethodsService(
+      methodRepo,
+      {} as Repository<MethodVariant>,
+      {} as Repository<VariantIoItem>,
+      {} as Repository<VariantHistory>,
+      createMethodLikeRepo(),
+      userRepo,
+      {} as VariantSnapshotService,
+      {} as RuneScapeApiService,
+      { get: jest.fn().mockReturnValue('redis://localhost:6379') } as unknown as ConfigService,
+    );
+
+    jest.spyOn(service as any, 'verifySupabaseToken').mockResolvedValue('user-1');
+
+    await service.skillsSummaryWithProfitResponse(undefined, 'Bearer token', 'false');
+
+    expect(findMock).toHaveBeenCalledWith({
+      where: { enabled: false },
+      relations: ['variants', 'variants.ioItems'],
+    });
+  });
+
+  it('throws when enabled query param is sent by a non-super admin on skill summaries', async () => {
+    const findMock = jest.fn().mockResolvedValue([]);
+    const methodRepo = {
+      find: findMock,
+    } as unknown as Repository<Method>;
+
+    const userRepo = {
+      findOne: jest.fn().mockResolvedValue({ id: 'user-1', role: 'user' }),
+    } as unknown as Repository<User>;
+
+    const service = new MethodsService(
+      methodRepo,
+      {} as Repository<MethodVariant>,
+      {} as Repository<VariantIoItem>,
+      {} as Repository<VariantHistory>,
+      createMethodLikeRepo(),
+      userRepo,
+      {} as VariantSnapshotService,
+      {} as RuneScapeApiService,
+      { get: jest.fn().mockReturnValue('redis://localhost:6379') } as unknown as ConfigService,
+    );
+
+    jest.spyOn(service as any, 'verifySupabaseToken').mockResolvedValue('user-1');
+
+    await expect(
+      service.skillsSummaryWithProfitResponse(undefined, 'Bearer token', 'true'),
+    ).rejects.toBeInstanceOf(ForbiddenException);
+    expect(findMock).not.toHaveBeenCalled();
   });
 
   it('throws when likedByMe=true is sent without auth', async () => {

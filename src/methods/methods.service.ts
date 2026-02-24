@@ -103,6 +103,47 @@ interface MethodDetailsWithProfit {
   variants: Array<Record<string, unknown>>;
 }
 
+interface SkillSummaryVariant {
+  id: string;
+  slug: string;
+  xpHour?: XpHour | null;
+  label?: string;
+  description?: string | null;
+  clickIntensity?: number | null;
+  afkiness?: number | null;
+  riskLevel?: string | null;
+  requirements?: Record<string, unknown> | null;
+  wilderness?: boolean;
+  lowProfit: number;
+  highProfit: number;
+  marketImpactInstant: number;
+  marketImpactSlow: number;
+}
+
+interface SkillSummaryMethod {
+  id: string;
+  name: string;
+  slug: string;
+  category?: string;
+  enabled: boolean;
+  variants: SkillSummaryVariant[];
+  variantCount: number;
+  likes: number;
+  likedByMe?: boolean;
+}
+
+interface SkillSummaryCandidate {
+  method: SkillSummaryMethod;
+  variant: SkillSummaryVariant;
+  skillExperience: number;
+}
+
+interface SkillSummaryBySkill {
+  bestProfit: SkillSummaryMethod | null;
+  bestAfk: SkillSummaryMethod | null;
+  bestXp: SkillSummaryMethod | null;
+}
+
 @Injectable()
 export class MethodsService implements OnModuleDestroy {
   private readonly redis: Redis;
@@ -336,15 +377,25 @@ export class MethodsService implements OnModuleDestroy {
     await this.methodLikeRepo.delete({ methodId, userId });
   }
 
-  private async assertSuperAdminForDisabledMethods(authorization?: string): Promise<void> {
-    // Accessing disabled methods is an admin-only capability.
-    // We require a valid Supabase JWT and then enforce role from our DB users table.
+  private async assertSuperAdmin(
+    authorization: string | undefined,
+    errorMessage: string,
+  ): Promise<void> {
     const userId = await this.verifySupabaseToken(authorization);
     const user = await this.userRepo.findOne({ where: { id: userId } });
 
     if (!user || user.role !== 'super_admin') {
-      throw new ForbiddenException('Only super_admin can request enabled=false');
+      throw new ForbiddenException(errorMessage);
     }
+  }
+
+  private async assertSuperAdminForDisabledMethods(authorization?: string): Promise<void> {
+    // Accessing disabled methods is an admin-only capability.
+    await this.assertSuperAdmin(authorization, 'Only super_admin can request enabled=false');
+  }
+
+  private async assertSuperAdminForEnabledQueryParam(authorization?: string): Promise<void> {
+    await this.assertSuperAdmin(authorization, 'Only super_admin can use enabled query parameter');
   }
 
   private async assertCanAccessMethodDetails(
@@ -443,6 +494,217 @@ export class MethodsService implements OnModuleDestroy {
       warnings,
       meta,
     };
+  }
+
+  async skillsSummaryWithProfitResponse(
+    username?: string,
+    authorization?: string,
+    enabledParam?: string | boolean,
+  ) {
+    const authenticatedUserId = await this.resolveAuthenticatedUserId(authorization);
+    await this.assertRegisteredUserForUsername(username, authorization, authenticatedUserId);
+    const { userInfo } = await this.fetchUserInfo(username);
+    if (enabledParam != null) {
+      await this.assertSuperAdminForEnabledQueryParam(authorization);
+    }
+    const enabled = this.parseBooleanQueryParam(enabledParam, 'enabled') ?? true;
+
+    const methods = await this.findAllWithVariantsAndProfit(
+      userInfo ?? undefined,
+      authenticatedUserId ?? undefined,
+      enabled,
+    );
+
+    const candidatesBySkill = new Map<string, SkillSummaryCandidate[]>();
+    for (const method of methods) {
+      for (const variant of method.variants) {
+        const xpEntries = Array.isArray(variant.xpHour) ? variant.xpHour : [];
+        for (const entry of xpEntries) {
+          const skillKey = this.toSkillSummaryKey(entry.skill);
+          const experience = Number(entry.experience);
+
+          if (!skillKey || !Number.isFinite(experience) || experience <= 0) {
+            continue;
+          }
+
+          const candidate: SkillSummaryCandidate = {
+            method,
+            variant,
+            skillExperience: experience,
+          };
+
+          const bucket = candidatesBySkill.get(skillKey) ?? [];
+          bucket.push(candidate);
+          candidatesBySkill.set(skillKey, bucket);
+        }
+      }
+    }
+
+    const data: Record<string, SkillSummaryBySkill> = {};
+    for (const skill of [...candidatesBySkill.keys()].sort()) {
+      const candidates = candidatesBySkill.get(skill) ?? [];
+      const bestProfitCandidate = this.pickBestSkillCandidate(
+        candidates,
+        (candidate) => candidate.variant.highProfit ?? 0,
+      );
+      const bestAfkCandidate = this.pickBestSkillCandidate(
+        candidates,
+        (candidate) => candidate.variant.afkiness ?? 0,
+      );
+      const bestXpCandidate = this.pickBestSkillCandidate(
+        candidates,
+        (candidate) => candidate.skillExperience,
+      );
+
+      data[skill] = {
+        bestProfit: bestProfitCandidate
+          ? this.toSingleVariantSkillMethod(bestProfitCandidate.method, bestProfitCandidate.variant)
+          : null,
+        bestAfk: bestAfkCandidate
+          ? this.toSingleVariantSkillMethod(bestAfkCandidate.method, bestAfkCandidate.variant)
+          : null,
+        bestXp: bestXpCandidate
+          ? this.toSingleVariantSkillMethod(bestXpCandidate.method, bestXpCandidate.variant)
+          : null,
+      };
+    }
+
+    return {
+      data,
+      meta: {
+        ...(username ? { username } : {}),
+        computedAt: Math.floor(Date.now() / 1000),
+      },
+    };
+  }
+
+  private toSkillSummaryKey(skillName: unknown): string {
+    if (typeof skillName !== 'string') return '';
+    const normalized = skillName.trim().toLowerCase();
+    return normalized.length > 0 ? normalized : '';
+  }
+
+  private pickBestSkillCandidate(
+    candidates: SkillSummaryCandidate[],
+    metric: (candidate: SkillSummaryCandidate) => number,
+  ): SkillSummaryCandidate | null {
+    let best: SkillSummaryCandidate | null = null;
+    let bestMetric = Number.NEGATIVE_INFINITY;
+
+    for (const candidate of candidates) {
+      const metricValue = metric(candidate);
+      if (metricValue > bestMetric) {
+        best = candidate;
+        bestMetric = metricValue;
+        continue;
+      }
+
+      if (metricValue === bestMetric && best) {
+        if (candidate.skillExperience > best.skillExperience) {
+          best = candidate;
+          continue;
+        }
+
+        if (
+          candidate.skillExperience === best.skillExperience &&
+          candidate.variant.id < best.variant.id
+        ) {
+          best = candidate;
+        }
+      }
+    }
+
+    return best;
+  }
+
+  private toSingleVariantSkillMethod(
+    method: SkillSummaryMethod,
+    variant: SkillSummaryVariant,
+  ): SkillSummaryMethod {
+    return {
+      ...method,
+      variants: [variant],
+    };
+  }
+
+  private async findAllWithVariantsAndProfit(
+    userInfo?: UserInfo,
+    likedByUserId?: string,
+    enabled = true,
+  ): Promise<SkillSummaryMethod[]> {
+    const allEntities = await this.methodRepo.find({
+      where: { enabled },
+      relations: ['variants', 'variants.ioItems'],
+    });
+
+    const variantCounts = allEntities.reduce<Record<string, number>>((acc, method) => {
+      acc[method.id] = method.variants.length;
+      return acc;
+    }, {});
+
+    let methodsToProcess = allEntities.map((method) => this.toDto(method));
+    if (userInfo) {
+      methodsToProcess = filterMethodsByUserStats(methodsToProcess, userInfo);
+    }
+
+    const itemIds = this.collectItemIdsFromMethods(methodsToProcess);
+    const [allProfits, pricesByItem, volumes24hByItem] = await Promise.all([
+      this.getAllMethodsProfits(),
+      this.getItemPrices(itemIds),
+      this.getItemVolumes24h(itemIds),
+    ]);
+
+    let methods = methodsToProcess
+      .map((method) => {
+        const methodProfits = allProfits[method.id] ?? {};
+        const variants: SkillSummaryVariant[] = method.variants.map((variant) => {
+          const profit = methodProfits[variant.id] ?? { low: 0, high: 0 };
+          const marketImpact = this.calculateVariantMarketImpact(
+            variant,
+            pricesByItem,
+            volumes24hByItem,
+          );
+
+          return {
+            id: variant.id,
+            slug: variant.slug,
+            xpHour: variant.xpHour,
+            label: variant.label,
+            description: variant.description,
+            clickIntensity: variant.clickIntensity,
+            afkiness: variant.afkiness,
+            riskLevel: variant.riskLevel,
+            requirements: variant.requirements as Record<string, unknown> | null,
+            wilderness: variant.wilderness,
+            lowProfit: profit.low,
+            highProfit: profit.high,
+            marketImpactInstant: marketImpact.marketImpactInstant,
+            marketImpactSlow: marketImpact.marketImpactSlow,
+          };
+        });
+
+        const { description: _description, ...methodWithoutDescription } = method;
+        return {
+          ...methodWithoutDescription,
+          variants,
+          variantCount: variantCounts[method.id] ?? 0,
+        };
+      })
+      .filter((method) => method.variants.length > 0) as SkillSummaryMethod[];
+
+    const methodIds = methods.map((method) => method.id);
+    const likesCountMap = await this.getLikesCountMap(methodIds);
+    const likedMethodIds = likedByUserId
+      ? await this.getLikedMethodIdsByUser(likedByUserId, methodIds)
+      : new Set<string>();
+
+    methods = methods.map((method) => ({
+      ...method,
+      likes: likesCountMap[method.id] ?? 0,
+      ...(likedByUserId ? { likedByMe: likedMethodIds.has(method.id) } : {}),
+    }));
+
+    return methods;
   }
 
   async methodDetailsWithProfitResponse(id: string, username?: string, authorization?: string) {
