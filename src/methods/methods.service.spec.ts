@@ -10,7 +10,7 @@ import { RuneScapeApiService } from './RuneScapeApiService';
 import { buildMethodFixture } from '../testing/fixtures';
 import type { ConfigService } from '@nestjs/config';
 import { User } from '../auth/entities/user.entity';
-import { ForbiddenException, UnauthorizedException } from '@nestjs/common';
+import { BadRequestException, ForbiddenException, UnauthorizedException } from '@nestjs/common';
 
 type MethodDetailsWithProfitResult = Awaited<
   ReturnType<MethodsService['findMethodDetailsWithProfit']>
@@ -141,6 +141,111 @@ describe('MethodsService variantCount', () => {
     expect(result.data[0].variants[0].id).toBe('v2');
   });
 
+  it('returns one method row per variant when variants=all', async () => {
+    const methodEntity: Method = {
+      id: 'm1',
+      name: 'Method 1',
+      slug: 'method-1',
+      description: undefined,
+      category: undefined,
+      enabled: true,
+      createdAt: new Date(),
+      variants: [
+        {
+          id: 'v1',
+          slug: 'v1',
+          label: 'Variant 1',
+          description: null,
+          xpHour: null,
+          clickIntensity: 0,
+          afkiness: 0,
+          riskLevel: '0',
+          requirements: null,
+          recommendations: null,
+          wilderness: false,
+          actionsPerHour: 0,
+          createdAt: new Date(),
+          ioItems: [],
+          method: {} as Method,
+        } as MethodVariant,
+        {
+          id: 'v2',
+          slug: 'v2',
+          label: 'Variant 2',
+          description: null,
+          xpHour: null,
+          clickIntensity: 0,
+          afkiness: 0,
+          riskLevel: '0',
+          requirements: null,
+          recommendations: null,
+          wilderness: false,
+          actionsPerHour: 0,
+          createdAt: new Date(),
+          ioItems: [],
+          method: {} as Method,
+        } as MethodVariant,
+      ],
+    };
+
+    const methodRepo = {
+      find: jest.fn().mockResolvedValue([methodEntity]),
+    } as unknown as Repository<Method>;
+
+    const service = new MethodsService(
+      methodRepo,
+      {} as Repository<MethodVariant>,
+      {} as Repository<VariantIoItem>,
+      {} as Repository<VariantHistory>,
+      createMethodLikeRepo(),
+      {} as Repository<User>,
+      {} as VariantSnapshotService,
+      {} as RuneScapeApiService,
+      { get: jest.fn().mockReturnValue('redis://localhost:6379') } as unknown as ConfigService,
+    );
+
+    call.mockResolvedValue(
+      JSON.stringify([
+        {
+          m1: {
+            v1: { low: 0, high: 10 },
+            v2: { low: 0, high: 20 },
+          },
+        },
+      ]),
+    );
+
+    const result = (await service.findAllWithProfit(
+      1,
+      10,
+      undefined,
+      { enabled: true },
+      { sortBy: 'highProfit', order: 'desc' },
+      {},
+      'all',
+    )) as {
+      data: Array<{ id: string; variantCount: number; variants: Array<{ id: string }> }>;
+      total: number;
+    };
+
+    expect(result.total).toBe(2);
+    expect(result.data).toHaveLength(2);
+    expect(result.data).toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({
+          id: 'm1',
+          variantCount: 2,
+          variants: [expect.objectContaining({ id: 'v1' })],
+        }),
+        expect.objectContaining({
+          id: 'm1',
+          variantCount: 2,
+          variants: [expect.objectContaining({ id: 'v2' })],
+        }),
+      ]),
+    );
+  });
+
   it('filters non-profitable variants when showProfitables is true', async () => {
     const methodEntity = buildMethodFixture();
     methodEntity.id = 'm1';
@@ -230,6 +335,114 @@ describe('MethodsService variantCount', () => {
     const method = result.data[0] as { variants: Array<{ id: string }> };
     expect(method.variants).toHaveLength(1);
     expect(method.variants[0].id).toBe('v2');
+  });
+
+  it('adds gpPerXpHigh and gpPerXpLow when skill is provided using that skill xp only', async () => {
+    const methodEntity = buildMethodFixture();
+    methodEntity.id = 'm1';
+    methodEntity.variants[0].id = 'v1';
+    methodEntity.variants[1].id = 'v2';
+    methodEntity.variants[0].xpHour = [
+      { skill: 'Crafting', experience: 7000 },
+      { skill: 'Magic', experience: 5000 },
+    ];
+    methodEntity.variants[1].xpHour = [{ skill: 'Magic', experience: 2000 }];
+
+    const methodRepo = {
+      find: jest.fn().mockResolvedValue([methodEntity]),
+    } as unknown as Repository<Method>;
+
+    const service = new MethodsService(
+      methodRepo,
+      {} as Repository<MethodVariant>,
+      {} as Repository<VariantIoItem>,
+      {} as Repository<VariantHistory>,
+      createMethodLikeRepo(),
+      {} as Repository<User>,
+      {} as VariantSnapshotService,
+      {} as RuneScapeApiService,
+      { get: jest.fn().mockReturnValue('redis://localhost:6379') } as unknown as ConfigService,
+    );
+
+    jest.spyOn(service as any, 'getAllMethodsProfits').mockResolvedValue({
+      m1: {
+        v1: { low: 5000, high: 10000 },
+        v2: { low: 4000, high: 8000 },
+      },
+    });
+    jest.spyOn(service as any, 'getItemPrices').mockResolvedValue({});
+    jest.spyOn(service as any, 'getItemVolumes24h').mockResolvedValue({});
+
+    const result = (await service.findAllWithProfit(
+      1,
+      10,
+      undefined,
+      { skill: 'magic', enabled: true },
+      { sortBy: 'highProfit', order: 'desc' },
+      {},
+      'all',
+    )) as {
+      data: Array<{ variants: Array<{ id: string; gpPerXpHigh?: number; gpPerXpLow?: number }> }>;
+    };
+
+    expect(result.data).toHaveLength(2);
+
+    const variantById = new Map(result.data.map((m) => [m.variants[0].id, m.variants[0]]));
+    expect(variantById.get('v1')).toMatchObject({
+      gpPerXpHigh: 2,
+      gpPerXpLow: 1,
+    });
+    expect(variantById.get('v2')).toMatchObject({
+      gpPerXpHigh: 4,
+      gpPerXpLow: 2,
+    });
+  });
+
+  it('does not add gpPerXp fields when skill is not provided', async () => {
+    const methodEntity = buildMethodFixture();
+    methodEntity.id = 'm1';
+    methodEntity.variants[0].id = 'v1';
+
+    const methodRepo = {
+      find: jest.fn().mockResolvedValue([methodEntity]),
+    } as unknown as Repository<Method>;
+
+    const service = new MethodsService(
+      methodRepo,
+      {} as Repository<MethodVariant>,
+      {} as Repository<VariantIoItem>,
+      {} as Repository<VariantHistory>,
+      createMethodLikeRepo(),
+      {} as Repository<User>,
+      {} as VariantSnapshotService,
+      {} as RuneScapeApiService,
+      { get: jest.fn().mockReturnValue('redis://localhost:6379') } as unknown as ConfigService,
+    );
+
+    jest.spyOn(service as any, 'getAllMethodsProfits').mockResolvedValue({
+      m1: {
+        [methodEntity.variants[0].id]: { low: 100, high: 200 },
+        [methodEntity.variants[1].id]: { low: 50, high: 150 },
+      },
+    });
+    jest.spyOn(service as any, 'getItemPrices').mockResolvedValue({});
+    jest.spyOn(service as any, 'getItemVolumes24h').mockResolvedValue({});
+
+    const result = (await service.findAllWithProfit(
+      1,
+      10,
+      undefined,
+      { enabled: true },
+      { sortBy: 'highProfit', order: 'desc' },
+      {},
+      'all',
+    )) as {
+      data: Array<{ variants: Array<{ gpPerXpHigh?: number; gpPerXpLow?: number }> }>;
+    };
+
+    const variant = result.data[0].variants[0];
+    expect(variant.gpPerXpHigh).toBeUndefined();
+    expect(variant.gpPerXpLow).toBeUndefined();
   });
 
   it('builds skill summaries using only variants that grant xp to that skill', async () => {
@@ -547,6 +760,32 @@ describe('MethodsService variantCount', () => {
     ).rejects.toBeInstanceOf(UnauthorizedException);
   });
 
+  it('throws when variants query param is invalid', async () => {
+    const methodRepo = {
+      find: jest.fn().mockResolvedValue([]),
+    } as unknown as Repository<Method>;
+
+    const service = new MethodsService(
+      methodRepo,
+      {} as Repository<MethodVariant>,
+      {} as Repository<VariantIoItem>,
+      {} as Repository<VariantHistory>,
+      createMethodLikeRepo(),
+      {} as Repository<User>,
+      {} as VariantSnapshotService,
+      {} as RuneScapeApiService,
+      { get: jest.fn().mockReturnValue('redis://localhost:6379') } as unknown as ConfigService,
+    );
+
+    await expect(
+      service.listWithProfitResponse({
+        page: '1',
+        perPage: '10',
+        variants: 'foo',
+      }),
+    ).rejects.toBeInstanceOf(BadRequestException);
+  });
+
   it('sorts by likes and includes likedByMe when auth token is present', async () => {
     const methodOne = buildMethodFixture();
     methodOne.id = 'm1';
@@ -622,6 +861,65 @@ describe('MethodsService variantCount', () => {
       likes: 1,
       likedByMe: false,
     });
+  });
+
+  it('sorts by gpPerXpHigh when skill is provided', async () => {
+    const methodOne = buildMethodFixture();
+    methodOne.id = 'm1';
+    methodOne.name = 'Method One';
+    methodOne.slug = 'method-one';
+    methodOne.variants = [methodOne.variants[0]];
+    methodOne.variants[0].id = 'm1v1';
+    methodOne.variants[0].xpHour = [{ skill: 'Magic', experience: 5000 }];
+
+    const methodTwo = buildMethodFixture();
+    methodTwo.id = 'm2';
+    methodTwo.name = 'Method Two';
+    methodTwo.slug = 'method-two';
+    methodTwo.variants = [methodTwo.variants[0]];
+    methodTwo.variants[0].id = 'm2v1';
+    methodTwo.variants[0].xpHour = [{ skill: 'Magic', experience: 1000 }];
+
+    const methodRepo = {
+      find: jest.fn().mockResolvedValue([methodOne, methodTwo]),
+    } as unknown as Repository<Method>;
+
+    const service = new MethodsService(
+      methodRepo,
+      {} as Repository<MethodVariant>,
+      {} as Repository<VariantIoItem>,
+      {} as Repository<VariantHistory>,
+      createMethodLikeRepo(),
+      {} as Repository<User>,
+      {} as VariantSnapshotService,
+      {} as RuneScapeApiService,
+      { get: jest.fn().mockReturnValue('redis://localhost:6379') } as unknown as ConfigService,
+    );
+
+    jest.spyOn(service as any, 'getAllMethodsProfits').mockResolvedValue({
+      m1: { m1v1: { low: 1000, high: 5000 } }, // 1 gp/xp high
+      m2: { m2v1: { low: 500, high: 4000 } }, // 4 gp/xp high
+    });
+    jest.spyOn(service as any, 'getItemPrices').mockResolvedValue({});
+    jest.spyOn(service as any, 'getItemVolumes24h').mockResolvedValue({});
+
+    const result = (await service.listWithProfitResponse({
+      page: '1',
+      perPage: '10',
+      skill: 'magic',
+      sortBy: 'gpPerXpHigh',
+      order: 'desc',
+    })) as {
+      data: {
+        methods: Array<{ id: string; variants: Array<{ gpPerXpHigh?: number }> }>;
+      };
+    };
+
+    expect(result.data.methods).toHaveLength(2);
+    expect(result.data.methods[0].id).toBe('m2');
+    expect(result.data.methods[0].variants[0].gpPerXpHigh).toBe(4);
+    expect(result.data.methods[1].id).toBe('m1');
+    expect(result.data.methods[1].variants[0].gpPerXpHigh).toBe(1);
   });
 
   it('includes pageSize and hasNext in list metadata while keeping perPage', async () => {

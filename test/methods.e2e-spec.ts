@@ -169,6 +169,223 @@ describe('Methods (e2e)', () => {
     expect(result.variants[0].id).toBe(variantIds[1]);
   });
 
+  it('GET /methods?variants=all returns one row per variant', async () => {
+    const methodRepo = dataSource.getRepository(Method);
+    const variantRepo = dataSource.getRepository(MethodVariant);
+    const ioRepo = dataSource.getRepository(VariantIoItem);
+    const seed = buildMethodFixture();
+
+    const savedMethod = await methodRepo.save({
+      name: seed.name,
+      slug: seed.slug,
+      description: seed.description,
+      category: seed.category,
+    });
+
+    const [variantA, variantB] = seed.variants;
+    const savedVariantA = await variantRepo.save({
+      label: variantA.label,
+      slug: variantA.slug,
+      description: variantA.description,
+      xpHour: variantA.xpHour,
+      clickIntensity: variantA.clickIntensity,
+      afkiness: variantA.afkiness,
+      riskLevel: variantA.riskLevel,
+      requirements: variantA.requirements,
+      recommendations: variantA.recommendations,
+      wilderness: variantA.wilderness,
+      actionsPerHour: variantA.actionsPerHour,
+      method: savedMethod,
+    });
+
+    const savedVariantB = await variantRepo.save({
+      label: variantB.label,
+      slug: variantB.slug,
+      description: variantB.description,
+      xpHour: variantB.xpHour,
+      clickIntensity: variantB.clickIntensity,
+      afkiness: variantB.afkiness,
+      riskLevel: variantB.riskLevel,
+      requirements: variantB.requirements,
+      recommendations: variantB.recommendations,
+      wilderness: variantB.wilderness,
+      actionsPerHour: variantB.actionsPerHour,
+      method: savedMethod,
+    });
+
+    await ioRepo.save(
+      variantA.ioItems.map((item) => ({
+        itemId: item.itemId,
+        type: item.type,
+        quantity: item.quantity,
+        variant: savedVariantA,
+      })),
+    );
+    await ioRepo.save(
+      variantB.ioItems.map((item) => ({
+        itemId: item.itemId,
+        type: item.type,
+        quantity: item.quantity,
+        variant: savedVariantB,
+      })),
+    );
+
+    const variantIds = [savedVariantA.id, savedVariantB.id];
+    const profitPayload = [
+      {
+        [savedMethod.id]: {
+          [variantIds[0]]: { low: 100, high: 200 },
+          [variantIds[1]]: { low: 50, high: 300 },
+        },
+      },
+    ];
+
+    redisCall.mockResolvedValue(JSON.stringify(profitPayload));
+
+    const server = app.getHttpServer() as unknown as Server;
+    const res = await request(server).get('/methods?variants=all').expect(200);
+
+    const body = res.body as {
+      status: string;
+      data: {
+        methods: Array<{ id: string; variantCount: number; variants: Array<{ id: string }> }>;
+      };
+      meta: {
+        total: number;
+        page: number;
+        pageSize: number;
+        perPage: number;
+        hasNext: boolean;
+      };
+    };
+
+    expect(body.status).toBe('ok');
+    expect(body.data.methods).toHaveLength(2);
+    expect(body.meta).toMatchObject({
+      total: 2,
+      page: 1,
+      pageSize: 10,
+      perPage: 10,
+      hasNext: false,
+    });
+    expect(body.data.methods[0]).toMatchObject({
+      id: savedMethod.id,
+      variantCount: 2,
+      variants: [{ id: variantIds[1] }],
+    });
+    expect(body.data.methods[1]).toMatchObject({
+      id: savedMethod.id,
+      variantCount: 2,
+      variants: [{ id: variantIds[0] }],
+    });
+  });
+
+  it('GET /methods with skill includes gpPerXpHigh and gpPerXpLow per variant', async () => {
+    const methodRepo = dataSource.getRepository(Method);
+    const variantRepo = dataSource.getRepository(MethodVariant);
+    const ioRepo = dataSource.getRepository(VariantIoItem);
+    const seed = buildMethodFixture();
+
+    const savedMethod = await methodRepo.save({
+      name: seed.name,
+      slug: seed.slug,
+      description: seed.description,
+      category: seed.category,
+    });
+
+    const [variantA, variantB] = seed.variants;
+    const savedVariantA = await variantRepo.save({
+      label: variantA.label,
+      slug: variantA.slug,
+      description: variantA.description,
+      xpHour: [
+        { skill: 'Crafting', experience: 7000 },
+        { skill: 'Magic', experience: 5000 },
+      ],
+      clickIntensity: variantA.clickIntensity,
+      afkiness: variantA.afkiness,
+      riskLevel: variantA.riskLevel,
+      requirements: variantA.requirements,
+      recommendations: variantA.recommendations,
+      wilderness: variantA.wilderness,
+      actionsPerHour: variantA.actionsPerHour,
+      method: savedMethod,
+    });
+
+    const savedVariantB = await variantRepo.save({
+      label: variantB.label,
+      slug: variantB.slug,
+      description: variantB.description,
+      xpHour: [{ skill: 'Magic', experience: 2000 }],
+      clickIntensity: variantB.clickIntensity,
+      afkiness: variantB.afkiness,
+      riskLevel: variantB.riskLevel,
+      requirements: variantB.requirements,
+      recommendations: variantB.recommendations,
+      wilderness: variantB.wilderness,
+      actionsPerHour: variantB.actionsPerHour,
+      method: savedMethod,
+    });
+
+    await ioRepo.save(
+      variantA.ioItems.map((item) => ({
+        itemId: item.itemId,
+        type: item.type,
+        quantity: item.quantity,
+        variant: savedVariantA,
+      })),
+    );
+    await ioRepo.save(
+      variantB.ioItems.map((item) => ({
+        itemId: item.itemId,
+        type: item.type,
+        quantity: item.quantity,
+        variant: savedVariantB,
+      })),
+    );
+
+    const variantIds = [savedVariantA.id, savedVariantB.id];
+    const profitPayload = [
+      {
+        [savedMethod.id]: {
+          [variantIds[0]]: { low: 5000, high: 10000 },
+          [variantIds[1]]: { low: 4000, high: 8000 },
+        },
+      },
+    ];
+
+    redisCall.mockResolvedValue(JSON.stringify(profitPayload));
+
+    const server = app.getHttpServer() as unknown as Server;
+    const res = await request(server).get('/methods?skill=magic&variants=all').expect(200);
+
+    const body = res.body as {
+      status: string;
+      data: {
+        methods: Array<{
+          variants: Array<{
+            id: string;
+            gpPerXpHigh?: number;
+            gpPerXpLow?: number;
+          }>;
+        }>;
+      };
+    };
+
+    expect(body.status).toBe('ok');
+    expect(body.data.methods).toHaveLength(2);
+
+    const variantById = new Map(body.data.methods.map((m) => [m.variants[0].id, m.variants[0]]));
+    expect(variantById.get(variantIds[0])).toMatchObject({
+      gpPerXpHigh: 2,
+      gpPerXpLow: 1,
+    });
+    expect(variantById.get(variantIds[1])).toMatchObject({
+      gpPerXpHigh: 4,
+      gpPerXpLow: 2,
+    });
+  });
+
   it('POST /methods rejects unsafe script content in method.description', async () => {
     const server = app.getHttpServer() as unknown as Server;
     const payload = buildValidCreateMethodPayload();
