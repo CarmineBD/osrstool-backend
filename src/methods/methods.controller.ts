@@ -115,12 +115,20 @@ export class MethodsController {
   @ApiQuery({
     name: 'sortBy',
     required: false,
-    description: 'Sort by highProfit, clickIntensity, afkiness, xpHour, likes',
+    description:
+      'Sort by highProfit, clickIntensity, afkiness, xpHour, likes, gpPerXpLow, gpPerXpHigh',
   })
   @ApiQuery({
     name: 'likedByMe',
     required: false,
     description: 'true to return only methods liked by the authenticated user',
+  })
+  @ApiQuery({
+    name: 'variants',
+    required: false,
+    enum: ['best', 'all'],
+    description:
+      'best (default) returns only the best-profit variant per method. all returns one method entry per variant.',
   })
   @ApiQuery({ name: 'order', required: false, description: 'asc or desc' })
   @ApiOkResponse({
@@ -148,6 +156,7 @@ export class MethodsController {
     @Query('showProfitables') showProfitables?: string,
     @Query('enabled') enabled?: string | boolean,
     @Query('likedByMe') likedByMe?: string | boolean,
+    @Query('variants') variants?: string,
     @Query('sortBy') sortBy = 'highProfit',
     @Query('order') order = 'desc',
     @Req() req?: Request,
@@ -166,6 +175,7 @@ export class MethodsController {
       showProfitables,
       enabled,
       likedByMe,
+      variants,
       sortBy,
       order,
       authorization: req?.headers.authorization,
