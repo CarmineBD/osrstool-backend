@@ -8,11 +8,12 @@ import { User } from '../auth/entities/user.entity';
 import { ItemsService } from './items.service';
 import { ItemsController } from './items.controller';
 import { ItemsSeederService } from './items-seeder.service';
+import { ItemsMappingSyncService } from './items-mapping-sync.service';
 
 @Module({
   imports: [TypeOrmModule.forFeature([Item, User]), HttpModule, PricesModule, AuthModule],
-  providers: [ItemsService, ItemsSeederService],
+  providers: [ItemsService, ItemsSeederService, ItemsMappingSyncService],
   controllers: [ItemsController],
-  exports: [ItemsService, ItemsSeederService],
+  exports: [ItemsService, ItemsSeederService, ItemsMappingSyncService],
 })
 export class ItemsModule {}

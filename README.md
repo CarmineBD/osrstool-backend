@@ -53,6 +53,7 @@ Available variables:
 - `CORS_ORIGINS`: Comma-separated allowed origins (e.g. `https://example.com,https://app.example.com`).
 - `SWAGGER_ENABLED`: Set to `true` to enable Swagger in production (disabled by default in prod).
 - `CDN_BASE`: Base URL for item icons (defaults to OSRS Wiki).
+- `OSRS_WIKI_USER_AGENT`: User-Agent descriptivo para llamadas automatizadas a la API pública de OSRS Wiki (recomendado para scripts de sync).
 - `APP_VERSION`: Version label for `/version` (defaults to `package.json`).
 - `GIT_COMMIT`: Commit hash for `/version`.
 - `BUILD_DATE`: Build date for `/version` (ISO 8601 recommended).
@@ -89,12 +90,22 @@ npm run test:cov
 
 # force item-volumes backfill (optional: pass a reference unix ts aligned to hour)
 ITEM_VOLUMES_INIT_ENABLED=false npm run item-volumes:backfill -- 1735689600
+
+# sync de tabla items desde /mapping (sin escribir en DB)
+npm run sync:items:mapping:dry
+
+# sync real (inserta/actualiza por diff)
+npm run sync:items:mapping
+
+# opcional: tamaño de lote para persistencia
+npm run sync:items:mapping -- --chunkSize=1000
 ```
 
 ## Notes
 
 - If you use Docker, default DB/Redis settings are defined in `docker-compose.yml` and no `.env` is required.
 - Keep `.env` out of version control.
+- La API pública de precios de OSRS Wiki solicita usar un `User-Agent` descriptivo en automatizaciones; configura `OSRS_WIKI_USER_AGENT` para este proyecto.
 
 ## Supabase Auth test endpoint
 
