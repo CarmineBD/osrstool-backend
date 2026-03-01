@@ -124,7 +124,8 @@ export class ItemsController {
   @ApiQuery({
     name: 'fields',
     required: false,
-    description: 'Comma-separated fields to include when using ids',
+    description:
+      'Comma-separated fields to include when using ids (supports prices, 24h volumes and market impact fields)',
   })
   @ApiQuery({ name: 'page', required: false, description: 'Page number (default 1)' })
   @ApiQuery({
