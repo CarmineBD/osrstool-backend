@@ -1,12 +1,18 @@
 import { ItemsService } from './items.service';
 import { Repository } from 'typeorm';
 import { PricesService } from '../prices/prices.service';
+import { ItemVolumesService } from '../item-volumes/item-volumes.service';
 import { Item } from './entities/item.entity';
 import { buildItemFixture } from '../testing/fixtures';
 import { ConfigService } from '@nestjs/config';
 
 describe('ItemsService', () => {
   const pricesService: { getMany: jest.MockedFunction<PricesService['getMany']> } = {
+    getMany: jest.fn(),
+  };
+  const itemVolumesService: {
+    getMany: jest.MockedFunction<ItemVolumesService['getMany']>;
+  } = {
     getMany: jest.fn(),
   };
   const configService: { get: jest.MockedFunction<ConfigService['get']> } = {
@@ -41,6 +47,7 @@ describe('ItemsService', () => {
   const service = new ItemsService(
     repo as unknown as Repository<Item>,
     pricesService as unknown as PricesService,
+    itemVolumesService as unknown as ItemVolumesService,
     configService as unknown as ConfigService,
   );
 
@@ -70,8 +77,33 @@ describe('ItemsService', () => {
     const result = await service.findByIds([item.id], ['id', 'name', 'highPrice', 'lowPrice']);
 
     expect(pricesService.getMany).toHaveBeenCalledWith([item.id]);
+    expect(itemVolumesService.getMany).not.toHaveBeenCalled();
     expect(result[item.id].highPrice).toBe(500);
     expect(result[item.id].lowPrice).toBe(450);
     expect(result[item.id].iconUrl).toBeUndefined();
+  });
+
+  it('fetches 24h volumes and computes item market impact when requested', async () => {
+    const item = buildItemFixture({ id: 321, iconPath: 'Some item.png' });
+    repo.findBy.mockResolvedValue([item]);
+    itemVolumesService.getMany.mockResolvedValue({
+      [item.id]: {
+        high24h: 240,
+        low24h: 120,
+        total24h: 360,
+        updatedAt: 1735689600,
+      },
+    });
+
+    const result = await service.findByIds(
+      [item.id],
+      ['id', 'high24h', 'low24h', 'marketImpactInstant', 'marketImpactSlow'],
+    );
+
+    expect(itemVolumesService.getMany).toHaveBeenCalledWith([item.id]);
+    expect(result[item.id].high24h).toBe(240);
+    expect(result[item.id].low24h).toBe(120);
+    expect(result[item.id].marketImpactInstant).toBeCloseTo(0.1, 6);
+    expect(result[item.id].marketImpactSlow).toBeCloseTo(0.2, 6);
   });
 });

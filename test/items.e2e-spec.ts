@@ -13,13 +13,16 @@ describe('Items (e2e)', () => {
   let app: INestApplication;
   let dataSource: DataSource;
   let pricesService: TestApp['pricesService'];
+  let itemVolumesService: TestApp['itemVolumesService'];
 
   beforeEach(async () => {
     const testApp = await createTestApp();
     app = testApp.app;
     dataSource = testApp.dataSource;
     pricesService = testApp.pricesService;
+    itemVolumesService = testApp.itemVolumesService;
     pricesService.getMany.mockReset();
+    itemVolumesService.getMany.mockReset();
   });
 
   afterEach(async () => {
@@ -34,10 +37,20 @@ describe('Items (e2e)', () => {
     pricesService.getMany.mockResolvedValue({
       [item.id]: { high: 200, low: 150, highTime: 1, lowTime: 2 },
     });
+    itemVolumesService.getMany.mockResolvedValue({
+      [item.id]: {
+        high24h: 240,
+        low24h: 120,
+        total24h: 360,
+        updatedAt: 1735689600,
+      },
+    });
 
     const server = app.getHttpServer() as unknown as Server;
     const res = await request(server)
-      .get(`/items?ids=${item.id}&fields=id,name,iconUrl,highPrice,lowPrice`)
+      .get(
+        `/items?ids=${item.id}&fields=id,name,iconUrl,highPrice,lowPrice,high24h,low24h,marketImpactInstant,marketImpactSlow`,
+      )
       .expect(200);
 
     const body = res.body as Record<
@@ -49,6 +62,10 @@ describe('Items (e2e)', () => {
         highPrice?: number;
         lowPrice?: number;
         highTime?: number;
+        high24h?: number;
+        low24h?: number;
+        marketImpactInstant?: number;
+        marketImpactSlow?: number;
       }
     >;
     const itemBody = body[item.id];
@@ -58,6 +75,10 @@ describe('Items (e2e)', () => {
     expect(itemBody.highPrice).toBe(200);
     expect(itemBody.lowPrice).toBe(150);
     expect(itemBody.highTime).toBeUndefined();
+    expect(itemBody.high24h).toBe(240);
+    expect(itemBody.low24h).toBe(120);
+    expect(itemBody.marketImpactInstant).toBeCloseTo(0.1, 6);
+    expect(itemBody.marketImpactSlow).toBeCloseTo(0.2, 6);
   });
 
   it('GET /items/search returns paginated results', async () => {
