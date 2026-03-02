@@ -58,7 +58,23 @@ async function bootstrap() {
       .setVersion(config.get<string>('APP_VERSION') ?? '0.0.1')
       .build();
     const swaggerDocument = SwaggerModule.createDocument(app, swaggerConfig);
-    SwaggerModule.setup('docs', app, swaggerDocument);
+    const swaggerCustomCss = `
+      .swagger-ui .parameters-col_description input[type="text"],
+      .swagger-ui .parameters-col_description textarea {
+        width: 100% !important;
+        max-width: 100% !important;
+      }
+      .swagger-ui table.parameters {
+        table-layout: fixed;
+      }
+      .swagger-ui .parameters-col_name {
+        width: 24% !important;
+      }
+      .swagger-ui .parameters-col_description {
+        width: 76% !important;
+      }
+    `;
+    SwaggerModule.setup('docs', app, swaggerDocument, { customCss: swaggerCustomCss });
   }
 
   const portValue = config.get<string>('PORT');

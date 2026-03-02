@@ -84,6 +84,11 @@ export class MethodsController {
     summary: 'List methods with profit',
     description: 'Returns methods with profit data and optional user context.',
   })
+  @ApiQuery({
+    name: 'name',
+    required: false,
+    description: 'Search methods by name',
+  })
   @ApiQuery({ name: 'page', required: false, description: 'Page number (default 1)' })
   @ApiQuery({ name: 'perPage', required: false, description: 'Items per page (default 10)' })
   @ApiQuery({
@@ -143,10 +148,10 @@ export class MethodsController {
     },
   })
   async findAll(
+    @Query('name') name?: string,
     @Query('page') page = '1',
     @Query('perPage') perPage = '10',
     @Query('username') username?: string,
-    @Query('name') name?: string,
     @Query('category') category?: string,
     @Query('clickIntensity') clickIntensity?: string,
     @Query('afkiness') afkiness?: string,
