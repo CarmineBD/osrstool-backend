@@ -15,12 +15,14 @@ import { VariantSnapshot } from '../../src/methods/entities/variant-snapshot.ent
 import { VariantIoItemSnapshot } from '../../src/methods/entities/io-item-snapshot.entity';
 import { User } from '../../src/auth/entities/user.entity';
 import { MethodLike } from '../../src/methods/entities/method-like.entity';
+import { ItemVolumeBucket } from '../../src/item-volumes/entities/item-volume-bucket.entity';
 import { CatalogsModule } from '../../src/catalogs/catalogs.module';
 import { AchievementDiary } from '../../src/catalogs/entities/achievement-diary.entity';
 import { Quest } from '../../src/catalogs/entities/quest.entity';
 import { Skill } from '../../src/catalogs/entities/skill.entity';
 import { SupabaseAuthGuard } from '../../src/auth/supabase-auth.guard';
 import { SuperAdminGuard } from '../../src/auth/super-admin.guard';
+import { ItemVolumesService } from '../../src/item-volumes/item-volumes.service';
 
 export interface TestApp {
   app: INestApplication;
@@ -28,10 +30,16 @@ export interface TestApp {
   pricesService: {
     getMany: jest.MockedFunction<PricesService['getMany']>;
   };
+  itemVolumesService: {
+    getMany: jest.MockedFunction<ItemVolumesService['getMany']>;
+  };
 }
 
 export const createTestApp = async (): Promise<TestApp> => {
   const pricesService: TestApp['pricesService'] = {
+    getMany: jest.fn(),
+  };
+  const itemVolumesService: TestApp['itemVolumesService'] = {
     getMany: jest.fn(),
   };
 
@@ -65,6 +73,7 @@ export const createTestApp = async (): Promise<TestApp> => {
           VariantIoItemSnapshot,
           User,
           MethodLike,
+          ItemVolumeBucket,
           AchievementDiary,
           Quest,
           Skill,
@@ -79,6 +88,8 @@ export const createTestApp = async (): Promise<TestApp> => {
   })
     .overrideProvider(PricesService)
     .useValue(pricesService)
+    .overrideProvider(ItemVolumesService)
+    .useValue(itemVolumesService)
     .overrideGuard(SupabaseAuthGuard)
     .useValue({ canActivate: () => true })
     .overrideGuard(SuperAdminGuard)
@@ -96,5 +107,5 @@ export const createTestApp = async (): Promise<TestApp> => {
   await app.init();
   const dataSource = app.get(DataSource);
 
-  return { app, dataSource, pricesService };
+  return { app, dataSource, pricesService, itemVolumesService };
 };

@@ -16,6 +16,20 @@ import {
   ItemCompactDto,
 } from './dto';
 import { PricesService } from '../prices/prices.service';
+import { ItemVolumesService } from '../item-volumes/item-volumes.service';
+import { calculateMarketImpact } from '../methods/market-impact-calculator';
+
+interface ItemVolume24h {
+  high24h?: number;
+  low24h?: number;
+}
+
+interface ItemPriceData {
+  high: number;
+  low: number;
+  highTime: number;
+  lowTime: number;
+}
 @Injectable()
 export class ItemsService {
   private cdnBase?: string;
@@ -23,6 +37,7 @@ export class ItemsService {
   constructor(
     @InjectRepository(Item) private readonly repo: Repository<Item>,
     private readonly pricesService: PricesService,
+    private readonly itemVolumesService: ItemVolumesService,
     private readonly config: ConfigService,
   ) {}
 
@@ -79,6 +94,85 @@ export class ItemsService {
     }
     return result;
   }
+
+  private toNonNegativeNumberOrNull(value: unknown): number | null {
+    if (typeof value === 'number' && Number.isFinite(value)) {
+      return value >= 0 ? value : 0;
+    }
+
+    if (typeof value === 'string') {
+      const parsed = Number.parseFloat(value);
+      if (Number.isFinite(parsed)) {
+        return parsed >= 0 ? parsed : 0;
+      }
+    }
+
+    return null;
+  }
+
+  private normalizeItemPrices(raw: unknown): Record<number, ItemPriceData> {
+    if (!raw || typeof raw !== 'object' || Array.isArray(raw)) {
+      return {};
+    }
+
+    const result: Record<number, ItemPriceData> = {};
+    for (const [itemIdRaw, value] of Object.entries(raw as Record<string, unknown>)) {
+      const itemId = Number.parseInt(itemIdRaw, 10);
+      if (!Number.isInteger(itemId) || itemId <= 0) continue;
+      if (!value || typeof value !== 'object' || Array.isArray(value)) continue;
+
+      const candidate = value as Record<string, unknown>;
+      const low = this.toNonNegativeNumberOrNull(candidate.low);
+      if (low === null) continue;
+      const high = this.toNonNegativeNumberOrNull(candidate.high) ?? low;
+      const highTime = this.toNonNegativeNumberOrNull(candidate.highTime) ?? 0;
+      const lowTime = this.toNonNegativeNumberOrNull(candidate.lowTime) ?? 0;
+
+      result[itemId] = { high, low, highTime, lowTime };
+    }
+
+    return result;
+  }
+
+  private normalizeItemVolumes24h(raw: unknown): Record<number, ItemVolume24h> {
+    if (!raw || typeof raw !== 'object' || Array.isArray(raw)) {
+      return {};
+    }
+
+    const result: Record<number, ItemVolume24h> = {};
+    for (const [itemIdRaw, value] of Object.entries(raw as Record<string, unknown>)) {
+      const itemId = Number.parseInt(itemIdRaw, 10);
+      if (!Number.isInteger(itemId) || itemId <= 0) continue;
+      if (!value || typeof value !== 'object' || Array.isArray(value)) continue;
+
+      const candidate = value as Record<string, unknown>;
+      const high24h = this.toNonNegativeNumberOrNull(candidate.high24h);
+      const low24h = this.toNonNegativeNumberOrNull(candidate.low24h);
+      if (high24h === null && low24h === null) continue;
+
+      result[itemId] = {
+        ...(high24h !== null ? { high24h } : {}),
+        ...(low24h !== null ? { low24h } : {}),
+      };
+    }
+
+    return result;
+  }
+
+  private calculateItemMarketImpact(
+    itemId: number,
+    volumes24hByItem: Record<number, ItemVolume24h>,
+  ): { marketImpactInstant: number; marketImpactSlow: number } {
+    // Per-item impact uses a single-unit quantity and removes cross-item weighting.
+    return calculateMarketImpact({
+      inputs: [{ id: itemId, quantity: 1 }],
+      outputs: [],
+      pricesByItem: {},
+      volumes24hByItem,
+      alpha: 1,
+    });
+  }
+
   async findOne(id: number): Promise<ItemResponseDto> {
     const item = await this.repo.findOne({ where: { id } });
     if (!item) throw new NotFoundException('Item not found');
@@ -92,8 +186,21 @@ export class ItemsService {
     if (ids.length === 0) return {};
     const items = await this.repo.findBy({ id: In(ids) });
     const priceFieldSet = new Set(['highPrice', 'lowPrice', 'highTime', 'lowTime']);
+    const volumeFieldSet = new Set(['high24h', 'low24h']);
+    const marketImpactFieldSet = new Set(['marketImpactInstant', 'marketImpactSlow']);
     const wantPrices = fields?.some((f) => priceFieldSet.has(f)) ?? false;
-    const prices = wantPrices ? await this.pricesService.getMany(items.map((i) => i.id)) : {};
+    const wantVolumes =
+      fields?.some((f) => volumeFieldSet.has(f) || marketImpactFieldSet.has(f)) ?? false;
+    const wantMarketImpact = fields?.some((f) => marketImpactFieldSet.has(f)) ?? false;
+    const itemIds = items.map((i) => i.id);
+
+    const [rawPrices, rawVolumes24hByItem] = await Promise.all([
+      wantPrices ? this.pricesService.getMany(itemIds) : Promise.resolve({}),
+      wantVolumes ? this.itemVolumesService.getMany(itemIds) : Promise.resolve({}),
+    ]);
+
+    const prices = this.normalizeItemPrices(rawPrices);
+    const volumes24hByItem = this.normalizeItemVolumes24h(rawVolumes24hByItem);
 
     const map: Record<number, Partial<ItemResponseDto>> = {};
     for (const item of items) {
@@ -106,6 +213,16 @@ export class ItemsService {
           base.highTime = p.highTime;
           base.lowTime = p.lowTime;
         }
+      }
+      if (wantVolumes) {
+        const volume = volumes24hByItem[item.id];
+        base.high24h = volume?.high24h ?? null;
+        base.low24h = volume?.low24h ?? null;
+      }
+      if (wantMarketImpact) {
+        const impact = this.calculateItemMarketImpact(item.id, volumes24hByItem);
+        base.marketImpactInstant = impact.marketImpactInstant;
+        base.marketImpactSlow = impact.marketImpactSlow;
       }
       map[item.id] = this.filterFields(base, fields);
     }

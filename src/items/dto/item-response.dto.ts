@@ -19,6 +19,10 @@ export interface ItemResponseDto {
   lowPrice?: number | null;
   highTime?: number | null;
   lowTime?: number | null;
+  high24h?: number | null;
+  low24h?: number | null;
+  marketImpactInstant?: number | null;
+  marketImpactSlow?: number | null;
 }
 
 export interface ItemCompactDto {
