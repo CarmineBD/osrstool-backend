@@ -17,7 +17,7 @@
     "start:prod": "node dist/main",
     "lint": "eslint \"{src,apps,libs,test}/**/*.ts\"",
     "lint:fix": "eslint \"{src,apps,libs,test}/**/*.ts\" --fix",
-    "test": "jest",
+    "test": "jest --runInBand",
     "test:watch": "jest --watch",
     "test:cov": "jest --coverage",
     "test:debug": "node --inspect-brk -r tsconfig-paths/register -r ts-node/register node_modules/.bin/jest --runInBand",
@@ -25,7 +25,9 @@
     "redis:migrate:items-prices": "ts-node src/scripts/migrate-items-prices-to-hash.ts",
     "item-volumes:backfill": "ts-node src/scripts/backfill-item-volumes.ts",
     "sync:items:mapping": "ts-node src/scripts/sync-items-mapping.ts",
-    "sync:items:mapping:dry": "ts-node src/scripts/sync-items-mapping.ts --dry-run"
+    "sync:items:mapping:dry": "ts-node src/scripts/sync-items-mapping.ts --dry-run",
+    "sync:items:wiki": "ts-node src/scripts/sync-items-wiki.ts",
+    "sync:items:wiki:dry": "ts-node src/scripts/sync-items-wiki.ts --dry-run"
   },
   "dependencies": {
     "@nestjs/axios": "^4.0.0",
@@ -37,6 +39,7 @@
     "@nestjs/swagger": "^11.2.0",
     "@nestjs/throttler": "^6.4.0",
     "@nestjs/typeorm": "^11.0.0",
+    "cheerio": "^1.2.0",
     "class-transformer": "^0.5.1",
     "class-validator": "^0.14.2",
     "helmet": "^7.1.0",
