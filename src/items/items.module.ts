@@ -10,6 +10,7 @@ import { ItemsService } from './items.service';
 import { ItemsController } from './items.controller';
 import { ItemsSeederService } from './items-seeder.service';
 import { ItemsMappingSyncService } from './items-mapping-sync.service';
+import { ItemsWikiSyncService } from './items-wiki-sync.service';
 
 @Module({
   imports: [
@@ -19,8 +20,8 @@ import { ItemsMappingSyncService } from './items-mapping-sync.service';
     ItemVolumesModule,
     AuthModule,
   ],
-  providers: [ItemsService, ItemsSeederService, ItemsMappingSyncService],
+  providers: [ItemsService, ItemsSeederService, ItemsMappingSyncService, ItemsWikiSyncService],
   controllers: [ItemsController],
-  exports: [ItemsService, ItemsSeederService, ItemsMappingSyncService],
+  exports: [ItemsService, ItemsSeederService, ItemsMappingSyncService, ItemsWikiSyncService],
 })
 export class ItemsModule {}
