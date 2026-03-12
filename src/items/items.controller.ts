@@ -87,6 +87,12 @@ export class ItemsController {
     required: false,
     description: 'Deprecated alias for pageSize',
   })
+  @ApiQuery({
+    name: 'showUntradeables',
+    required: false,
+    description:
+      'When true, includes all items. Defaults to false, which returns only tradeable items.',
+  })
   @ApiOkResponse({
     description: 'Matching items',
     schema: { example: { data: [ITEM_COMPACT_EXAMPLE], page: 1, pageSize: 20, total: 153 } },
@@ -97,6 +103,7 @@ export class ItemsController {
     @Query('page') page = '1',
     @Query('pageSize') pageSize?: string,
     @Query('limit') limit?: string,
+    @Query('showUntradeables') showUntradeables?: string,
   ) {
     if (!q) throw new BadRequestException('q is required');
     if (q.length > 100) throw new BadRequestException('q too long');
@@ -106,8 +113,9 @@ export class ItemsController {
     const psRaw = parseInt(requestedPageSize, 10) || 20;
     if (psRaw > 100) throw new BadRequestException('pageSize too large');
     const ps = Math.min(psRaw, 100);
+    const showAllItems = showUntradeables === 'true' || showUntradeables === '1';
 
-    return this.svc.search(q, p, ps);
+    return this.svc.search(q, p, ps, showAllItems);
   }
 
   @Get()

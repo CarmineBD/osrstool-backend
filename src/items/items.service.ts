@@ -264,12 +264,16 @@ export class ItemsService {
     q: string,
     page: number,
     pageSize: number,
+    showUntradeables = false,
   ): Promise<{ data: ItemCompactDto[]; page: number; pageSize: number; total: number }> {
     if (q.length === 0) throw new BadRequestException('q is required');
     const qb = this.repo
       .createQueryBuilder('item')
       .where('item.name ILIKE :q', { q: `%${q}%` })
       .orderBy('item.name', 'ASC');
+    if (!showUntradeables) {
+      qb.andWhere('item.tradeable = true');
+    }
     const total = await qb.getCount();
     const items = await qb
       .skip((page - 1) * pageSize)
