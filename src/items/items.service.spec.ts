@@ -106,4 +106,58 @@ describe('ItemsService', () => {
     expect(result[item.id].marketImpactInstant).toBeCloseTo(0.1, 6);
     expect(result[item.id].marketImpactSlow).toBeCloseTo(0.2, 6);
   });
+
+  it('search excludes untradeable items by default', async () => {
+    const item = buildItemFixture({
+      id: 123,
+      name: 'Rune Search A',
+      iconPath: 'Rune Search A.png',
+    });
+    const qb = {
+      where: jest.fn().mockReturnThis(),
+      andWhere: jest.fn().mockReturnThis(),
+      orderBy: jest.fn().mockReturnThis(),
+      getCount: jest.fn().mockResolvedValue(1),
+      skip: jest.fn().mockReturnThis(),
+      take: jest.fn().mockReturnThis(),
+      getMany: jest.fn().mockResolvedValue([item]),
+    };
+    repo.createQueryBuilder.mockReturnValue(qb as never);
+
+    const result = await service.search('Rune Search', 1, 20);
+
+    expect(qb.where).toHaveBeenCalledWith('item.name ILIKE :q', { q: '%Rune Search%' });
+    expect(qb.andWhere).toHaveBeenCalledWith('item.tradeable = true');
+    expect(result.total).toBe(1);
+    expect(result.data[0]).toEqual({
+      id: item.id,
+      name: item.name,
+      iconUrl: 'https://oldschool.runescape.wiki/images/Rune_Search_A.png',
+    });
+  });
+
+  it('search includes untradeable items when requested', async () => {
+    const item = buildItemFixture({
+      id: 124,
+      name: 'Rune Search Hidden',
+      iconPath: 'Rune Search Hidden.png',
+      tradeable: false,
+    });
+    const qb = {
+      where: jest.fn().mockReturnThis(),
+      andWhere: jest.fn().mockReturnThis(),
+      orderBy: jest.fn().mockReturnThis(),
+      getCount: jest.fn().mockResolvedValue(1),
+      skip: jest.fn().mockReturnThis(),
+      take: jest.fn().mockReturnThis(),
+      getMany: jest.fn().mockResolvedValue([item]),
+    };
+    repo.createQueryBuilder.mockReturnValue(qb as never);
+
+    const result = await service.search('Rune Search', 1, 20, true);
+
+    expect(qb.andWhere).not.toHaveBeenCalled();
+    expect(result.total).toBe(1);
+    expect(result.data[0].name).toBe('Rune Search Hidden');
+  });
 });

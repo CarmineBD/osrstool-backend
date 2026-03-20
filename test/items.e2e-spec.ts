@@ -81,11 +81,17 @@ describe('Items (e2e)', () => {
     expect(itemBody.marketImpactSlow).toBeCloseTo(0.2, 6);
   });
 
-  it('GET /items/search returns paginated results', async () => {
+  it('GET /items/search returns paginated tradeable results by default', async () => {
     const itemRepo = dataSource.getRepository(Item);
     await itemRepo.save([
       buildItemFixture({ id: 5001, name: 'Rune Search A', iconPath: 'Rune Search A.png' }),
       buildItemFixture({ id: 5002, name: 'Rune Search B', iconPath: 'Rune Search B.png' }),
+      buildItemFixture({
+        id: 50025,
+        name: 'Rune Search Hidden',
+        iconPath: 'Rune Search Hidden.png',
+        tradeable: false,
+      }),
       buildItemFixture({ id: 5003, name: 'Rune Search C', iconPath: 'Rune Search C.png' }),
       buildItemFixture({ id: 5004, name: 'Rune Search D', iconPath: 'Rune Search D.png' }),
       buildItemFixture({ id: 5005, name: 'Rune Search E', iconPath: 'Rune Search E.png' }),
@@ -110,5 +116,38 @@ describe('Items (e2e)', () => {
     expect(body.data).toHaveLength(2);
     expect(body.data.map((item) => item.name)).toEqual(['Rune Search C', 'Rune Search D']);
     expect(body.data[0].iconUrl).toContain('Rune_Search_C.png');
+  });
+
+  it('GET /items/search includes untradeables when showUntradeables=true', async () => {
+    const itemRepo = dataSource.getRepository(Item);
+    await itemRepo.save([
+      buildItemFixture({ id: 5101, name: 'Rune Search A', iconPath: 'Rune Search A.png' }),
+      buildItemFixture({
+        id: 5102,
+        name: 'Rune Search Hidden',
+        iconPath: 'Rune Search Hidden.png',
+        tradeable: false,
+      }),
+      buildItemFixture({ id: 5103, name: 'Rune Search B', iconPath: 'Rune Search B.png' }),
+    ]);
+
+    const server = app.getHttpServer() as unknown as Server;
+    const res = await request(server)
+      .get('/items/search?q=rune%20search&showUntradeables=true')
+      .expect(200);
+
+    const body = res.body as {
+      data: Array<{ id: number; name: string; iconUrl: string }>;
+      page: number;
+      pageSize: number;
+      total: number;
+    };
+
+    expect(body.total).toBe(3);
+    expect(body.data.map((item) => item.name)).toEqual([
+      'Rune Search A',
+      'Rune Search B',
+      'Rune Search Hidden',
+    ]);
   });
 });
