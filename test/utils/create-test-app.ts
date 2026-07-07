@@ -11,6 +11,7 @@ import { Method } from '../../src/methods/entities/method.entity';
 import { MethodVariant } from '../../src/methods/entities/variant.entity';
 import { VariantIoItem } from '../../src/methods/entities/io-item.entity';
 import { VariantHistory } from '../../src/methods/entities/variant-history.entity';
+import { VariantHistoryDaily } from '../../src/methods/entities/variant-history-daily.entity';
 import { VariantSnapshot } from '../../src/methods/entities/variant-snapshot.entity';
 import { VariantIoItemSnapshot } from '../../src/methods/entities/io-item-snapshot.entity';
 import { User } from '../../src/auth/entities/user.entity';
@@ -69,6 +70,7 @@ export const createTestApp = async (): Promise<TestApp> => {
           MethodVariant,
           VariantIoItem,
           VariantHistory,
+          VariantHistoryDaily,
           VariantSnapshot,
           VariantIoItemSnapshot,
           User,
