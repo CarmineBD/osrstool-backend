@@ -4,6 +4,7 @@ import { InjectRepository } from '@nestjs/typeorm';
 import { Repository } from 'typeorm';
 import Redis from 'ioredis';
 import { VariantHistory } from '../methods/entities/variant-history.entity';
+import { VariantHistoryDaily } from '../methods/entities/variant-history-daily.entity';
 import { MethodVariant } from '../methods/entities/variant.entity';
 import { VariantSnapshot } from '../methods/entities/variant-snapshot.entity';
 import { ConfigService } from '@nestjs/config';
@@ -23,6 +24,8 @@ export class VariantHistoryService {
   constructor(
     @InjectRepository(VariantHistory)
     private readonly historyRepo: Repository<VariantHistory>,
+    @InjectRepository(VariantHistoryDaily)
+    private readonly dailyHistoryRepo: Repository<VariantHistoryDaily>,
     @InjectRepository(VariantSnapshot)
     private readonly snapshotRepo: Repository<VariantSnapshot>,
     private readonly config: ConfigService,
@@ -132,8 +135,172 @@ export class VariantHistoryService {
 
     console.log('Saving variant history records:', records);
     await this.historyRepo.save(records);
+    await this.upsertDailyHistory(records);
     console.log('Saved variant history records successfully:', records);
     this.logger.log(`Stored ${records.length} variant profit snapshots`);
+  }
+
+  private async upsertDailyHistory(records: VariantHistory[]): Promise<void> {
+    if (records.length === 0) return;
+
+    const params: unknown[] = [];
+    const valuesSql = records.map((record, index) => {
+      const base = index * 4;
+      params.push(record.variant.id, record.timestamp, record.lowProfit, record.highProfit);
+      return `($${base + 1}::uuid, $${base + 2}::timestamptz, $${base + 3}::numeric, $${base + 4}::numeric)`;
+    });
+
+    await this.dailyHistoryRepo.query(
+      `
+        INSERT INTO variant_history_daily (
+          variant_id,
+          bucket_date,
+          low_profit_sum,
+          high_profit_sum,
+          low_profit_min,
+          low_profit_max,
+          high_profit_min,
+          high_profit_max,
+          open_low_profit,
+          open_high_profit,
+          open_timestamp,
+          close_low_profit,
+          close_high_profit,
+          close_timestamp,
+          samples,
+          updated_at
+        )
+        SELECT
+          input.variant_id,
+          (input.timestamp AT TIME ZONE 'Europe/London')::date AS bucket_date,
+          input.low_profit,
+          input.high_profit,
+          input.low_profit,
+          input.low_profit,
+          input.high_profit,
+          input.high_profit,
+          input.low_profit,
+          input.high_profit,
+          input.timestamp,
+          input.low_profit,
+          input.high_profit,
+          input.timestamp,
+          1,
+          now()
+        FROM (VALUES ${valuesSql.join(', ')}) AS input(
+          variant_id,
+          timestamp,
+          low_profit,
+          high_profit
+        )
+        ON CONFLICT (variant_id, bucket_date) DO UPDATE SET
+          low_profit_sum = variant_history_daily.low_profit_sum + EXCLUDED.low_profit_sum,
+          high_profit_sum = variant_history_daily.high_profit_sum + EXCLUDED.high_profit_sum,
+          low_profit_min = LEAST(variant_history_daily.low_profit_min, EXCLUDED.low_profit_min),
+          low_profit_max = GREATEST(variant_history_daily.low_profit_max, EXCLUDED.low_profit_max),
+          high_profit_min = LEAST(variant_history_daily.high_profit_min, EXCLUDED.high_profit_min),
+          high_profit_max = GREATEST(variant_history_daily.high_profit_max, EXCLUDED.high_profit_max),
+          open_low_profit = CASE
+            WHEN EXCLUDED.open_timestamp < variant_history_daily.open_timestamp
+              THEN EXCLUDED.open_low_profit
+            ELSE variant_history_daily.open_low_profit
+          END,
+          open_high_profit = CASE
+            WHEN EXCLUDED.open_timestamp < variant_history_daily.open_timestamp
+              THEN EXCLUDED.open_high_profit
+            ELSE variant_history_daily.open_high_profit
+          END,
+          open_timestamp = LEAST(variant_history_daily.open_timestamp, EXCLUDED.open_timestamp),
+          close_low_profit = CASE
+            WHEN EXCLUDED.close_timestamp > variant_history_daily.close_timestamp
+              THEN EXCLUDED.close_low_profit
+            ELSE variant_history_daily.close_low_profit
+          END,
+          close_high_profit = CASE
+            WHEN EXCLUDED.close_timestamp > variant_history_daily.close_timestamp
+              THEN EXCLUDED.close_high_profit
+            ELSE variant_history_daily.close_high_profit
+          END,
+          close_timestamp = GREATEST(variant_history_daily.close_timestamp, EXCLUDED.close_timestamp),
+          samples = variant_history_daily.samples + EXCLUDED.samples,
+          updated_at = now()
+      `,
+      params,
+    );
+  }
+
+  private shouldUseDailyHistory(
+    range: HistoryRange,
+    granularity: HistoryGranularity,
+    tz: string,
+  ): boolean {
+    const isLongRange = range === HistoryRange.RANGE_1Y || range === HistoryRange.RANGE_ALL;
+    const isDefaultTimezone = tz.trim().toLowerCase() === 'europe/london';
+    const isDailyOrLarger =
+      granularity === HistoryGranularity.DAY_1 ||
+      granularity === HistoryGranularity.WEEK_1 ||
+      granularity === HistoryGranularity.MONTH_1;
+
+    return isLongRange && isDefaultTimezone && isDailyOrLarger;
+  }
+
+  private buildDailyBucketExpression(granularity: HistoryGranularity): string {
+    if (granularity === HistoryGranularity.DAY_1) {
+      return "bucket_date::timestamp AT TIME ZONE 'Europe/London'";
+    }
+
+    const trunc = granularity === HistoryGranularity.WEEK_1 ? 'week' : 'month';
+    return `date_trunc('${trunc}', bucket_date::timestamp) AT TIME ZONE 'Europe/London'`;
+  }
+
+  private async queryDailyHistory(
+    variantId: string,
+    from: Date,
+    to: Date,
+    granularity: HistoryGranularity,
+    agg: HistoryAgg,
+  ): Promise<Record<string, unknown>[]> {
+    const bucketExpr = this.buildDailyBucketExpression(granularity);
+
+    let selectClause = '';
+    if (agg === HistoryAgg.AVG) {
+      selectClause = `
+        ${bucketExpr} AS bucket,
+        (SUM(low_profit_sum) / NULLIF(SUM(samples), 0))::float AS low_profit,
+        (SUM(high_profit_sum) / NULLIF(SUM(samples), 0))::float AS high_profit
+      `;
+    } else if (agg === HistoryAgg.CLOSE) {
+      selectClause = `
+        ${bucketExpr} AS bucket,
+        (ARRAY_AGG(close_low_profit ORDER BY close_timestamp DESC))[1]::float AS low_profit,
+        (ARRAY_AGG(close_high_profit ORDER BY close_timestamp DESC))[1]::float AS high_profit
+      `;
+    } else {
+      selectClause = `
+        ${bucketExpr} AS bucket,
+        (ARRAY_AGG(open_low_profit ORDER BY open_timestamp ASC))[1]::float AS open_low,
+        MAX(low_profit_max)::float AS high_low,
+        MIN(low_profit_min)::float AS low_low,
+        (ARRAY_AGG(close_low_profit ORDER BY close_timestamp DESC))[1]::float AS close_low,
+        (ARRAY_AGG(open_high_profit ORDER BY open_timestamp ASC))[1]::float AS open_high,
+        MAX(high_profit_max)::float AS high_high,
+        MIN(high_profit_min)::float AS low_high,
+        (ARRAY_AGG(close_high_profit ORDER BY close_timestamp DESC))[1]::float AS close_high
+      `;
+    }
+
+    return this.dailyHistoryRepo.query(
+      `
+        SELECT ${selectClause}
+        FROM variant_history_daily
+        WHERE variant_id = $1
+          AND bucket_date >= ($2::timestamptz AT TIME ZONE 'Europe/London')::date
+          AND bucket_date <= ($3::timestamptz AT TIME ZONE 'Europe/London')::date
+        GROUP BY bucket
+        ORDER BY bucket
+      `,
+      [variantId, from.toISOString(), to.toISOString()],
+    );
   }
 
   async getHistory(
@@ -203,64 +370,69 @@ export class VariantHistoryService {
       }
     }
 
-    const params: any[] = [variantId, from.toISOString(), now.toISOString()];
-
-    let bucketExpr = '';
-    if (
-      granularity === HistoryGranularity.MIN_10 ||
-      granularity === HistoryGranularity.MIN_30 ||
-      granularity === HistoryGranularity.HOUR_2
-    ) {
-      const sec = granSecs[granularity];
-      bucketExpr = `to_timestamp(floor(extract(epoch from timestamp) / ${sec}) * ${sec})`;
+    let rows: Record<string, unknown>[];
+    if (this.shouldUseDailyHistory(range, granularity, tz)) {
+      rows = await this.queryDailyHistory(variantId, from, now, granularity, agg);
     } else {
-      const trunc =
-        granularity === HistoryGranularity.DAY_1
-          ? 'day'
-          : granularity === HistoryGranularity.WEEK_1
-            ? 'week'
-            : 'month';
-      const paramIndex = params.length + 1;
-      bucketExpr = `date_trunc('${trunc}', timestamp AT TIME ZONE $${paramIndex}) AT TIME ZONE $${paramIndex}`;
-      params.push(tz);
+      const params: any[] = [variantId, from.toISOString(), now.toISOString()];
+
+      let bucketExpr = '';
+      if (
+        granularity === HistoryGranularity.MIN_10 ||
+        granularity === HistoryGranularity.MIN_30 ||
+        granularity === HistoryGranularity.HOUR_2
+      ) {
+        const sec = granSecs[granularity];
+        bucketExpr = `to_timestamp(floor(extract(epoch from timestamp) / ${sec}) * ${sec})`;
+      } else {
+        const trunc =
+          granularity === HistoryGranularity.DAY_1
+            ? 'day'
+            : granularity === HistoryGranularity.WEEK_1
+              ? 'week'
+              : 'month';
+        const paramIndex = params.length + 1;
+        bucketExpr = `date_trunc('${trunc}', timestamp AT TIME ZONE $${paramIndex}) AT TIME ZONE $${paramIndex}`;
+        params.push(tz);
+      }
+
+      let selectClause = '';
+      if (agg === HistoryAgg.AVG) {
+        selectClause = `
+          ${bucketExpr} AS bucket,
+          AVG(low_profit)::float AS low_profit,
+          AVG(high_profit)::float AS high_profit
+        `;
+      } else if (agg === HistoryAgg.CLOSE) {
+        selectClause = `
+          ${bucketExpr} AS bucket,
+          (ARRAY_AGG(low_profit ORDER BY timestamp DESC))[1]::float AS low_profit,
+          (ARRAY_AGG(high_profit ORDER BY timestamp DESC))[1]::float AS high_profit
+        `;
+      } else {
+        selectClause = `
+          ${bucketExpr} AS bucket,
+          (ARRAY_AGG(low_profit ORDER BY timestamp ASC))[1]::float AS open_low,
+          MAX(low_profit)::float AS high_low,
+          MIN(low_profit)::float AS low_low,
+          (ARRAY_AGG(low_profit ORDER BY timestamp DESC))[1]::float AS close_low,
+          (ARRAY_AGG(high_profit ORDER BY timestamp ASC))[1]::float AS open_high,
+          MAX(high_profit)::float AS high_high,
+          MIN(high_profit)::float AS low_high,
+          (ARRAY_AGG(high_profit ORDER BY timestamp DESC))[1]::float AS close_high
+        `;
+      }
+
+      const sql = `
+        SELECT ${selectClause}
+        FROM variant_history
+        WHERE variant_id = $1 AND timestamp >= $2 AND timestamp <= $3
+        GROUP BY bucket
+        ORDER BY bucket
+      `;
+
+      rows = await this.historyRepo.query(sql, params);
     }
-
-    let selectClause = '';
-    if (agg === HistoryAgg.AVG) {
-      selectClause = `
-        ${bucketExpr} AS bucket,
-        AVG(low_profit)::float AS low_profit,
-        AVG(high_profit)::float AS high_profit
-      `;
-    } else if (agg === HistoryAgg.CLOSE) {
-      selectClause = `
-        ${bucketExpr} AS bucket,
-        (ARRAY_AGG(low_profit ORDER BY timestamp DESC))[1]::float AS low_profit,
-        (ARRAY_AGG(high_profit ORDER BY timestamp DESC))[1]::float AS high_profit
-      `;
-    } else {
-      selectClause = `
-        ${bucketExpr} AS bucket,
-        (ARRAY_AGG(low_profit ORDER BY timestamp ASC))[1]::float AS open_low,
-        MAX(low_profit)::float AS high_low,
-        MIN(low_profit)::float AS low_low,
-        (ARRAY_AGG(low_profit ORDER BY timestamp DESC))[1]::float AS close_low,
-        (ARRAY_AGG(high_profit ORDER BY timestamp ASC))[1]::float AS open_high,
-        MAX(high_profit)::float AS high_high,
-        MIN(high_profit)::float AS low_high,
-        (ARRAY_AGG(high_profit ORDER BY timestamp DESC))[1]::float AS close_high
-      `;
-    }
-
-    const sql = `
-      SELECT ${selectClause}
-      FROM variant_history
-      WHERE variant_id = $1 AND timestamp >= $2 AND timestamp <= $3
-      GROUP BY bucket
-      ORDER BY bucket
-    `;
-
-    const rows: Record<string, unknown>[] = await this.historyRepo.query(sql, params);
 
     let history: unknown[] = [];
     if (agg === HistoryAgg.OHLC) {
