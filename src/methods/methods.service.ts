@@ -1,11 +1,13 @@
 import {
   Injectable,
+  Logger,
   NotFoundException,
   OnModuleDestroy,
   BadRequestException,
   UnauthorizedException,
   ForbiddenException,
 } from '@nestjs/common';
+import { performance } from 'node:perf_hooks';
 import { InjectRepository } from '@nestjs/typeorm';
 import { Repository, In, LessThanOrEqual, Not } from 'typeorm';
 import { Method } from './entities/method.entity';
@@ -156,6 +158,7 @@ interface SkillSummaryBySkill {
 
 @Injectable()
 export class MethodsService implements OnModuleDestroy {
+  private readonly logger = new Logger(MethodsService.name);
   private readonly redis: Redis;
   private readonly methodsProfitsHashKey = 'methods:profits';
   private readonly itemPricesHashKey = 'items:prices';
@@ -190,6 +193,30 @@ export class MethodsService implements OnModuleDestroy {
 
   onModuleDestroy() {
     void this.redis.quit();
+  }
+
+  private isMethodDetailsPerfLogEnabled(): boolean {
+    const specific = this.config.get<string>('METHOD_DETAILS_PERF_LOGS');
+    const fallback = this.config.get<string>('PERF_LOGS');
+    const value = specific ?? fallback ?? '';
+    return ['1', 'true', 'yes', 'on'].includes(value.trim().toLowerCase());
+  }
+
+  private async timeMethodDetailsStep<T>(
+    enabled: boolean,
+    scope: string,
+    label: string,
+    operation: () => Promise<T>,
+  ): Promise<T> {
+    if (!enabled) return operation();
+
+    const startedAt = performance.now();
+    try {
+      return await operation();
+    } finally {
+      const elapsedMs = performance.now() - startedAt;
+      this.logger.log(`[perf] ${scope} ${label} ${elapsedMs.toFixed(1)}ms`);
+    }
   }
 
   private async fetchUserInfo(username?: string): Promise<{
@@ -749,15 +776,48 @@ export class MethodsService implements OnModuleDestroy {
   }
 
   async methodDetailsWithProfitResponse(id: string, username?: string, authorization?: string) {
-    const authenticatedUserId = await this.resolveAuthenticatedUserId(authorization);
-    await this.assertCanAccessMethodDetails(id, authorization, authenticatedUserId);
-    await this.assertRegisteredUserForUsername(username, authorization, authenticatedUserId);
-    const { userInfo, warnings } = await this.fetchUserInfo(username);
-    const method = await this.findMethodDetailsWithProfit(
-      id,
-      userInfo ?? undefined,
-      authenticatedUserId ?? undefined,
+    const perfLogsEnabled = this.isMethodDetailsPerfLogEnabled();
+    const scope = `methodDetails id=${id}`;
+    const totalStartedAt = performance.now();
+
+    const authenticatedUserId = await this.timeMethodDetailsStep(
+      perfLogsEnabled,
+      scope,
+      'resolveAuthenticatedUserId',
+      () => this.resolveAuthenticatedUserId(authorization),
     );
+    await this.timeMethodDetailsStep(perfLogsEnabled, scope, 'assertCanAccessMethodDetails', () =>
+      this.assertCanAccessMethodDetails(id, authorization, authenticatedUserId),
+    );
+    await this.timeMethodDetailsStep(
+      perfLogsEnabled,
+      scope,
+      'assertRegisteredUserForUsername',
+      () => this.assertRegisteredUserForUsername(username, authorization, authenticatedUserId),
+    );
+    const { userInfo, warnings } = await this.timeMethodDetailsStep(
+      perfLogsEnabled,
+      scope,
+      'fetchUserInfo',
+      () => this.fetchUserInfo(username),
+    );
+    const method = await this.timeMethodDetailsStep(
+      perfLogsEnabled,
+      scope,
+      'findMethodDetailsWithProfit',
+      () =>
+        this.findMethodDetailsWithProfit(
+          id,
+          userInfo ?? undefined,
+          authenticatedUserId ?? undefined,
+        ),
+    );
+
+    if (perfLogsEnabled) {
+      this.logger.log(
+        `[perf] ${scope} total ${Number(performance.now() - totalStartedAt).toFixed(1)}ms`,
+      );
+    }
 
     return {
       status: warnings.length ? 'partial' : 'ok',
@@ -774,9 +834,30 @@ export class MethodsService implements OnModuleDestroy {
     username?: string,
     authorization?: string,
   ) {
-    const method = await this.methodRepo.findOne({ where: { slug } });
+    const perfLogsEnabled = this.isMethodDetailsPerfLogEnabled();
+    const scope = `methodDetailsBySlug slug=${slug}`;
+    const totalStartedAt = performance.now();
+    const method = await this.timeMethodDetailsStep(
+      perfLogsEnabled,
+      scope,
+      'findMethodBySlug',
+      () => this.methodRepo.findOne({ where: { slug } }),
+    );
     if (!method) throw new NotFoundException(`Method with slug ${slug} not found`);
-    return this.methodDetailsWithProfitResponse(method.id, username, authorization);
+    const response = await this.timeMethodDetailsStep(
+      perfLogsEnabled,
+      scope,
+      'methodDetailsWithProfitResponse',
+      () => this.methodDetailsWithProfitResponse(method.id, username, authorization),
+    );
+
+    if (perfLogsEnabled) {
+      this.logger.log(
+        `[perf] ${scope} total ${Number(performance.now() - totalStartedAt).toFixed(1)}ms`,
+      );
+    }
+
+    return response;
   }
 
   private toDto(entity: Method): MethodDto {
@@ -1608,59 +1689,99 @@ export class MethodsService implements OnModuleDestroy {
     userInfo?: UserInfo,
     likedByUserId?: string,
   ): Promise<MethodDetailsWithProfit> {
-    const methodDto = await this.findOne(id);
+    const perfLogsEnabled = this.isMethodDetailsPerfLogEnabled();
+    const scope = `findMethodDetailsWithProfit id=${id}`;
+    const totalStartedAt = performance.now();
+    const methodDto = await this.timeMethodDetailsStep(perfLogsEnabled, scope, 'findOne', () =>
+      this.findOne(id),
+    );
     const itemIds = this.collectItemIdsFromVariants(methodDto.variants);
     const [allProfits, pricesByItem, volumes24hByItem] = await Promise.all([
-      this.getMethodProfits(methodDto.id),
-      this.getItemPrices(itemIds),
-      this.getItemVolumes24h(itemIds),
+      this.timeMethodDetailsStep(perfLogsEnabled, scope, 'getMethodProfits', () =>
+        this.getMethodProfits(methodDto.id),
+      ),
+      this.timeMethodDetailsStep(
+        perfLogsEnabled,
+        scope,
+        `getItemPrices items=${itemIds.length}`,
+        () => this.getItemPrices(itemIds),
+      ),
+      this.timeMethodDetailsStep(
+        perfLogsEnabled,
+        scope,
+        `getItemVolumes24h items=${itemIds.length}`,
+        () => this.getItemVolumes24h(itemIds),
+      ),
     ]);
 
-    const enrichedVariants = await Promise.all(
-      methodDto.variants.map(async (variant) => {
-        // Si solo hay una variante se utiliza el id del método; de lo contrario se usa una clave compuesta
-        const profitKey = variant.id;
-        const profit = allProfits[profitKey] ?? { low: 0, high: 0 };
-        const marketImpact = this.calculateVariantMarketImpact(
-          variant,
-          pricesByItem,
-          volumes24hByItem,
-        );
+    const enrichedVariants = await this.timeMethodDetailsStep(
+      perfLogsEnabled,
+      scope,
+      `enrichVariants variants=${methodDto.variants.length}`,
+      () =>
+        Promise.all(
+          methodDto.variants.map(async (variant) => {
+            // Si solo hay una variante se utiliza el id del método; de lo contrario se usa una clave compuesta
+            const profitKey = variant.id;
+            const profit = allProfits[profitKey] ?? { low: 0, high: 0 };
+            const marketImpact = this.calculateVariantMarketImpact(
+              variant,
+              pricesByItem,
+              volumes24hByItem,
+            );
 
-        const trends = await this.computeTrend(variant.id, profit.high);
+            const trends = await this.timeMethodDetailsStep(
+              perfLogsEnabled,
+              scope,
+              `computeTrend variant=${variant.id}`,
+              () => this.computeTrend(variant.id, profit.high),
+            );
 
-        const missingRequirements = userInfo
-          ? computeMissingRequirements(variant.requirements ?? null, userInfo)
-          : null;
+            const missingRequirements = userInfo
+              ? computeMissingRequirements(variant.requirements ?? null, userInfo)
+              : null;
 
-        return {
-          ...variant,
-          // Se calculan campos a partir de Redis
-          clickIntensity: variant.clickIntensity,
-          afkiness: variant.afkiness,
-          riskLevel: variant.riskLevel,
-          requirements: variant.requirements,
-          recommendations: variant.recommendations,
-          missingRequirements,
-          lowProfit: profit.low,
-          highProfit: profit.high,
-          marketImpactInstant: marketImpact.marketImpactInstant,
-          marketImpactSlow: marketImpact.marketImpactSlow,
-          trendLastHour: trends.lastHour,
-          trendLast24h: trends.last24h,
-          trendLastWeek: trends.lastWeek,
-          trendLastMonth: trends.lastMonth,
-        };
-      }),
+            return {
+              ...variant,
+              // Se calculan campos a partir de Redis
+              clickIntensity: variant.clickIntensity,
+              afkiness: variant.afkiness,
+              riskLevel: variant.riskLevel,
+              requirements: variant.requirements,
+              recommendations: variant.recommendations,
+              missingRequirements,
+              lowProfit: profit.low,
+              highProfit: profit.high,
+              marketImpactInstant: marketImpact.marketImpactInstant,
+              marketImpactSlow: marketImpact.marketImpactSlow,
+              trendLastHour: trends.lastHour,
+              trendLast24h: trends.last24h,
+              trendLastWeek: trends.lastWeek,
+              trendLastMonth: trends.lastMonth,
+            };
+          }),
+        ),
     );
-    const [likes, likedByMe] = await Promise.all([
-      this.methodLikeRepo.count({ where: { methodId: methodDto.id } }),
-      likedByUserId
-        ? this.methodLikeRepo.exists({
-            where: { methodId: methodDto.id, userId: likedByUserId },
-          })
-        : Promise.resolve(false),
-    ]);
+    const [likes, likedByMe] = await this.timeMethodDetailsStep(
+      perfLogsEnabled,
+      scope,
+      'loadLikes',
+      () =>
+        Promise.all([
+          this.methodLikeRepo.count({ where: { methodId: methodDto.id } }),
+          likedByUserId
+            ? this.methodLikeRepo.exists({
+                where: { methodId: methodDto.id, userId: likedByUserId },
+              })
+            : Promise.resolve(false),
+        ]),
+    );
+
+    if (perfLogsEnabled) {
+      this.logger.log(
+        `[perf] ${scope} total ${Number(performance.now() - totalStartedAt).toFixed(1)}ms`,
+      );
+    }
 
     return {
       id: methodDto.id,
