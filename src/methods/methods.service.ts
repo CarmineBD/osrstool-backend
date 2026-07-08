@@ -77,6 +77,8 @@ interface SortOptions {
 }
 
 type VariantsMode = 'best' | 'all';
+type TrendingProfitWindow = '15m' | '1h' | '24h' | '7d' | '30d';
+type TrendingProfitMode = 'reliable' | 'instant' | 'slow';
 
 interface ListQuery {
   page?: string;
@@ -98,9 +100,86 @@ interface ListQuery {
   authorization?: string;
 }
 
+interface TrendingProfitQuery extends ListQuery {
+  window?: string;
+  mode?: string;
+  minProfit?: string;
+  minGrowthAbs?: string;
+  minGrowthPct?: string;
+  minCurrentProfit?: string;
+}
+
 interface ListLikeOptions {
   likedByUserId?: string;
   onlyLikedByMe?: boolean;
+}
+
+interface TrendingProfitOptions {
+  window: TrendingProfitWindow;
+  mode: TrendingProfitMode;
+  minGrowthAbs: number;
+  minGrowthPct?: number;
+  minCurrentProfit: number;
+}
+
+interface ProfitGrowthPeriodRow {
+  variantId?: string;
+  timestamp?: Date | string;
+  lowProfit?: number | string;
+  highProfit?: number | string;
+}
+
+interface ProfitGrowthPeriodStats {
+  variantId: string;
+  previousLowProfit: number;
+  previousHighProfit: number;
+  currentLowProfit: number;
+  currentHighProfit: number;
+  sampleCountPrevious: number;
+  sampleCountCurrent: number;
+}
+
+interface ProfitGrowthTrendCalculation {
+  previousPeriodProfit: number;
+  currentPeriodProfit: number;
+  growthAbs: number;
+  growthPct: number | null;
+  trendDirection: 'up' | 'down' | 'flat';
+  lowProfit: number;
+  highProfit: number;
+  lowGrowthAbs: number;
+  highGrowthAbs: number;
+  lowGrowthPct: number | null;
+  highGrowthPct: number | null;
+  reliableGrowthAbs: number;
+  reliableGrowthPct: number | null;
+}
+
+interface PublicProfitGrowthMetrics {
+  window: TrendingProfitWindow;
+  mode: TrendingProfitMode;
+  previousPeriodProfit: number;
+  currentPeriodProfit: number;
+  growthAbs: number;
+  growthPct: number | null;
+  trendDirection: 'up' | 'down' | 'flat';
+}
+
+interface ProfitGrowthMetrics extends PublicProfitGrowthMetrics {
+  sampleCountPrevious: number;
+  sampleCountCurrent: number;
+  previousPeriodLowProfit: number;
+  previousPeriodHighProfit: number;
+  currentPeriodLowProfit: number;
+  currentPeriodHighProfit: number;
+  lowGrowthAbs: number;
+  highGrowthAbs: number;
+  reliableGrowthAbs: number;
+  lowGrowthPct: number | null;
+  highGrowthPct: number | null;
+  reliableGrowthPct: number | null;
+  selectedGrowthAbs: number;
+  selectedGrowthPct: number | null;
 }
 
 interface MethodDetailsWithProfit {
@@ -289,6 +368,68 @@ export class MethodsService implements OnModuleDestroy {
     }
 
     throw new BadRequestException('variants must be one of: best, all');
+  }
+
+  private parseTrendingProfitWindow(value: string | undefined): TrendingProfitWindow {
+    if (value == null) return '24h';
+
+    const normalized = value.trim().toLowerCase();
+    if (
+      normalized === '15m' ||
+      normalized === '1h' ||
+      normalized === '24h' ||
+      normalized === '7d' ||
+      normalized === '30d'
+    ) {
+      return normalized;
+    }
+
+    throw new BadRequestException('window must be one of: 15m, 1h, 24h, 7d, 30d');
+  }
+
+  private parseTrendingProfitMode(value: string | undefined): TrendingProfitMode {
+    if (value == null) return 'reliable';
+
+    const normalized = value.trim().toLowerCase();
+    if (normalized === 'reliable' || normalized === 'instant' || normalized === 'slow') {
+      return normalized;
+    }
+
+    throw new BadRequestException('mode must be one of: reliable, instant, slow');
+  }
+
+  private parseNonNegativeNumberParam(value: string | undefined, paramName: string): number {
+    if (value == null || value.trim().length === 0) return 0;
+
+    const parsed = Number(value);
+    if (!Number.isFinite(parsed) || parsed < 0) {
+      throw new BadRequestException(`${paramName} must be a non-negative number`);
+    }
+
+    return parsed;
+  }
+
+  private parseOptionalNonNegativeNumberParam(
+    value: string | undefined,
+    paramName: string,
+  ): number | undefined {
+    if (value == null || value.trim().length === 0) return undefined;
+    return this.parseNonNegativeNumberParam(value, paramName);
+  }
+
+  private buildTrendingProfitOptions(query: TrendingProfitQuery): TrendingProfitOptions {
+    return {
+      window: this.parseTrendingProfitWindow(query.window),
+      mode: this.parseTrendingProfitMode(query.mode),
+      minGrowthAbs: this.parseNonNegativeNumberParam(query.minGrowthAbs, 'minGrowthAbs'),
+      minGrowthPct: this.parseOptionalNonNegativeNumberParam(query.minGrowthPct, 'minGrowthPct'),
+      minCurrentProfit: this.parseNonNegativeNumberParam(
+        query.minCurrentProfit ?? query.minProfit,
+        query.minCurrentProfit == null && query.minProfit != null
+          ? 'minProfit'
+          : 'minCurrentProfit',
+      ),
+    };
   }
 
   private getExperienceForSkill(xpHour: XpHour | null | undefined, skill: string): number | null {
@@ -553,6 +694,59 @@ export class MethodsService implements OnModuleDestroy {
       pageSize: pp,
       perPage: pp, // Backward-compatible alias for existing clients.
       hasNext,
+      ...(username ? { username } : {}),
+    };
+
+    return {
+      status: warnings.length ? 'partial' : 'ok',
+      data: { methods: result.data, user: userInfo },
+      warnings,
+      meta,
+    };
+  }
+
+  async listTrendingProfitResponse(query: TrendingProfitQuery) {
+    const { page = '1', perPage = '10', username } = query;
+    const p = parseInt(page, 10);
+    const pp = parseInt(perPage, 10);
+    const variantsMode = this.parseVariantsQueryParam(query.variants);
+    const likedByMeFilter = this.parseBooleanQueryParam(query.likedByMe, 'likedByMe');
+    const authenticatedUserId = await this.resolveAuthenticatedUserId(query.authorization);
+
+    if (likedByMeFilter && !authenticatedUserId) {
+      throw new UnauthorizedException('likedByMe filter requires authentication');
+    }
+
+    await this.assertRegisteredUserForUsername(username, query.authorization, authenticatedUserId);
+    const { userInfo, warnings } = await this.fetchUserInfo(username);
+    const filters = this.buildListFilters(query);
+    if (filters.enabled === false) {
+      await this.assertSuperAdminForDisabledMethods(query.authorization);
+    }
+
+    const trendingOptions = this.buildTrendingProfitOptions(query);
+    const result = await this.findTrendingProfit(
+      p,
+      pp,
+      userInfo ?? undefined,
+      filters,
+      trendingOptions,
+      {
+        likedByUserId: authenticatedUserId ?? undefined,
+        onlyLikedByMe: likedByMeFilter === true,
+      },
+      variantsMode,
+    );
+
+    const hasNext = p * pp < result.total;
+    const meta = {
+      total: result.total,
+      page: p,
+      pageSize: pp,
+      perPage: pp,
+      hasNext,
+      window: trendingOptions.window,
+      mode: trendingOptions.mode,
       ...(username ? { username } : {}),
     };
 
@@ -1405,6 +1599,479 @@ export class MethodsService implements OnModuleDestroy {
       pricesByItem,
       volumes24hByItem,
     });
+  }
+
+  private getTrendingWindowMs(window: TrendingProfitWindow): number {
+    const windows: Record<TrendingProfitWindow, number> = {
+      '15m': 15 * 60 * 1000,
+      '1h': 60 * 60 * 1000,
+      '24h': 24 * 60 * 60 * 1000,
+      '7d': 7 * 24 * 60 * 60 * 1000,
+      '30d': 30 * 24 * 60 * 60 * 1000,
+    };
+
+    return windows[window];
+  }
+
+  private getMedian(values: number[]): number | null {
+    if (values.length === 0) return null;
+
+    const sorted = [...values].sort((a, b) => a - b);
+    const middle = Math.floor(sorted.length / 2);
+    if (sorted.length % 2 === 1) return sorted[middle];
+
+    return (sorted[middle - 1] + sorted[middle]) / 2;
+  }
+
+  private async getProfitGrowthPeriodStats(
+    variantIds: string[],
+    previousPeriodStart: Date,
+    currentPeriodStart: Date,
+    currentPeriodEnd: Date,
+  ): Promise<Record<string, ProfitGrowthPeriodStats>> {
+    if (variantIds.length === 0) return {};
+
+    const variantPlaceholders = variantIds.map((_, index) => `$${index + 1}`).join(', ');
+    const previousStartParam = variantIds.length + 1;
+    const currentEndParam = variantIds.length + 2;
+    const rawRows = (await this.historyRepo.query(
+      `
+        SELECT
+          variant_id AS "variantId",
+          "timestamp" AS "timestamp",
+          low_profit::float AS "lowProfit",
+          high_profit::float AS "highProfit"
+        FROM variant_history
+        WHERE variant_id IN (${variantPlaceholders})
+          AND "timestamp" >= $${previousStartParam}
+          AND "timestamp" <= $${currentEndParam}
+        ORDER BY variant_id, "timestamp" ASC
+      `,
+      [...variantIds, previousPeriodStart.toISOString(), currentPeriodEnd.toISOString()],
+    )) as unknown;
+    const rows = Array.isArray(rawRows) ? (rawRows as ProfitGrowthPeriodRow[]) : [];
+
+    const grouped: Record<
+      string,
+      {
+        previousLow: number[];
+        previousHigh: number[];
+        currentLow: number[];
+        currentHigh: number[];
+      }
+    > = {};
+
+    for (const row of rows) {
+      if (typeof row.variantId !== 'string' || row.timestamp == null) {
+        continue;
+      }
+
+      const variantId = row.variantId;
+      const timestamp = row.timestamp instanceof Date ? row.timestamp : new Date(row.timestamp);
+      const lowProfit = Number(row.lowProfit);
+      const highProfit = Number(row.highProfit);
+
+      if (
+        variantId.length === 0 ||
+        Number.isNaN(timestamp.getTime()) ||
+        timestamp < previousPeriodStart ||
+        timestamp > currentPeriodEnd ||
+        !Number.isFinite(lowProfit) ||
+        !Number.isFinite(highProfit)
+      ) {
+        continue;
+      }
+
+      const bucket =
+        grouped[variantId] ??
+        (grouped[variantId] = {
+          previousLow: [],
+          previousHigh: [],
+          currentLow: [],
+          currentHigh: [],
+        });
+
+      if (timestamp < currentPeriodStart) {
+        bucket.previousLow.push(lowProfit);
+        bucket.previousHigh.push(highProfit);
+      } else {
+        bucket.currentLow.push(lowProfit);
+        bucket.currentHigh.push(highProfit);
+      }
+    }
+
+    const minSamplesPerPeriod = 2;
+    const stats: Record<string, ProfitGrowthPeriodStats> = {};
+    for (const [variantId, bucket] of Object.entries(grouped)) {
+      if (
+        bucket.previousLow.length < minSamplesPerPeriod ||
+        bucket.currentLow.length < minSamplesPerPeriod
+      ) {
+        continue;
+      }
+
+      const previousLowProfit = this.getMedian(bucket.previousLow);
+      const previousHighProfit = this.getMedian(bucket.previousHigh);
+      const currentLowProfit = this.getMedian(bucket.currentLow);
+      const currentHighProfit = this.getMedian(bucket.currentHigh);
+
+      if (
+        previousLowProfit == null ||
+        previousHighProfit == null ||
+        currentLowProfit == null ||
+        currentHighProfit == null
+      ) {
+        continue;
+      }
+
+      stats[variantId] = {
+        variantId,
+        previousLowProfit,
+        previousHighProfit,
+        currentLowProfit,
+        currentHighProfit,
+        sampleCountPrevious: bucket.previousLow.length,
+        sampleCountCurrent: bucket.currentLow.length,
+      };
+    }
+
+    return stats;
+  }
+
+  private calculateGrowthPct(current: number, previous: number): number | null {
+    if (previous <= 0) return null;
+    return ((current - previous) / previous) * 100;
+  }
+
+  private getTrendDirection(growthAbs: number): 'up' | 'down' | 'flat' {
+    if (growthAbs > 0) return 'up';
+    if (growthAbs < 0) return 'down';
+    return 'flat';
+  }
+
+  private calculatePeriodTrend(
+    stats: ProfitGrowthPeriodStats,
+    mode: TrendingProfitMode,
+  ): ProfitGrowthTrendCalculation {
+    const lowGrowthAbs = stats.currentLowProfit - stats.previousLowProfit;
+    const highGrowthAbs = stats.currentHighProfit - stats.previousHighProfit;
+    const reliableGrowthAbs = Math.min(lowGrowthAbs, highGrowthAbs);
+    const lowGrowthPct = this.calculateGrowthPct(stats.currentLowProfit, stats.previousLowProfit);
+    const highGrowthPct = this.calculateGrowthPct(
+      stats.currentHighProfit,
+      stats.previousHighProfit,
+    );
+    const reliableGrowthPct =
+      lowGrowthPct == null || highGrowthPct == null ? null : Math.min(lowGrowthPct, highGrowthPct);
+
+    if (mode === 'instant') {
+      return {
+        previousPeriodProfit: stats.previousLowProfit,
+        currentPeriodProfit: stats.currentLowProfit,
+        growthAbs: lowGrowthAbs,
+        growthPct: lowGrowthPct,
+        trendDirection: this.getTrendDirection(lowGrowthAbs),
+        lowProfit: stats.currentLowProfit,
+        highProfit: stats.currentHighProfit,
+        lowGrowthAbs,
+        highGrowthAbs,
+        reliableGrowthAbs,
+        lowGrowthPct,
+        highGrowthPct,
+        reliableGrowthPct,
+      };
+    }
+
+    if (mode === 'slow') {
+      return {
+        previousPeriodProfit: stats.previousHighProfit,
+        currentPeriodProfit: stats.currentHighProfit,
+        growthAbs: highGrowthAbs,
+        growthPct: highGrowthPct,
+        trendDirection: this.getTrendDirection(highGrowthAbs),
+        lowProfit: stats.currentLowProfit,
+        highProfit: stats.currentHighProfit,
+        lowGrowthAbs,
+        highGrowthAbs,
+        reliableGrowthAbs,
+        lowGrowthPct,
+        highGrowthPct,
+        reliableGrowthPct,
+      };
+    }
+
+    const previousPeriodProfit = Math.min(stats.previousLowProfit, stats.previousHighProfit);
+    const currentPeriodProfit = Math.min(stats.currentLowProfit, stats.currentHighProfit);
+
+    return {
+      previousPeriodProfit,
+      currentPeriodProfit,
+      growthAbs: reliableGrowthAbs,
+      growthPct: reliableGrowthPct,
+      trendDirection: this.getTrendDirection(reliableGrowthAbs),
+      lowProfit: stats.currentLowProfit,
+      highProfit: stats.currentHighProfit,
+      lowGrowthAbs,
+      highGrowthAbs,
+      reliableGrowthAbs,
+      lowGrowthPct,
+      highGrowthPct,
+      reliableGrowthPct,
+    };
+  }
+
+  private buildProfitGrowthMetrics(
+    stats: ProfitGrowthPeriodStats,
+    options: TrendingProfitOptions,
+  ): ProfitGrowthMetrics {
+    const trend = this.calculatePeriodTrend(stats, options.mode);
+
+    return {
+      window: options.window,
+      mode: options.mode,
+      previousPeriodProfit: trend.previousPeriodProfit,
+      currentPeriodProfit: trend.currentPeriodProfit,
+      growthAbs: trend.growthAbs,
+      growthPct: trend.growthPct,
+      sampleCountPrevious: stats.sampleCountPrevious,
+      sampleCountCurrent: stats.sampleCountCurrent,
+      trendDirection: trend.trendDirection,
+      previousPeriodLowProfit: stats.previousLowProfit,
+      previousPeriodHighProfit: stats.previousHighProfit,
+      currentPeriodLowProfit: stats.currentLowProfit,
+      currentPeriodHighProfit: stats.currentHighProfit,
+      lowGrowthAbs: trend.lowGrowthAbs,
+      highGrowthAbs: trend.highGrowthAbs,
+      reliableGrowthAbs: trend.reliableGrowthAbs,
+      lowGrowthPct: trend.lowGrowthPct,
+      highGrowthPct: trend.highGrowthPct,
+      reliableGrowthPct: trend.reliableGrowthPct,
+      selectedGrowthAbs: trend.growthAbs,
+      selectedGrowthPct: trend.growthPct,
+    };
+  }
+
+  private toPublicProfitGrowthMetrics(metrics: ProfitGrowthMetrics): PublicProfitGrowthMetrics {
+    return {
+      window: metrics.window,
+      mode: metrics.mode,
+      previousPeriodProfit: metrics.previousPeriodProfit,
+      currentPeriodProfit: metrics.currentPeriodProfit,
+      growthAbs: metrics.growthAbs,
+      growthPct: metrics.growthPct,
+      trendDirection: metrics.trendDirection,
+    };
+  }
+
+  async findTrendingProfit(
+    page = 1,
+    perPage = 10,
+    userInfo?: UserInfo,
+    filters: ListFilters = { enabled: true },
+    options: TrendingProfitOptions = {
+      window: '24h',
+      mode: 'reliable',
+      minGrowthAbs: 0,
+      minCurrentProfit: 0,
+    },
+    likeOptions: ListLikeOptions = {},
+    variantsMode: VariantsMode = 'best',
+  ): Promise<{ data: any[]; total: number }> {
+    const allEntities = await this.methodRepo.find({
+      where: { enabled: filters.enabled },
+      relations: ['variants', 'variants.ioItems'],
+    });
+    const variantCounts = allEntities.reduce<Record<string, number>>((acc, method) => {
+      acc[method.id] = method.variants.length;
+      return acc;
+    }, {});
+    let methodsToProcess = allEntities.map((m) => this.toDto(m));
+
+    if (userInfo) {
+      methodsToProcess = filterMethodsByUserStats(methodsToProcess, userInfo);
+    }
+
+    const itemIds = this.collectItemIdsFromMethods(methodsToProcess);
+    const variantIds = methodsToProcess.flatMap((method) =>
+      method.variants.map((variant) => variant.id),
+    );
+    const now = new Date();
+    const windowMs = this.getTrendingWindowMs(options.window);
+    const currentPeriodStart = new Date(now.getTime() - windowMs);
+    const previousPeriodStart = new Date(now.getTime() - windowMs * 2);
+    const [pricesByItem, volumes24hByItem, periodStats] = await Promise.all([
+      this.getItemPrices(itemIds),
+      this.getItemVolumes24h(itemIds),
+      this.getProfitGrowthPeriodStats(variantIds, previousPeriodStart, currentPeriodStart, now),
+    ]);
+    const selectedSkill = filters.skill?.trim().toLowerCase() || undefined;
+
+    let enrichedMethods = methodsToProcess
+      .map((method) => {
+        let enrichedVariants = method.variants.flatMap((variant) => {
+          const stats = periodStats[variant.id];
+          if (!stats) return [];
+
+          const profitGrowthMetrics = this.buildProfitGrowthMetrics(stats, options);
+          if (
+            profitGrowthMetrics.previousPeriodProfit <= 0 ||
+            profitGrowthMetrics.currentPeriodProfit <= 0
+          ) {
+            return [];
+          }
+
+          if (profitGrowthMetrics.currentPeriodProfit <= options.minCurrentProfit) return [];
+          if (profitGrowthMetrics.growthAbs <= options.minGrowthAbs) return [];
+          if (
+            options.minGrowthPct != null &&
+            (profitGrowthMetrics.growthPct == null ||
+              profitGrowthMetrics.growthPct < options.minGrowthPct)
+          ) {
+            return [];
+          }
+
+          const marketImpact = this.calculateVariantMarketImpact(
+            variant,
+            pricesByItem,
+            volumes24hByItem,
+          );
+          const {
+            id,
+            slug,
+            clickIntensity,
+            afkiness,
+            riskLevel,
+            requirements,
+            xpHour,
+            label,
+            description,
+            wilderness,
+          } = variant;
+          const enrichedVariant = {
+            id,
+            slug,
+            xpHour,
+            label,
+            description,
+            clickIntensity,
+            afkiness,
+            riskLevel,
+            requirements,
+            wilderness,
+            lowProfit: profitGrowthMetrics.currentPeriodLowProfit,
+            highProfit: profitGrowthMetrics.currentPeriodHighProfit,
+            marketImpactInstant: marketImpact.marketImpactInstant,
+            marketImpactSlow: marketImpact.marketImpactSlow,
+            profitGrowth: this.toPublicProfitGrowthMetrics(profitGrowthMetrics),
+          };
+
+          if (selectedSkill) {
+            const experienceForSkill = this.getExperienceForSkill(xpHour, selectedSkill);
+            if (experienceForSkill != null) {
+              return [
+                {
+                  ...enrichedVariant,
+                  gpPerXpHigh: profitGrowthMetrics.currentPeriodHighProfit / experienceForSkill,
+                  gpPerXpLow: profitGrowthMetrics.currentPeriodLowProfit / experienceForSkill,
+                },
+              ];
+            }
+          }
+
+          return [enrichedVariant];
+        });
+
+        enrichedVariants = enrichedVariants.filter((v) => {
+          if (
+            filters.clickIntensity != null &&
+            v.clickIntensity != null &&
+            v.clickIntensity > filters.clickIntensity
+          )
+            return false;
+          if (filters.afkiness != null) {
+            if (v.afkiness == null || v.afkiness <= filters.afkiness) return false;
+          }
+          if (
+            filters.riskLevel != null &&
+            v.riskLevel != null &&
+            Number(v.riskLevel) > filters.riskLevel
+          )
+            return false;
+          if (filters.givesExperience != null) {
+            const hasXp = (v.xpHour?.length ?? 0) > 0;
+            if ((filters.givesExperience && !hasXp) || (!filters.givesExperience && hasXp))
+              return false;
+          }
+          if (selectedSkill) {
+            const experienceForSkill = this.getExperienceForSkill(v.xpHour, selectedSkill);
+            if (experienceForSkill == null) return false;
+          }
+          if (filters.showProfitables && v.highProfit <= 0) return false;
+          return true;
+        });
+
+        return { ...method, variants: enrichedVariants };
+      })
+      .filter((m) => {
+        if (filters.name && !m.name.toLowerCase().includes(filters.name.toLowerCase()))
+          return false;
+        if (
+          filters.category &&
+          (!m.category || m.category.toLowerCase() !== filters.category.toLowerCase())
+        )
+          return false;
+        return m.variants.length > 0;
+      });
+
+    const compareGrowthDesc = (
+      a: { profitGrowth?: PublicProfitGrowthMetrics },
+      b: { profitGrowth?: PublicProfitGrowthMetrics },
+    ) => (b.profitGrowth?.growthAbs ?? 0) - (a.profitGrowth?.growthAbs ?? 0);
+
+    if (variantsMode === 'all') {
+      enrichedMethods = enrichedMethods.flatMap((method) => {
+        const variantCount = variantCounts[method.id] ?? 0;
+        const { description: _description, ...methodWithoutDescription } = method;
+        return [...method.variants].sort(compareGrowthDesc).map((variant) => ({
+          ...methodWithoutDescription,
+          variants: [variant],
+          variantCount,
+        }));
+      });
+    } else {
+      enrichedMethods = enrichedMethods.map((method) => {
+        const variantCount = variantCounts[method.id] ?? 0;
+        const bestVariant = [...method.variants].sort(compareGrowthDesc)[0];
+        const { description: _description, ...methodWithoutDescription } = method;
+        return { ...methodWithoutDescription, variants: [bestVariant], variantCount };
+      });
+    }
+
+    const methodIds = enrichedMethods.map((method) => method.id);
+    const likesCountMap = await this.getLikesCountMap(methodIds);
+    const likedMethodIds = likeOptions.likedByUserId
+      ? await this.getLikedMethodIdsByUser(likeOptions.likedByUserId, methodIds)
+      : new Set<string>();
+
+    enrichedMethods = enrichedMethods.map((method) => ({
+      ...method,
+      likes: likesCountMap[method.id] ?? 0,
+      ...(likeOptions.likedByUserId ? { likedByMe: likedMethodIds.has(method.id) } : {}),
+    }));
+
+    if (likeOptions.onlyLikedByMe) {
+      enrichedMethods = enrichedMethods.filter((method) =>
+        likeOptions.likedByUserId ? likedMethodIds.has(method.id) : false,
+      );
+    }
+
+    enrichedMethods.sort((a, b) => compareGrowthDesc(a.variants[0], b.variants[0]));
+
+    const total = enrichedMethods.length;
+    const start = (page - 1) * perPage;
+    const paginated = enrichedMethods.slice(start, start + perPage);
+
+    return { data: paginated, total };
   }
 
   async findAllWithProfit(

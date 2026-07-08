@@ -1066,3 +1066,401 @@ describe('MethodsService variantCount', () => {
     expect(result.data.method.id).toBe('m1');
   });
 });
+
+describe('MethodsService trending profit', () => {
+  const now = new Date('2026-07-07T12:00:00.000Z');
+  const previousTimestamps = [
+    new Date('2026-07-05T13:00:00.000Z'),
+    new Date('2026-07-06T00:00:00.000Z'),
+    new Date('2026-07-06T11:00:00.000Z'),
+  ];
+  const currentTimestamps = [
+    new Date('2026-07-06T13:00:00.000Z'),
+    new Date('2026-07-07T00:00:00.000Z'),
+    new Date('2026-07-07T11:00:00.000Z'),
+  ];
+
+  const buildVariant = (id: string, label = id): MethodVariant =>
+    ({
+      id,
+      slug: id,
+      label,
+      description: null,
+      xpHour: null,
+      clickIntensity: 0,
+      afkiness: 0,
+      riskLevel: '0',
+      requirements: null,
+      recommendations: null,
+      wilderness: false,
+      actionsPerHour: 0,
+      createdAt: new Date(),
+      ioItems: [],
+      method: {} as Method,
+    }) as MethodVariant;
+
+  const buildMethod = (id: string, variants: MethodVariant[]): Method =>
+    ({
+      id,
+      name: `Method ${id}`,
+      slug: `method-${id}`,
+      description: undefined,
+      category: 'Skilling',
+      enabled: true,
+      createdAt: new Date(),
+      variants,
+    }) as Method;
+
+  const createTrendingService = (
+    methods: Method[],
+    historyRows: Array<{
+      variantId: string;
+      timestamp: Date | string;
+      lowProfit: number;
+      highProfit: number;
+    }>,
+  ) => {
+    const methodRepo = {
+      find: jest.fn().mockResolvedValue(methods),
+    } as unknown as Repository<Method>;
+    const historyQuery = jest.fn().mockResolvedValue(historyRows);
+    const historyRepo = {
+      query: historyQuery,
+    } as unknown as Repository<VariantHistory>;
+    const service = new MethodsService(
+      methodRepo,
+      {} as Repository<MethodVariant>,
+      {} as Repository<VariantIoItem>,
+      historyRepo,
+      createMethodLikeRepo(),
+      {} as Repository<User>,
+      {} as VariantSnapshotService,
+      {} as RuneScapeApiService,
+      { get: jest.fn().mockReturnValue('redis://localhost:6379') } as unknown as ConfigService,
+    );
+
+    jest.spyOn(service as any, 'getItemPrices').mockResolvedValue({});
+    jest.spyOn(service as any, 'getItemVolumes24h').mockResolvedValue({});
+
+    return { service, historyQuery };
+  };
+
+  const buildHistoryRows = (
+    variantId: string,
+    previousProfits: number[],
+    currentProfits: number[],
+  ): Array<{ variantId: string; timestamp: Date; lowProfit: number; highProfit: number }> => [
+    ...previousProfits.map((profit, index) => ({
+      variantId,
+      timestamp: previousTimestamps[index],
+      lowProfit: profit,
+      highProfit: profit,
+    })),
+    ...currentProfits.map((profit, index) => ({
+      variantId,
+      timestamp: currentTimestamps[index],
+      lowProfit: profit,
+      highProfit: profit,
+    })),
+  ];
+
+  interface TrendingProfitTestVariant {
+    id: string;
+    profitGrowth: {
+      previousPeriodProfit?: number;
+      currentPeriodProfit?: number;
+      growthAbs?: number;
+      growthPct?: number | null;
+      trendDirection?: 'up' | 'down' | 'flat';
+    };
+  }
+
+  interface TrendingProfitTestMethod {
+    id: string;
+    variants: TrendingProfitTestVariant[];
+  }
+
+  beforeEach(() => {
+    jest.useFakeTimers().setSystemTime(now);
+    call.mockReset();
+  });
+
+  afterEach(() => {
+    jest.useRealTimers();
+    jest.restoreAllMocks();
+  });
+
+  it('uses period-over-period medians and orders by absolute growth instead of percentage', async () => {
+    const small = buildMethod('small', [buildVariant('v-small')]);
+    const big = buildMethod('big', [buildVariant('v-big')]);
+    const { service } = createTrendingService(
+      [small, big],
+      [
+        ...buildHistoryRows('v-small', [1, 1, 1], [1_000, 1_000, 1_000]),
+        ...buildHistoryRows(
+          'v-big',
+          [1_000_000, 1_000_000, 1_000_000],
+          [1_300_000, 1_300_000, 1_300_000],
+        ),
+      ],
+    );
+
+    const result = await service.findTrendingProfit(
+      1,
+      10,
+      undefined,
+      { enabled: true },
+      { window: '24h', mode: 'reliable', minGrowthAbs: 0, minCurrentProfit: 0 },
+    );
+    const methods = result.data as TrendingProfitTestMethod[];
+
+    expect(methods.map((method) => method.id)).toEqual(['big', 'small']);
+    expect(methods[0].variants[0].profitGrowth).toMatchObject({
+      previousPeriodProfit: 1_000_000,
+      currentPeriodProfit: 1_300_000,
+      growthAbs: 300_000,
+      growthPct: 30,
+      trendDirection: 'up',
+    });
+    expect(methods[0].variants[0].profitGrowth).not.toHaveProperty('selectedGrowthAbs');
+    expect(methods[0].variants[0].profitGrowth).not.toHaveProperty('sampleCountPrevious');
+    expect(methods[0].variants[0].profitGrowth).not.toHaveProperty('lowGrowthAbs');
+    expect(methods[1].variants[0].profitGrowth.growthPct).toBe(99_900);
+  });
+
+  it('uses median so a previous-period spike does not contaminate the trend', async () => {
+    const method = buildMethod('m1', [buildVariant('v1')]);
+    const { service } = createTrendingService(
+      [method],
+      buildHistoryRows('v1', [100_000, 500_000, 105_000], [150_000, 155_000, 160_000]),
+    );
+
+    const result = await service.findTrendingProfit(
+      1,
+      10,
+      undefined,
+      { enabled: true },
+      { window: '24h', mode: 'reliable', minGrowthAbs: 0, minCurrentProfit: 0 },
+    );
+    const methods = result.data as TrendingProfitTestMethod[];
+
+    expect(methods[0].variants[0].profitGrowth).toMatchObject({
+      previousPeriodProfit: 105_000,
+      currentPeriodProfit: 155_000,
+      growthAbs: 50_000,
+    });
+    expect(methods[0].variants[0].profitGrowth.growthPct).toBeCloseTo(47.619, 3);
+  });
+
+  it('uses reliable growth as the minimum growth across low and high profit', async () => {
+    const method = buildMethod('m1', [buildVariant('v1'), buildVariant('v2')]);
+    const { service } = createTrendingService(
+      [method],
+      [
+        ...[
+          ...previousTimestamps.map((timestamp) => ({
+            variantId: 'v1',
+            timestamp,
+            lowProfit: 100,
+            highProfit: 100,
+          })),
+          ...currentTimestamps.map((timestamp) => ({
+            variantId: 'v1',
+            timestamp,
+            lowProfit: 300,
+            highProfit: 120,
+          })),
+        ],
+        ...[
+          ...previousTimestamps.map((timestamp) => ({
+            variantId: 'v2',
+            timestamp,
+            lowProfit: 100,
+            highProfit: 100,
+          })),
+          ...currentTimestamps.map((timestamp) => ({
+            variantId: 'v2',
+            timestamp,
+            lowProfit: 180,
+            highProfit: 180,
+          })),
+        ],
+      ],
+    );
+
+    const result = await service.findTrendingProfit(
+      1,
+      10,
+      undefined,
+      { enabled: true },
+      { window: '24h', mode: 'reliable', minGrowthAbs: 0, minCurrentProfit: 0 },
+    );
+    const methods = result.data as TrendingProfitTestMethod[];
+
+    expect(methods[0].variants[0]).toMatchObject({
+      id: 'v2',
+      profitGrowth: { growthAbs: 80, growthPct: 80 },
+    });
+  });
+
+  it('switches selected growth for instant and slow modes', async () => {
+    const method = buildMethod('m1', [buildVariant('v-instant'), buildVariant('v-slow')]);
+    const baselineRows = [
+      ...previousTimestamps.map((timestamp) => ({
+        variantId: 'v-instant',
+        timestamp,
+        lowProfit: 100,
+        highProfit: 100,
+      })),
+      ...currentTimestamps.map((timestamp) => ({
+        variantId: 'v-instant',
+        timestamp,
+        lowProfit: 300,
+        highProfit: 110,
+      })),
+      ...previousTimestamps.map((timestamp) => ({
+        variantId: 'v-slow',
+        timestamp,
+        lowProfit: 100,
+        highProfit: 100,
+      })),
+      ...currentTimestamps.map((timestamp) => ({
+        variantId: 'v-slow',
+        timestamp,
+        lowProfit: 120,
+        highProfit: 500,
+      })),
+    ];
+
+    const instant = createTrendingService([method], baselineRows);
+
+    const instantResult = await instant.service.findTrendingProfit(
+      1,
+      10,
+      undefined,
+      { enabled: true },
+      { window: '24h', mode: 'instant', minGrowthAbs: 0, minCurrentProfit: 0 },
+    );
+    const instantMethods = instantResult.data as TrendingProfitTestMethod[];
+
+    expect(instantMethods[0].variants[0]).toMatchObject({
+      id: 'v-instant',
+      profitGrowth: { growthAbs: 200 },
+    });
+
+    jest.restoreAllMocks();
+    const slow = createTrendingService([method], baselineRows);
+
+    const slowResult = await slow.service.findTrendingProfit(
+      1,
+      10,
+      undefined,
+      { enabled: true },
+      { window: '24h', mode: 'slow', minGrowthAbs: 0, minCurrentProfit: 0 },
+    );
+    const slowMethods = slowResult.data as TrendingProfitTestMethod[];
+
+    expect(slowMethods[0].variants[0]).toMatchObject({
+      id: 'v-slow',
+      profitGrowth: { growthAbs: 400 },
+    });
+  });
+
+  it('excludes variants when previous or current median profit is not positive', async () => {
+    const method = buildMethod('m1', [buildVariant('v1')]);
+    const { service } = createTrendingService(
+      [method],
+      buildHistoryRows('v1', [0, 0, 0], [100, 100, 100]),
+    );
+
+    const result = await service.findTrendingProfit(
+      1,
+      10,
+      undefined,
+      { enabled: true },
+      { window: '24h', mode: 'reliable', minGrowthAbs: 0, minCurrentProfit: 0 },
+    );
+
+    expect(result.data).toHaveLength(0);
+  });
+
+  it('excludes variants without enough samples in both periods', async () => {
+    const method = buildMethod('m1', [
+      buildVariant('v-good'),
+      buildVariant('v-missing'),
+      buildVariant('v-insufficient'),
+    ]);
+    const { service, historyQuery } = createTrendingService(
+      [method],
+      [
+        ...buildHistoryRows('v-good', [100, 100, 100], [200, 250, 300]),
+        {
+          variantId: 'v-insufficient',
+          timestamp: previousTimestamps[0],
+          lowProfit: 100,
+          highProfit: 100,
+        },
+        {
+          variantId: 'v-insufficient',
+          timestamp: currentTimestamps[0],
+          lowProfit: 200,
+          highProfit: 200,
+        },
+      ],
+    );
+
+    const result = await service.findTrendingProfit(
+      1,
+      10,
+      undefined,
+      { enabled: true },
+      { window: '24h', mode: 'reliable', minGrowthAbs: 0, minCurrentProfit: 0 },
+      {},
+      'all',
+    );
+
+    expect(result.data).toHaveLength(1);
+    const methods = result.data as TrendingProfitTestMethod[];
+    expect(methods[0].variants[0].id).toBe('v-good');
+    expect(historyQuery).toHaveBeenCalledWith(expect.stringContaining('variant_id IN'), [
+      'v-good',
+      'v-missing',
+      'v-insufficient',
+      '2026-07-05T12:00:00.000Z',
+      '2026-07-07T12:00:00.000Z',
+    ]);
+  });
+
+  it('returns one row per variant when variants mode is all', async () => {
+    const method = buildMethod('m1', [buildVariant('v1'), buildVariant('v2')]);
+    const { service } = createTrendingService(
+      [method],
+      [
+        ...buildHistoryRows('v1', [100, 100, 100], [200, 200, 200]),
+        ...buildHistoryRows('v2', [100, 100, 100], [300, 300, 300]),
+      ],
+    );
+
+    const result = await service.findTrendingProfit(
+      1,
+      10,
+      undefined,
+      { enabled: true },
+      { window: '24h', mode: 'reliable', minGrowthAbs: 0, minCurrentProfit: 0 },
+      {},
+      'all',
+    );
+
+    expect(result.total).toBe(2);
+    const methods = result.data as TrendingProfitTestMethod[];
+    expect(methods.map((methodRow) => methodRow.variants[0].id)).toEqual(['v2', 'v1']);
+  });
+
+  it('requires authentication for likedByMe trending filter', async () => {
+    const { service } = createTrendingService([], []);
+
+    await expect(service.listTrendingProfitResponse({ likedByMe: 'true' })).rejects.toBeInstanceOf(
+      UnauthorizedException,
+    );
+  });
+});
