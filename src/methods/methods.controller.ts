@@ -234,6 +234,122 @@ export class MethodsController {
     return this.svc.skillsSummaryWithProfitResponse(username, req?.headers.authorization, enabled);
   }
 
+  @Get('trending-profit')
+  @ApiOperation({
+    summary: 'List methods by profit growth',
+    description:
+      'Returns methods ordered by period-over-period median profit growth using low/high profit history.',
+  })
+  @ApiQuery({ name: 'window', required: false, enum: ['15m', '1h', '24h', '7d', '30d'] })
+  @ApiQuery({ name: 'mode', required: false, enum: ['reliable', 'instant', 'slow'] })
+  @ApiQuery({ name: 'page', required: false, description: 'Page number (default 1)' })
+  @ApiQuery({ name: 'perPage', required: false, description: 'Items per page (default 10)' })
+  @ApiQuery({ name: 'name', required: false, description: 'Search methods by name' })
+  @ApiQuery({ name: 'username', required: false, description: 'RuneScape username for context' })
+  @ApiQuery({ name: 'category', required: false, description: 'Filter by a single category' })
+  @ApiQuery({ name: 'skill', required: false, description: 'Filter by skill' })
+  @ApiQuery({ name: 'givesExperience', required: false, description: 'true or false' })
+  @ApiQuery({ name: 'showProfitables', required: false, description: 'true or false' })
+  @ApiQuery({ name: 'enabled', required: false, description: 'true or false (default true)' })
+  @ApiQuery({
+    name: 'likedByMe',
+    required: false,
+    description: 'true to return only methods liked by the authenticated user',
+  })
+  @ApiQuery({
+    name: 'variants',
+    required: false,
+    enum: ['best', 'all'],
+    description:
+      'best (default) returns the top-growth variant per method. all returns one method entry per variant.',
+  })
+  @ApiQuery({
+    name: 'minGrowthAbs',
+    required: false,
+    description: 'Minimum selected absolute profit growth, default 0',
+  })
+  @ApiQuery({
+    name: 'minGrowthPct',
+    required: false,
+    description: 'Minimum selected percent profit growth',
+  })
+  @ApiQuery({
+    name: 'minCurrentProfit',
+    required: false,
+    description: 'Minimum selected current-period median profit, default 0',
+  })
+  @ApiQuery({
+    name: 'minProfit',
+    required: false,
+    description: 'Alias for minCurrentProfit',
+  })
+  @ApiOkResponse({
+    description: 'Methods list ordered by profit growth',
+    schema: {
+      example: {
+        status: 'ok',
+        data: { methods: [METHOD_EXAMPLE], user: null },
+        warnings: [],
+        meta: {
+          total: 1,
+          page: 1,
+          pageSize: 10,
+          perPage: 10,
+          hasNext: false,
+          window: '24h',
+          mode: 'reliable',
+        },
+      },
+    },
+  })
+  async findTrendingProfit(
+    @Query('window') window?: string,
+    @Query('mode') mode?: string,
+    @Query('page') page = '1',
+    @Query('perPage') perPage = '10',
+    @Query('username') username?: string,
+    @Query('name') name?: string,
+    @Query('category') category?: string,
+    @Query('clickIntensity') clickIntensity?: string,
+    @Query('afkiness') afkiness?: string,
+    @Query('riskLevel') riskLevel?: string,
+    @Query('givesExperience') givesExperience?: string,
+    @Query('skill') skill?: string,
+    @Query('showProfitables') showProfitables?: string,
+    @Query('enabled') enabled?: string | boolean,
+    @Query('likedByMe') likedByMe?: string | boolean,
+    @Query('variants') variants?: string,
+    @Query('minGrowthAbs') minGrowthAbs?: string,
+    @Query('minGrowthPct') minGrowthPct?: string,
+    @Query('minCurrentProfit') minCurrentProfit?: string,
+    @Query('minProfit') minProfit?: string,
+    @Req() req?: Request,
+  ) {
+    return this.svc.listTrendingProfitResponse({
+      window,
+      mode,
+      page,
+      perPage,
+      username,
+      name,
+      category,
+      clickIntensity,
+      afkiness,
+      riskLevel,
+      givesExperience,
+      skill,
+      showProfitables,
+      enabled,
+      likedByMe,
+      variants,
+      minGrowthAbs,
+      minGrowthPct,
+      minCurrentProfit,
+      minProfit,
+      authorization: req?.headers.authorization,
+    });
+  }
+
   @Post(':methodId/like')
   @UseGuards(SupabaseAuthGuard)
   @ApiBearerAuth()
