@@ -300,6 +300,71 @@ describe('Methods (e2e)', () => {
     });
   });
 
+  it('GET /methods?members=false&variants=all returns only free-to-play variants', async () => {
+    const methodRepo = dataSource.getRepository(Method);
+    const variantRepo = dataSource.getRepository(MethodVariant);
+    const seed = buildMethodFixture();
+
+    const savedMethod = await methodRepo.save({
+      name: seed.name,
+      slug: seed.slug,
+      description: seed.description,
+      category: seed.category,
+    });
+
+    const [variantA, variantB] = seed.variants;
+    const savedVariantA = await variantRepo.save({
+      label: variantA.label,
+      slug: variantA.slug,
+      description: variantA.description,
+      xpHour: variantA.xpHour,
+      clickIntensity: variantA.clickIntensity,
+      afkiness: variantA.afkiness,
+      riskLevel: variantA.riskLevel,
+      requirements: variantA.requirements,
+      recommendations: variantA.recommendations,
+      wilderness: variantA.wilderness,
+      members: false,
+      actionsPerHour: variantA.actionsPerHour,
+      method: savedMethod,
+    });
+
+    const savedVariantB = await variantRepo.save({
+      label: variantB.label,
+      slug: variantB.slug,
+      description: variantB.description,
+      xpHour: variantB.xpHour,
+      clickIntensity: variantB.clickIntensity,
+      afkiness: variantB.afkiness,
+      riskLevel: variantB.riskLevel,
+      requirements: variantB.requirements,
+      recommendations: variantB.recommendations,
+      wilderness: variantB.wilderness,
+      members: true,
+      actionsPerHour: variantB.actionsPerHour,
+      method: savedMethod,
+    });
+
+    mockRedisProfits({
+      [savedMethod.id]: {
+        [savedVariantA.id]: { low: 100, high: 200 },
+        [savedVariantB.id]: { low: 200, high: 400 },
+      },
+    });
+
+    const res = await request(server).get('/methods?members=false&variants=all').expect(200);
+
+    const body = res.body as {
+      data: { methods: Array<{ variants: Array<{ id: string; members: boolean }> }> };
+    };
+
+    expect(body.data.methods).toHaveLength(1);
+    expect(body.data.methods[0].variants[0]).toMatchObject({
+      id: savedVariantA.id,
+      members: false,
+    });
+  });
+
   it('GET /methods/trending-profit returns methods ordered by profit growth', async () => {
     const methodRepo = dataSource.getRepository(Method);
     const variantRepo = dataSource.getRepository(MethodVariant);
