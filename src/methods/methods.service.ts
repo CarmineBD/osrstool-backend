@@ -61,6 +61,7 @@ interface ListFilters {
   givesExperience?: boolean;
   skill?: string;
   showProfitables?: boolean;
+  members?: boolean;
   enabled: boolean;
 }
 
@@ -92,6 +93,7 @@ interface ListQuery {
   givesExperience?: string;
   skill?: string;
   showProfitables?: string;
+  members?: string | boolean;
   enabled?: string | boolean;
   likedByMe?: string | boolean;
   variants?: string;
@@ -342,6 +344,7 @@ export class MethodsService implements OnModuleDestroy {
       skill: skill ?? undefined,
       showProfitables:
         showProfitables === 'true' ? true : showProfitables === 'false' ? false : undefined,
+      members: this.parseBooleanQueryParam(query.members, 'members'),
       enabled: enabledParsed ?? true,
     };
   }
@@ -2012,6 +2015,7 @@ export class MethodsService implements OnModuleDestroy {
             if (experienceForSkill == null) return false;
           }
           if (filters.showProfitables && v.highProfit <= 0) return false;
+          if (filters.members != null && v.members !== filters.members) return false;
           return true;
         });
 
@@ -2196,6 +2200,7 @@ export class MethodsService implements OnModuleDestroy {
             if (experienceForSkill == null) return false;
           }
           if (filters.showProfitables && v.highProfit <= 0) return false;
+          if (filters.members != null && v.members !== filters.members) return false;
           return true;
         });
 
