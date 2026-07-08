@@ -32,6 +32,7 @@ export class UpdateVariantDto {
   @IsSafeMarkdown()
   description?: string;
   @IsOptional() @IsBoolean() wilderness?: boolean;
+  @IsOptional() @IsBoolean() members?: boolean;
   @IsOptional() requirements?: VariantRequirements;
   @IsOptional() recommendations?: VariantRecommendations;
 

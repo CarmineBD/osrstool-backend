@@ -48,6 +48,7 @@ const METHOD_EXAMPLE = {
     {
       id: 'v_456',
       slug: 'karambwan-basic',
+      members: true,
       inputs: [{ id: 3144, quantity: 1, reason: null }],
       outputs: [{ id: 3145, quantity: 1, reason: null }],
       actionsPerHour: 1200,
@@ -113,6 +114,11 @@ export class MethodsController {
     description: 'true or false',
   })
   @ApiQuery({
+    name: 'members',
+    required: false,
+    description: 'true to return only members variants, false to return only free-to-play variants',
+  })
+  @ApiQuery({
     name: 'enabled',
     required: false,
     description: 'true or false (default true)',
@@ -159,6 +165,7 @@ export class MethodsController {
     @Query('givesExperience') givesExperience?: string,
     @Query('skill') skill?: string,
     @Query('showProfitables') showProfitables?: string,
+    @Query('members') members?: string | boolean,
     @Query('enabled') enabled?: string | boolean,
     @Query('likedByMe') likedByMe?: string | boolean,
     @Query('variants') variants?: string,
@@ -178,6 +185,7 @@ export class MethodsController {
       givesExperience,
       skill,
       showProfitables,
+      members,
       enabled,
       likedByMe,
       variants,
@@ -250,6 +258,11 @@ export class MethodsController {
   @ApiQuery({ name: 'skill', required: false, description: 'Filter by skill' })
   @ApiQuery({ name: 'givesExperience', required: false, description: 'true or false' })
   @ApiQuery({ name: 'showProfitables', required: false, description: 'true or false' })
+  @ApiQuery({
+    name: 'members',
+    required: false,
+    description: 'true to return only members variants, false to return only free-to-play variants',
+  })
   @ApiQuery({ name: 'enabled', required: false, description: 'true or false (default true)' })
   @ApiQuery({
     name: 'likedByMe',
@@ -316,6 +329,7 @@ export class MethodsController {
     @Query('givesExperience') givesExperience?: string,
     @Query('skill') skill?: string,
     @Query('showProfitables') showProfitables?: string,
+    @Query('members') members?: string | boolean,
     @Query('enabled') enabled?: string | boolean,
     @Query('likedByMe') likedByMe?: string | boolean,
     @Query('variants') variants?: string,
@@ -339,6 +353,7 @@ export class MethodsController {
       givesExperience,
       skill,
       showProfitables,
+      members,
       enabled,
       likedByMe,
       variants,

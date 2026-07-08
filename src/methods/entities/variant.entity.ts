@@ -61,6 +61,9 @@ export class MethodVariant {
   @Column({ type: 'boolean', default: false })
   wilderness: boolean;
 
+  @Column({ type: 'boolean', default: false })
+  members?: boolean;
+
   @Column({
     name: 'actions_per_hour',
     type: 'int',

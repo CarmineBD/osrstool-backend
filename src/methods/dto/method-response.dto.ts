@@ -15,6 +15,7 @@ export class VariantResponseDto {
   requirements?: VariantRequirements;
   recommendations?: VariantRecommendations;
   wilderness?: boolean;
+  members?: boolean;
   inputs: IoItemDto[];
   outputs: IoItemDto[];
 }
