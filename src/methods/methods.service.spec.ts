@@ -337,6 +337,56 @@ describe('MethodsService variantCount', () => {
     expect(method.variants[0].id).toBe('v2');
   });
 
+  it('filters variants by members flag', async () => {
+    const methodEntity = buildMethodFixture();
+    methodEntity.id = 'm1';
+    methodEntity.variants[0].id = 'v1';
+    methodEntity.variants[0].members = false;
+    methodEntity.variants[1].id = 'v2';
+    methodEntity.variants[1].members = true;
+
+    const methodRepo = {
+      find: jest.fn().mockResolvedValue([methodEntity]),
+    } as unknown as Repository<Method>;
+
+    const service = new MethodsService(
+      methodRepo,
+      {} as Repository<MethodVariant>,
+      {} as Repository<VariantIoItem>,
+      {} as Repository<VariantHistory>,
+      createMethodLikeRepo(),
+      {} as Repository<User>,
+      {} as VariantSnapshotService,
+      {} as RuneScapeApiService,
+      { get: jest.fn().mockReturnValue('redis://localhost:6379') } as unknown as ConfigService,
+    );
+
+    call.mockResolvedValue(
+      JSON.stringify([
+        {
+          m1: {
+            v1: { low: 0, high: 100 },
+            v2: { low: 0, high: 200 },
+          },
+        },
+      ]),
+    );
+
+    const result = await service.findAllWithProfit(
+      1,
+      10,
+      undefined,
+      { members: false, enabled: true },
+      { sortBy: 'highProfit', order: 'desc' },
+      {},
+      'all',
+    );
+
+    expect(result.data).toHaveLength(1);
+    const method = result.data[0] as { variants: Array<{ id: string; members: boolean }> };
+    expect(method.variants[0]).toMatchObject({ id: 'v1', members: false });
+  });
+
   it('adds gpPerXpHigh and gpPerXpLow when skill is provided using that skill xp only', async () => {
     const methodEntity = buildMethodFixture();
     methodEntity.id = 'm1';
@@ -1093,6 +1143,7 @@ describe('MethodsService trending profit', () => {
       requirements: null,
       recommendations: null,
       wilderness: false,
+      members: false,
       actionsPerHour: 0,
       createdAt: new Date(),
       ioItems: [],
@@ -1454,6 +1505,33 @@ describe('MethodsService trending profit', () => {
     expect(result.total).toBe(2);
     const methods = result.data as TrendingProfitTestMethod[];
     expect(methods.map((methodRow) => methodRow.variants[0].id)).toEqual(['v2', 'v1']);
+  });
+
+  it('filters trending variants by members flag', async () => {
+    const method = buildMethod('m1', [buildVariant('v1'), buildVariant('v2')]);
+    method.variants[0].members = false;
+    method.variants[1].members = true;
+    const { service } = createTrendingService(
+      [method],
+      [
+        ...buildHistoryRows('v1', [100, 100, 100], [200, 200, 200]),
+        ...buildHistoryRows('v2', [100, 100, 100], [300, 300, 300]),
+      ],
+    );
+
+    const result = await service.findTrendingProfit(
+      1,
+      10,
+      undefined,
+      { enabled: true, members: false },
+      { window: '24h', mode: 'reliable', minGrowthAbs: 0, minCurrentProfit: 0 },
+      {},
+      'all',
+    );
+
+    expect(result.total).toBe(1);
+    const methods = result.data as TrendingProfitTestMethod[];
+    expect(methods[0].variants[0]).toMatchObject({ id: 'v1', members: false });
   });
 
   it('requires authentication for likedByMe trending filter', async () => {
