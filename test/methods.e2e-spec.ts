@@ -16,6 +16,7 @@ import { buildMethodFixture } from '../src/testing/fixtures';
 import { Method } from '../src/methods/entities/method.entity';
 import { MethodVariant } from '../src/methods/entities/variant.entity';
 import { VariantIoItem } from '../src/methods/entities/io-item.entity';
+import { VariantHistory } from '../src/methods/entities/variant-history.entity';
 import { createPgMemAdapter } from './utils/pg-mem';
 
 jest.mock('pg', () => createPgMemAdapter());
@@ -47,6 +48,33 @@ describe('Methods (e2e)', () => {
       },
     ],
   });
+
+  const mockRedisProfits = (
+    profits: Record<string, Record<string, { low: number; high: number }>>,
+  ) => {
+    redisCall.mockImplementation((command: string, key: string, field?: string) => {
+      if (command === 'HGETALL' && key === 'methods:profits') {
+        return Promise.resolve(
+          Object.fromEntries(
+            Object.entries(profits).map(([methodId, methodProfits]) => [
+              methodId,
+              JSON.stringify(methodProfits),
+            ]),
+          ),
+        );
+      }
+
+      if (command === 'HGET' && key === 'methods:profits' && field) {
+        return Promise.resolve(JSON.stringify(profits[field] ?? {}));
+      }
+
+      if (command === 'HMGET') {
+        return Promise.resolve([]);
+      }
+
+      return Promise.resolve(null);
+    });
+  };
 
   beforeAll(async () => {
     const testApp = await createTestApp();
@@ -129,16 +157,12 @@ describe('Methods (e2e)', () => {
     );
 
     const variantIds = [savedVariantA.id, savedVariantB.id];
-    const profitPayload = [
-      {
-        [savedMethod.id]: {
-          [variantIds[0]]: { low: 100, high: 200 },
-          [variantIds[1]]: { low: 50, high: 300 },
-        },
+    mockRedisProfits({
+      [savedMethod.id]: {
+        [variantIds[0]]: { low: 100, high: 200 },
+        [variantIds[1]]: { low: 50, high: 300 },
       },
-    ];
-
-    redisCall.mockResolvedValue(JSON.stringify(profitPayload));
+    });
 
     const server = app.getHttpServer() as unknown as Server;
     const res = await request(server).get('/methods').expect(200);
@@ -231,16 +255,12 @@ describe('Methods (e2e)', () => {
     );
 
     const variantIds = [savedVariantA.id, savedVariantB.id];
-    const profitPayload = [
-      {
-        [savedMethod.id]: {
-          [variantIds[0]]: { low: 100, high: 200 },
-          [variantIds[1]]: { low: 50, high: 300 },
-        },
+    mockRedisProfits({
+      [savedMethod.id]: {
+        [variantIds[0]]: { low: 100, high: 200 },
+        [variantIds[1]]: { low: 50, high: 300 },
       },
-    ];
-
-    redisCall.mockResolvedValue(JSON.stringify(profitPayload));
+    });
 
     const server = app.getHttpServer() as unknown as Server;
     const res = await request(server).get('/methods?variants=all').expect(200);
@@ -278,6 +298,141 @@ describe('Methods (e2e)', () => {
       variantCount: 2,
       variants: [{ id: variantIds[0] }],
     });
+  });
+
+  it('GET /methods/trending-profit returns methods ordered by profit growth', async () => {
+    const methodRepo = dataSource.getRepository(Method);
+    const variantRepo = dataSource.getRepository(MethodVariant);
+    const historyRepo = dataSource.getRepository(VariantHistory);
+    const seed = buildMethodFixture();
+
+    const smallMethod = await methodRepo.save({
+      name: 'Small mover',
+      slug: 'small-mover',
+      description: seed.description,
+      category: seed.category,
+    });
+    const bigMethod = await methodRepo.save({
+      name: 'Big mover',
+      slug: 'big-mover',
+      description: seed.description,
+      category: seed.category,
+    });
+
+    const smallVariant = await variantRepo.save({
+      label: 'Small variant',
+      slug: 'small-variant',
+      description: null,
+      xpHour: null,
+      clickIntensity: 0,
+      afkiness: 0,
+      riskLevel: '0',
+      requirements: null,
+      recommendations: null,
+      wilderness: false,
+      actionsPerHour: 0,
+      method: smallMethod,
+    });
+    const bigVariant = await variantRepo.save({
+      label: 'Big variant',
+      slug: 'big-variant',
+      description: null,
+      xpHour: null,
+      clickIntensity: 0,
+      afkiness: 0,
+      riskLevel: '0',
+      requirements: null,
+      recommendations: null,
+      wilderness: false,
+      actionsPerHour: 0,
+      method: bigMethod,
+    });
+
+    const hoursAgo = (hours: number) => new Date(Date.now() - hours * 60 * 60 * 1000);
+    await historyRepo.save([
+      ...[47, 36, 25].map((hours) =>
+        historyRepo.create({
+          variant: smallVariant,
+          timestamp: hoursAgo(hours),
+          lowProfit: 1,
+          highProfit: 1,
+        }),
+      ),
+      ...[23, 12, 1].map((hours) =>
+        historyRepo.create({
+          variant: smallVariant,
+          timestamp: hoursAgo(hours),
+          lowProfit: 1_000,
+          highProfit: 1_000,
+        }),
+      ),
+      ...[47, 36, 25].map((hours) =>
+        historyRepo.create({
+          variant: bigVariant,
+          timestamp: hoursAgo(hours),
+          lowProfit: 1_000_000,
+          highProfit: 1_000_000,
+        }),
+      ),
+      ...[23, 12, 1].map((hours) =>
+        historyRepo.create({
+          variant: bigVariant,
+          timestamp: hoursAgo(hours),
+          lowProfit: 1_300_000,
+          highProfit: 1_300_000,
+        }),
+      ),
+    ]);
+
+    const server = app.getHttpServer() as unknown as Server;
+    const res = await request(server)
+      .get('/methods/trending-profit?window=24h&mode=reliable&variants=all')
+      .expect(200);
+
+    const body = res.body as {
+      status: string;
+      data: {
+        methods: Array<{
+          id: string;
+          variants: Array<{
+            id: string;
+            profitGrowth: {
+              window: string;
+              mode: string;
+              previousPeriodProfit: number;
+              currentPeriodProfit: number;
+              growthAbs: number;
+              growthPct: number | null;
+              trendDirection: string;
+            };
+          }>;
+        }>;
+      };
+      meta: { total: number; page: number; perPage: number; hasNext: boolean };
+    };
+
+    expect(body.status).toBe('ok');
+    expect(body.meta).toMatchObject({ total: 2, page: 1, perPage: 10, hasNext: false });
+    expect(body.data.methods.map((method) => method.id)).toEqual([bigMethod.id, smallMethod.id]);
+    expect(body.data.methods[0].variants[0]).toMatchObject({
+      id: bigVariant.id,
+      profitGrowth: {
+        window: '24h',
+        mode: 'reliable',
+        previousPeriodProfit: 1_000_000,
+        currentPeriodProfit: 1_300_000,
+        growthAbs: 300_000,
+        growthPct: 30,
+        trendDirection: 'up',
+      },
+    });
+    expect(body.data.methods[0].variants[0].profitGrowth).not.toHaveProperty('selectedGrowthAbs');
+    expect(body.data.methods[0].variants[0].profitGrowth).not.toHaveProperty('sampleCountPrevious');
+    expect(body.data.methods[0].variants[0].profitGrowth).not.toHaveProperty('lowGrowthAbs');
+    expect(body.data.methods[1].variants[0].profitGrowth.growthPct).toBe(99_900);
+
+    await request(server).get('/methods/trending-profit?window=1h').expect(200);
+    await request(server).get('/methods/trending-profit?window=7d').expect(200);
   });
 
   it('GET /methods with skill includes gpPerXpHigh and gpPerXpLow per variant', async () => {
@@ -345,16 +500,12 @@ describe('Methods (e2e)', () => {
     );
 
     const variantIds = [savedVariantA.id, savedVariantB.id];
-    const profitPayload = [
-      {
-        [savedMethod.id]: {
-          [variantIds[0]]: { low: 5000, high: 10000 },
-          [variantIds[1]]: { low: 4000, high: 8000 },
-        },
+    mockRedisProfits({
+      [savedMethod.id]: {
+        [variantIds[0]]: { low: 5000, high: 10000 },
+        [variantIds[1]]: { low: 4000, high: 8000 },
       },
-    ];
-
-    redisCall.mockResolvedValue(JSON.stringify(profitPayload));
+    });
 
     const server = app.getHttpServer() as unknown as Server;
     const res = await request(server).get('/methods?skill=magic&variants=all').expect(200);

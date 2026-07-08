@@ -67,3 +67,62 @@ describe('MethodsController skills summary endpoint', () => {
     );
   });
 });
+
+describe('MethodsController trending profit endpoint', () => {
+  it('forwards trending profit query params and authorization header to service', async () => {
+    const svc: { listTrendingProfitResponse: jest.Mock } = {
+      listTrendingProfitResponse: jest.fn().mockResolvedValue({ data: { methods: [] }, meta: {} }),
+    };
+
+    const controller = new MethodsController(svc as unknown as MethodsService);
+    const req = { headers: { authorization: 'Bearer token' } } as unknown as Request;
+
+    await controller.findTrendingProfit(
+      '24h',
+      'reliable',
+      '2',
+      '20',
+      'zezima',
+      'craft',
+      'Skilling',
+      '3',
+      '4',
+      '1',
+      'true',
+      'Magic',
+      'true',
+      'true',
+      'false',
+      'all',
+      '1000',
+      '5',
+      '50000',
+      undefined,
+      req,
+    );
+
+    expect(svc.listTrendingProfitResponse).toHaveBeenCalledWith({
+      window: '24h',
+      mode: 'reliable',
+      page: '2',
+      perPage: '20',
+      username: 'zezima',
+      name: 'craft',
+      category: 'Skilling',
+      clickIntensity: '3',
+      afkiness: '4',
+      riskLevel: '1',
+      givesExperience: 'true',
+      skill: 'Magic',
+      showProfitables: 'true',
+      enabled: 'true',
+      likedByMe: 'false',
+      variants: 'all',
+      minGrowthAbs: '1000',
+      minGrowthPct: '5',
+      minCurrentProfit: '50000',
+      minProfit: undefined,
+      authorization: 'Bearer token',
+    });
+  });
+});
