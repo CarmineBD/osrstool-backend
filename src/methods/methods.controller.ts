@@ -48,6 +48,7 @@ const METHOD_EXAMPLE = {
     {
       id: 'v_456',
       slug: 'karambwan-basic',
+      members: true,
       inputs: [{ id: 3144, quantity: 1, reason: null }],
       outputs: [{ id: 3145, quantity: 1, reason: null }],
       actionsPerHour: 1200,

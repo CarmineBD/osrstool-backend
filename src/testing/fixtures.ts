@@ -43,6 +43,7 @@ export const buildMethodFixture = (): Method => {
   variantA.requirements = null;
   variantA.recommendations = null;
   variantA.wilderness = false;
+  variantA.members = false;
   variantA.actionsPerHour = 600;
   variantA.ioItems = [
     Object.assign(new VariantIoItem(), {
@@ -70,6 +71,7 @@ export const buildMethodFixture = (): Method => {
   variantB.requirements = null;
   variantB.recommendations = null;
   variantB.wilderness = false;
+  variantB.members = false;
   variantB.actionsPerHour = 800;
   variantB.ioItems = [
     Object.assign(new VariantIoItem(), {

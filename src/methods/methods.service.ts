@@ -205,6 +205,7 @@ interface SkillSummaryVariant {
   riskLevel?: string | null;
   requirements?: Record<string, unknown> | null;
   wilderness?: boolean;
+  members?: boolean;
   lowProfit: number;
   highProfit: number;
   marketImpactInstant: number;
@@ -938,6 +939,7 @@ export class MethodsService implements OnModuleDestroy {
             riskLevel: variant.riskLevel,
             requirements: variant.requirements as Record<string, unknown> | null,
             wilderness: variant.wilderness,
+            members: variant.members ?? false,
             lowProfit: profit.low,
             highProfit: profit.high,
             marketImpactInstant: marketImpact.marketImpactInstant,
@@ -1125,6 +1127,7 @@ export class MethodsService implements OnModuleDestroy {
         riskLevel: v.riskLevel,
         description: v.description ?? null,
         wilderness: v.wilderness ?? false,
+        members: v.members ?? false,
         requirements: v.requirements,
         recommendations: v.recommendations,
       });
@@ -1946,6 +1949,7 @@ export class MethodsService implements OnModuleDestroy {
             label,
             description,
             wilderness,
+            members,
           } = variant;
           const enrichedVariant = {
             id,
@@ -1958,6 +1962,7 @@ export class MethodsService implements OnModuleDestroy {
             riskLevel,
             requirements,
             wilderness,
+            members: members ?? false,
             lowProfit: profitGrowthMetrics.currentPeriodLowProfit,
             highProfit: profitGrowthMetrics.currentPeriodHighProfit,
             marketImpactInstant: marketImpact.marketImpactInstant,
@@ -2130,6 +2135,7 @@ export class MethodsService implements OnModuleDestroy {
             label,
             description,
             wilderness,
+            members,
           } = variant;
           const enrichedVariant = {
             id,
@@ -2142,6 +2148,7 @@ export class MethodsService implements OnModuleDestroy {
             riskLevel,
             requirements,
             wilderness,
+            members: members ?? false,
             lowProfit: profit.low,
             highProfit: profit.high,
             marketImpactInstant: marketImpact.marketImpactInstant,
