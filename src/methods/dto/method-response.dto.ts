@@ -5,6 +5,7 @@ import { XpHour, VariantRecommendations, VariantRequirements } from '../types';
 export class VariantResponseDto {
   id: string;
   slug: string;
+  icon_id?: number | null;
   label: string;
   description?: string;
   xpHour?: XpHour;
@@ -24,6 +25,7 @@ export class MethodResponseDto {
   id: string;
   name: string;
   slug: string;
+  icon_id?: number | null;
   description?: string;
   category?: string;
   variants: VariantResponseDto[];

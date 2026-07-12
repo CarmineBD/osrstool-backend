@@ -36,12 +36,14 @@ describe('Methods (e2e)', () => {
 
   const buildValidCreateMethodPayload = () => ({
     name: 'Validated method',
+    icon_id: 4151,
     description: 'Texto **markdown** con [link](https://example.com)',
     category: 'Skilling',
     enabled: true,
     variants: [
       {
         label: 'Validated variant',
+        icon_id: 4152,
         description: 'Lista:\n- item 1\n- item 2',
         inputs: [{ id: 100, quantity: 1, type: 'input', reason: 'Reason text' }],
         outputs: [{ id: 200, quantity: 1, type: 'output', reason: 'Reason text' }],

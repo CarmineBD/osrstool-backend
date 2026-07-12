@@ -5,6 +5,7 @@ import {
   ValidateNested,
   IsArray,
   IsBoolean,
+  IsInt,
   MaxLength,
 } from 'class-validator';
 import { Type } from 'class-transformer';
@@ -14,6 +15,7 @@ import { DESCRIPTION_MAX_LENGTH } from './validation.constants';
 
 export class CreateMethodDto {
   @IsString() name: string;
+  @IsInt() icon_id: number;
   @IsOptional()
   @IsString()
   @MaxLength(DESCRIPTION_MAX_LENGTH)

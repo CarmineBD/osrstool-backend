@@ -6,6 +6,7 @@ import {
   IsArray,
   ValidateNested,
   IsBoolean,
+  IsInt,
   MaxLength,
 } from 'class-validator';
 import { Type } from 'class-transformer';
@@ -17,6 +18,7 @@ import { DESCRIPTION_MAX_LENGTH } from './validation.constants';
 
 export class CreateVariantDto {
   @IsString() label: string;
+  @IsInt() icon_id: number;
   @IsOptional() @IsNumber() actionsPerHour?: number;
   @IsOptional()
   @IsArray()
