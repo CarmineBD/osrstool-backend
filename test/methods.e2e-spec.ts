@@ -12,7 +12,8 @@ import * as request from 'supertest';
 import { Server } from 'http';
 import { DataSource } from 'typeorm';
 import { createTestApp } from './utils/create-test-app';
-import { buildMethodFixture } from '../src/testing/fixtures';
+import { buildItemFixture, buildMethodFixture } from '../src/testing/fixtures';
+import { Item } from '../src/items/entities/item.entity';
 import { Method } from '../src/methods/entities/method.entity';
 import { MethodVariant } from '../src/methods/entities/variant.entity';
 import { VariantIoItem } from '../src/methods/entities/io-item.entity';
@@ -36,18 +37,33 @@ describe('Methods (e2e)', () => {
 
   const buildValidCreateMethodPayload = () => ({
     name: 'Validated method',
+    icon_id: 4151,
     description: 'Texto **markdown** con [link](https://example.com)',
     category: 'Skilling',
     enabled: true,
     variants: [
       {
         label: 'Validated variant',
+        icon_id: 4152,
         description: 'Lista:\n- item 1\n- item 2',
         inputs: [{ id: 100, quantity: 1, type: 'input', reason: 'Reason text' }],
         outputs: [{ id: 200, quantity: 1, type: 'output', reason: 'Reason text' }],
       },
     ],
   });
+
+  const seedItems = async (...ids: number[]) => {
+    const itemRepo = dataSource.getRepository(Item);
+    await itemRepo.save(
+      ids.map((id) =>
+        buildItemFixture({
+          id,
+          name: `Item ${id}`,
+          iconPath: `Item_${id}.png`,
+        }),
+      ),
+    );
+  };
 
   const mockRedisProfits = (
     profits: Record<string, Record<string, { low: number; high: number }>>,
@@ -86,6 +102,7 @@ describe('Methods (e2e)', () => {
     await dataSource.query('DELETE FROM "variant_io_items"');
     await dataSource.query('DELETE FROM "method_variants"');
     await dataSource.query('DELETE FROM "money_making_methods"');
+    await dataSource.query('DELETE FROM "items"');
     redisCall.mockReset();
   });
 
@@ -352,6 +369,7 @@ describe('Methods (e2e)', () => {
       },
     });
 
+    const server = app.getHttpServer() as unknown as Server;
     const res = await request(server).get('/methods?members=false&variants=all').expect(200);
 
     const body = res.body as {
@@ -602,7 +620,170 @@ describe('Methods (e2e)', () => {
     });
   });
 
+  it('POST /methods stores icon_id and GET /methods/:id returns it for method and variant', async () => {
+    await seedItems(100, 200, 4151, 4152);
+
+    const server = app.getHttpServer() as unknown as Server;
+    const createRes = await request(server)
+      .post('/methods')
+      .send(buildValidCreateMethodPayload())
+      .expect(201);
+
+    const createdBody = createRes.body as {
+      data: {
+        id: string;
+        icon_id: number;
+        variants: Array<{ id: string; icon_id: number }>;
+      };
+    };
+
+    expect(createdBody.data.icon_id).toBe(4151);
+    expect(createdBody.data.variants[0].icon_id).toBe(4152);
+
+    mockRedisProfits({
+      [createdBody.data.id]: {
+        [createdBody.data.variants[0].id]: { low: 100, high: 200 },
+      },
+    });
+
+    const detailRes = await request(server).get(`/methods/${createdBody.data.id}`).expect(200);
+    const detailBody = detailRes.body as {
+      status: string;
+      data: {
+        method: {
+          id: string;
+          icon_id: number;
+          variants: Array<{ id: string; icon_id: number }>;
+        };
+      };
+    };
+
+    expect(detailBody.status).toBe('ok');
+    expect(detailBody.data.method).toMatchObject({
+      id: createdBody.data.id,
+      icon_id: 4151,
+    });
+    expect(detailBody.data.method.variants[0]).toMatchObject({
+      id: createdBody.data.variants[0].id,
+      icon_id: 4152,
+    });
+  });
+
+  it('POST /methods rejects icon_id values that do not exist in items', async () => {
+    await seedItems(100, 200, 4151);
+
+    const server = app.getHttpServer() as unknown as Server;
+    const payload = buildValidCreateMethodPayload();
+    payload.variants[0].icon_id = 999999;
+
+    const res = await request(server).post('/methods').send(payload).expect(400);
+    const body = res.body as { message?: unknown };
+    expect(String(body.message)).toContain('icon_id must reference an existing item');
+    expect(String(body.message)).toContain('999999');
+  });
+
+  it('PUT /methods/:id rejects icon_id values that do not exist in items', async () => {
+    await seedItems(4151, 4152);
+
+    const methodRepo = dataSource.getRepository(Method);
+    const variantRepo = dataSource.getRepository(MethodVariant);
+
+    const savedMethod = await methodRepo.save({
+      name: 'Editable method',
+      slug: 'editable-method',
+      iconId: 4151,
+      description: 'Safe markdown',
+      category: 'Skilling',
+      enabled: true,
+    });
+
+    const savedVariant = await variantRepo.save({
+      label: 'Editable variant',
+      slug: 'editable-variant',
+      iconId: 4152,
+      description: null,
+      xpHour: null,
+      clickIntensity: 1,
+      afkiness: 1,
+      riskLevel: '1',
+      requirements: null,
+      recommendations: null,
+      wilderness: false,
+      actionsPerHour: 100,
+      method: savedMethod,
+    });
+
+    const server = app.getHttpServer() as unknown as Server;
+    const res = await request(server)
+      .put(`/methods/${savedMethod.id}`)
+      .send({
+        icon_id: 999999,
+        variants: [
+          {
+            id: savedVariant.id,
+            label: 'Editable variant',
+            icon_id: 4152,
+            inputs: [],
+            outputs: [],
+          },
+        ],
+      })
+      .expect(400);
+
+    const body = res.body as { message?: unknown };
+    expect(String(body.message)).toContain('icon_id must reference an existing item');
+    expect(String(body.message)).toContain('999999');
+  });
+
+  it('PUT /methods/variant/:id rejects icon_id values that do not exist in items', async () => {
+    await seedItems(4151, 4152);
+
+    const methodRepo = dataSource.getRepository(Method);
+    const variantRepo = dataSource.getRepository(MethodVariant);
+
+    const savedMethod = await methodRepo.save({
+      name: 'Variant edit method',
+      slug: 'variant-edit-method',
+      iconId: 4151,
+      description: 'Safe markdown',
+      category: 'Skilling',
+      enabled: true,
+    });
+
+    const savedVariant = await variantRepo.save({
+      label: 'Variant edit variant',
+      slug: 'variant-edit-variant',
+      iconId: 4152,
+      description: null,
+      xpHour: null,
+      clickIntensity: 1,
+      afkiness: 1,
+      riskLevel: '1',
+      requirements: null,
+      recommendations: null,
+      wilderness: false,
+      actionsPerHour: 100,
+      method: savedMethod,
+    });
+
+    const server = app.getHttpServer() as unknown as Server;
+    const res = await request(server)
+      .put(`/methods/variant/${savedVariant.id}`)
+      .send({
+        icon_id: 999999,
+        inputs: [],
+        outputs: [],
+      })
+      .expect(400);
+
+    const body = res.body as { message?: unknown };
+    expect(String(body.message)).toContain('icon_id must reference an existing item');
+    expect(String(body.message)).toContain('999999');
+  });
+
   it('POST /methods rejects unsafe script content in method.description', async () => {
+    await seedItems(100, 200, 4151, 4152);
+
     const server = app.getHttpServer() as unknown as Server;
     const payload = buildValidCreateMethodPayload();
     payload.description = '<script>alert(1)</script>';
@@ -612,6 +793,8 @@ describe('Methods (e2e)', () => {
   });
 
   it('POST /methods rejects unsafe event handler content in variant.description', async () => {
+    await seedItems(100, 200, 4151, 4152);
+
     const server = app.getHttpServer() as unknown as Server;
     const payload = buildValidCreateMethodPayload();
     payload.variants[0].description = '<img src=x onerror=alert(1)>';

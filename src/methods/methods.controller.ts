@@ -39,6 +39,7 @@ const METHOD_EXAMPLE = {
   id: 'm_123',
   name: 'Cooked karambwan',
   slug: 'cooked-karambwan',
+  icon_id: 3145,
   description: 'Cook karambwans for profit.',
   category: 'Cooking',
   enabled: true,
@@ -48,6 +49,7 @@ const METHOD_EXAMPLE = {
     {
       id: 'v_456',
       slug: 'karambwan-basic',
+      icon_id: 3145,
       members: true,
       inputs: [{ id: 3144, quantity: 1, reason: null }],
       outputs: [{ id: 3145, quantity: 1, reason: null }],

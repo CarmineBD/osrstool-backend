@@ -5,6 +5,7 @@ import {
   IsString,
   ValidateNested,
   IsBoolean,
+  IsInt,
   MaxLength,
 } from 'class-validator';
 import { Type } from 'class-transformer';
@@ -26,6 +27,10 @@ export class UpdateMethodDto {
   @IsOptional()
   @IsString()
   category?: string;
+
+  @IsOptional()
+  @IsInt()
+  icon_id?: number;
 
   @IsOptional()
   @IsBoolean()

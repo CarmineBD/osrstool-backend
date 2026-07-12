@@ -12,6 +12,7 @@ import { RuneScapeApiService } from './RuneScapeApiService';
 import { VariantSnapshotModule } from '../variant-snapshots/variant-snapshot.module';
 import { User } from '../auth/entities/user.entity';
 import { AuthModule } from '../auth/auth.module';
+import { Item } from '../items/entities/item.entity';
 
 @Module({
   imports: [
@@ -22,6 +23,7 @@ import { AuthModule } from '../auth/auth.module';
       VariantHistory,
       MethodLike,
       User,
+      Item,
     ]),
     VariantSnapshotModule,
     AuthModule,

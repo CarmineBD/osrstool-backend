@@ -27,6 +27,9 @@ export class Method {
   @Column({ nullable: true })
   category?: string;
 
+  @Column({ name: 'icon_id', type: 'int', nullable: true })
+  iconId?: number | null;
+
   @Column({ type: 'boolean', default: true })
   enabled: boolean;
 
