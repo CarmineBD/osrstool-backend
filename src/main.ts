@@ -4,6 +4,7 @@ import { AppModule } from './app.module';
 import { DocumentBuilder, SwaggerModule } from '@nestjs/swagger';
 import { ValidationPipe } from '@nestjs/common';
 import { ConfigService } from '@nestjs/config';
+import type { NestExpressApplication } from '@nestjs/platform-express';
 import helmet from 'helmet';
 // eslint-disable-next-line @typescript-eslint/no-unused-vars
 import { ItemsSeederService } from './items/items-seeder.service';
@@ -11,8 +12,11 @@ import { HttpExceptionFilter } from './common/filters/http-exception.filter';
 import { RequestLoggingInterceptor } from './common/interceptors/request-logging.interceptor';
 
 async function bootstrap() {
-  const app = await NestFactory.create(AppModule);
+  const app = await NestFactory.create<NestExpressApplication>(AppModule, {
+    bodyParser: false,
+  });
   const config = app.get(ConfigService);
+  const requestBodyLimit = config.get<string>('REQUEST_BODY_LIMIT') ?? '1mb';
 
   const nodeEnv = (config.get<string>('NODE_ENV') ?? 'development').toLowerCase();
   const corsOriginsRaw = config.get<string>('CORS_ORIGINS') ?? '';
@@ -31,6 +35,8 @@ async function bootstrap() {
     });
   }
   app.use(helmet());
+  app.useBodyParser('json', { limit: requestBodyLimit });
+  app.useBodyParser('urlencoded', { extended: true, limit: requestBodyLimit });
 
   app.useGlobalPipes(
     new ValidationPipe({
