@@ -3,6 +3,7 @@ import { VariantRequirements, VariantRecommendations, XpHour } from '../types';
 export interface VariantDto {
   id: string;
   slug: string;
+  icon_id?: number | null;
   inputs: { id: number; quantity: number; reason?: string | null }[];
   outputs: { id: number; quantity: number; reason?: string | null }[];
   actionsPerHour?: number;
@@ -22,6 +23,7 @@ export class MethodDto {
   id: string;
   name: string;
   slug: string;
+  icon_id?: number | null;
   description?: string;
   category?: string;
   enabled: boolean;
@@ -31,6 +33,7 @@ export class MethodDto {
     id: string,
     name: string,
     slug: string,
+    icon_id: number | null | undefined,
     description: string,
     category: string,
     enabled: boolean,
@@ -39,6 +42,7 @@ export class MethodDto {
     this.id = id;
     this.name = name;
     this.slug = slug;
+    this.icon_id = icon_id;
     this.description = description;
     this.category = category;
     this.enabled = enabled;
@@ -48,12 +52,14 @@ export class MethodDto {
     id: string;
     name: string;
     slug: string;
+    iconId?: number | null;
     description?: string;
     category?: string;
     enabled: boolean;
     variants: Array<{
       id: string;
       slug: string;
+      iconId?: number | null;
       label: string;
       description: string | null;
       actionsPerHour: number;
@@ -91,6 +97,7 @@ export class MethodDto {
       return {
         id: variant.id,
         slug: variant.slug,
+        icon_id: variant.iconId,
         label: variant.label,
         description: variant.description,
         actionsPerHour: variant.actionsPerHour,
@@ -110,6 +117,7 @@ export class MethodDto {
       e.id,
       e.name,
       e.slug,
+      e.iconId,
       e.description || '',
       e.category || '',
       e.enabled,

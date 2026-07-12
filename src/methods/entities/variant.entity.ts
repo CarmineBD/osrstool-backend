@@ -34,6 +34,9 @@ export class MethodVariant {
   @Column({ type: 'text', nullable: true })
   description: string | null;
 
+  @Column({ name: 'icon_id', type: 'int', nullable: true })
+  iconId?: number | null;
+
   // Aquí forzamos que xpHour se guarde/lea de la columna xp_hour
   @Column({
     name: 'xp_hour',
