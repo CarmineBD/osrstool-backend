@@ -17,6 +17,12 @@ export class VariantResponseDto {
   recommendations?: VariantRecommendations;
   wilderness?: boolean;
   members?: boolean;
+  inputMarketImpactInstant?: number;
+  inputMarketImpactSlow?: number;
+  outputMarketImpactInstant?: number;
+  outputMarketImpactSlow?: number;
+  marketImpactInstant?: number;
+  marketImpactSlow?: number;
   inputs: IoItemDto[];
   outputs: IoItemDto[];
 }
