@@ -246,6 +246,123 @@ describe('MethodsService variantCount', () => {
     );
   });
 
+  it('includes per-side market impact breakdown on variants', async () => {
+    const methodEntity: Method = {
+      id: 'm1',
+      name: 'Method 1',
+      slug: 'method-1',
+      description: undefined,
+      category: undefined,
+      enabled: true,
+      createdAt: new Date(),
+      variants: [
+        {
+          id: 'v1',
+          slug: 'v1',
+          label: 'Variant 1',
+          description: null,
+          xpHour: null,
+          clickIntensity: 0,
+          afkiness: 0,
+          riskLevel: '0',
+          requirements: null,
+          recommendations: null,
+          wilderness: false,
+          actionsPerHour: 0,
+          createdAt: new Date(),
+          ioItems: [
+            {
+              id: 1,
+              itemId: 100,
+              quantity: 50,
+              type: 'input',
+              reason: null,
+              createdAt: new Date(),
+              variant: {} as MethodVariant,
+            } as VariantIoItem,
+            {
+              id: 2,
+              itemId: 200,
+              quantity: 60,
+              type: 'output',
+              reason: null,
+              createdAt: new Date(),
+              variant: {} as MethodVariant,
+            } as VariantIoItem,
+          ],
+          method: {} as Method,
+        } as MethodVariant,
+      ],
+    };
+
+    const methodRepo = {
+      find: jest.fn().mockResolvedValue([methodEntity]),
+    } as unknown as Repository<Method>;
+
+    const service = new MethodsService(
+      methodRepo,
+      {} as Repository<MethodVariant>,
+      {} as Repository<VariantIoItem>,
+      {} as Repository<VariantHistory>,
+      createMethodLikeRepo(),
+      {} as Repository<User>,
+      {} as VariantSnapshotService,
+      {} as RuneScapeApiService,
+      { get: jest.fn().mockReturnValue('redis://localhost:6379') } as unknown as ConfigService,
+    );
+
+    call.mockImplementation((command: string, key: string) => {
+      if (command === 'HGETALL' && key === 'methods:profits') {
+        return {
+          m1: JSON.stringify({
+            v1: { low: 100, high: 200 },
+          }),
+        };
+      }
+
+      if (command === 'HMGET' && key === 'items:prices') {
+        return [JSON.stringify({ high: 100, low: 90 }), JSON.stringify({ high: 200, low: 180 })];
+      }
+
+      if (command === 'HMGET' && key === 'items:vol24h') {
+        return [
+          JSON.stringify({ high24h: 2400, low24h: 4800 }),
+          JSON.stringify({ high24h: 1200, low24h: 2400 }),
+        ];
+      }
+
+      return null;
+    });
+
+    const result = (await service.findAllWithProfit(
+      1,
+      10,
+      undefined,
+      { enabled: true },
+      { sortBy: 'highProfit', order: 'desc' },
+    )) as {
+      data: Array<{
+        variants: Array<{
+          inputMarketImpactInstant: number;
+          inputMarketImpactSlow: number;
+          outputMarketImpactInstant: number;
+          outputMarketImpactSlow: number;
+          marketImpactInstant: number;
+          marketImpactSlow: number;
+        }>;
+      }>;
+    };
+
+    expect(result.data[0].variants[0]).toMatchObject({
+      inputMarketImpactInstant: 0.5,
+      inputMarketImpactSlow: 0.25,
+      outputMarketImpactInstant: 0.6,
+      outputMarketImpactSlow: 1.2,
+      marketImpactInstant: 0.55,
+      marketImpactSlow: 0.725,
+    });
+  });
+
   it('filters non-profitable variants when showProfitables is true', async () => {
     const methodEntity = buildMethodFixture();
     methodEntity.id = 'm1';
