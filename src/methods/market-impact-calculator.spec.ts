@@ -15,6 +15,10 @@ describe('calculateMarketImpact', () => {
       },
     });
 
+    expect(result.inputMarketImpactInstant).toBeCloseTo(0.5, 6);
+    expect(result.inputMarketImpactSlow).toBeCloseTo(0.25, 6);
+    expect(result.outputMarketImpactInstant).toBeCloseTo(0.6, 6);
+    expect(result.outputMarketImpactSlow).toBeCloseTo(1.2, 6);
     expect(result.marketImpactInstant).toBeCloseTo(0.55, 6);
     expect(result.marketImpactSlow).toBeCloseTo(0.725, 6);
   });
@@ -38,6 +42,10 @@ describe('calculateMarketImpact', () => {
       },
     });
 
+    expect(result.inputMarketImpactInstant).toBeCloseTo(0.181818, 5);
+    expect(result.inputMarketImpactSlow).toBeCloseTo(0.19, 6);
+    expect(result.outputMarketImpactInstant).toBeCloseTo(0.5, 6);
+    expect(result.outputMarketImpactSlow).toBeCloseTo(0.5, 6);
     expect(result.marketImpactInstant).toBeCloseTo(0.340909, 5);
   });
 
@@ -54,6 +62,10 @@ describe('calculateMarketImpact', () => {
       },
     });
 
+    expect(result.inputMarketImpactInstant).toBe(1);
+    expect(result.inputMarketImpactSlow).toBe(1);
+    expect(result.outputMarketImpactInstant).toBe(2);
+    expect(result.outputMarketImpactSlow).toBe(2);
     expect(result.marketImpactInstant).toBe(1.5);
     expect(result.marketImpactSlow).toBe(1.5);
   });
@@ -81,7 +93,11 @@ describe('calculateMarketImpact', () => {
 
     expect(uncappedResult.marketImpactInstant).toBeGreaterThan(1);
     expect(uncappedResult.marketImpactSlow).toBeGreaterThan(1);
+    expect(uncappedResult.inputMarketImpactInstant).toBeGreaterThan(1);
+    expect(uncappedResult.outputMarketImpactInstant).toBeGreaterThan(1);
     expect(lowResult.marketImpactInstant).toBe(0);
     expect(lowResult.marketImpactSlow).toBe(0);
+    expect(lowResult.inputMarketImpactInstant).toBe(0);
+    expect(lowResult.outputMarketImpactSlow).toBe(0);
   });
 });

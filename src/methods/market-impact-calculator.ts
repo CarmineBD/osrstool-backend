@@ -23,6 +23,10 @@ interface CalculateMarketImpactInput {
 }
 
 export interface MarketImpactResult {
+  inputMarketImpactInstant: number;
+  inputMarketImpactSlow: number;
+  outputMarketImpactInstant: number;
+  outputMarketImpactSlow: number;
   marketImpactInstant: number;
   marketImpactSlow: number;
 }
@@ -203,5 +207,12 @@ export const calculateMarketImpact = ({
     normalizedAlpha * slowInputsShare + (1 - normalizedAlpha) * slowOutputsShare,
   );
 
-  return { marketImpactInstant, marketImpactSlow };
+  return {
+    inputMarketImpactInstant: instantInputsShare,
+    inputMarketImpactSlow: slowInputsShare,
+    outputMarketImpactInstant: instantOutputsShare,
+    outputMarketImpactSlow: slowOutputsShare,
+    marketImpactInstant,
+    marketImpactSlow,
+  };
 };

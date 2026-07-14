@@ -28,7 +28,7 @@ import { RuneScapeApiService } from './RuneScapeApiService';
 import { computeMissingRequirements, filterMethodsByUserStats } from './helpers/requirements';
 import { ConfigService } from '@nestjs/config';
 import { User } from '../auth/entities/user.entity';
-import { calculateMarketImpact } from './market-impact-calculator';
+import { calculateMarketImpact, type MarketImpactResult } from './market-impact-calculator';
 import { Item } from '../items/entities/item.entity';
 
 // Definimos tipos para mayor seguridad
@@ -213,6 +213,10 @@ interface SkillSummaryVariant {
   members?: boolean;
   lowProfit: number;
   highProfit: number;
+  inputMarketImpactInstant: number;
+  inputMarketImpactSlow: number;
+  outputMarketImpactInstant: number;
+  outputMarketImpactSlow: number;
   marketImpactInstant: number;
   marketImpactSlow: number;
 }
@@ -952,6 +956,10 @@ export class MethodsService implements OnModuleDestroy {
             members: variant.members ?? false,
             lowProfit: profit.low,
             highProfit: profit.high,
+            inputMarketImpactInstant: marketImpact.inputMarketImpactInstant,
+            inputMarketImpactSlow: marketImpact.inputMarketImpactSlow,
+            outputMarketImpactInstant: marketImpact.outputMarketImpactInstant,
+            outputMarketImpactSlow: marketImpact.outputMarketImpactSlow,
             marketImpactInstant: marketImpact.marketImpactInstant,
             marketImpactSlow: marketImpact.marketImpactSlow,
           };
@@ -1688,7 +1696,7 @@ export class MethodsService implements OnModuleDestroy {
     variant: { inputs: VariantIoQuantity[]; outputs: VariantIoQuantity[] },
     pricesByItem: Record<number, ItemPrice>,
     volumes24hByItem: Record<number, ItemVolume24h>,
-  ): { marketImpactInstant: number; marketImpactSlow: number } {
+  ): MarketImpactResult {
     return calculateMarketImpact({
       inputs: variant.inputs,
       outputs: variant.outputs,
@@ -2060,6 +2068,10 @@ export class MethodsService implements OnModuleDestroy {
             members: members ?? false,
             lowProfit: profitGrowthMetrics.currentPeriodLowProfit,
             highProfit: profitGrowthMetrics.currentPeriodHighProfit,
+            inputMarketImpactInstant: marketImpact.inputMarketImpactInstant,
+            inputMarketImpactSlow: marketImpact.inputMarketImpactSlow,
+            outputMarketImpactInstant: marketImpact.outputMarketImpactInstant,
+            outputMarketImpactSlow: marketImpact.outputMarketImpactSlow,
             marketImpactInstant: marketImpact.marketImpactInstant,
             marketImpactSlow: marketImpact.marketImpactSlow,
             profitGrowth: this.toPublicProfitGrowthMetrics(profitGrowthMetrics),
@@ -2249,6 +2261,10 @@ export class MethodsService implements OnModuleDestroy {
             members: members ?? false,
             lowProfit: profit.low,
             highProfit: profit.high,
+            inputMarketImpactInstant: marketImpact.inputMarketImpactInstant,
+            inputMarketImpactSlow: marketImpact.inputMarketImpactSlow,
+            outputMarketImpactInstant: marketImpact.outputMarketImpactInstant,
+            outputMarketImpactSlow: marketImpact.outputMarketImpactSlow,
             marketImpactInstant: marketImpact.marketImpactInstant,
             marketImpactSlow: marketImpact.marketImpactSlow,
           };
@@ -2525,6 +2541,10 @@ export class MethodsService implements OnModuleDestroy {
               missingRequirements,
               lowProfit: profit.low,
               highProfit: profit.high,
+              inputMarketImpactInstant: marketImpact.inputMarketImpactInstant,
+              inputMarketImpactSlow: marketImpact.inputMarketImpactSlow,
+              outputMarketImpactInstant: marketImpact.outputMarketImpactInstant,
+              outputMarketImpactSlow: marketImpact.outputMarketImpactSlow,
               marketImpactInstant: marketImpact.marketImpactInstant,
               marketImpactSlow: marketImpact.marketImpactSlow,
               trendLastHour: trends.lastHour,
