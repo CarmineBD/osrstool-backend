@@ -36,7 +36,8 @@ export class AdminController {
   @Get('overview')
   @ApiOperation({
     summary: 'Get admin overview',
-    description: 'Returns aggregate site metrics and latest admin script executions.',
+    description:
+      'Returns aggregate site metrics, latest admin script executions, and recently added catalog entries.',
   })
   @ApiOkResponse({
     description: 'Admin overview',
@@ -55,6 +56,23 @@ export class AdminController {
             ],
           },
           latestExecutions: [],
+          latestCatalog: {
+            items: [
+              {
+                id: 4151,
+                name: 'Abyssal whip',
+                iconUrl: 'https://oldschool.runescape.wiki/images/Abyssal_whip.png',
+                addedAt: '2026-07-14T18:09:09.834Z',
+              },
+            ],
+            quests: [
+              {
+                name: "Cook's Assistant",
+                slug: 'cooks-assistant',
+                addedAt: '2026-02-11T21:32:13.214Z',
+              },
+            ],
+          },
         },
       },
     },
