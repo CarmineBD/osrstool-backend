@@ -7,5 +7,6 @@ import { MethodProfitRefresherService } from './method-profit-refresher.service'
 @Module({
   imports: [MethodsModule, PricesModule],
   providers: [MethodProfitRefresherService],
+  exports: [MethodProfitRefresherService],
 })
 export class MethodProfitRefresherModule {}
