@@ -1,4 +1,4 @@
-import { Column, Entity, PrimaryColumn } from 'typeorm';
+import { Column, CreateDateColumn, Entity, PrimaryColumn } from 'typeorm';
 
 @Entity('items')
 export class Item {
@@ -49,4 +49,7 @@ export class Item {
 
   @Column({ name: 'last_synced_at', type: 'timestamptz', default: () => 'now()' })
   lastSyncedAt: Date;
+
+  @CreateDateColumn({ name: 'created_at', type: 'timestamptz' })
+  createdAt: Date;
 }

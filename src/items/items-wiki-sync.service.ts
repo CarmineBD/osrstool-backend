@@ -211,7 +211,7 @@ export class ItemsWikiSyncService {
         }
 
         try {
-          await this.repo.insert(this.toPersistencePayload(scrapedItem));
+          await this.repo.insert(this.toPersistencePayload(scrapedItem, new Date()));
           summary.totalInserted += 1;
         } catch (error) {
           summary.totalFailed += 1;
@@ -239,7 +239,7 @@ export class ItemsWikiSyncService {
       }
 
       try {
-        const updatePayload = this.toPersistencePayload(scrapedItem);
+        const updatePayload = this.toPersistencePayload(scrapedItem, new Date());
         delete updatePayload.id;
         await this.repo.update({ id: scrapedItem.id }, updatePayload);
         summary.totalUpdated += 1;
@@ -337,7 +337,7 @@ export class ItemsWikiSyncService {
     return Number.isFinite(parsed) ? parsed : null;
   }
 
-  private toPersistencePayload(scrapedItem: ScrapedWikiItemRecord): Partial<Item> {
+  private toPersistencePayload(scrapedItem: ScrapedWikiItemRecord, syncedAt: Date): Partial<Item> {
     return {
       id: scrapedItem.id,
       name: scrapedItem.name,
@@ -354,7 +354,7 @@ export class ItemsWikiSyncService {
       weight: scrapedItem.weight,
       tradeable: scrapedItem.tradeable,
       members: scrapedItem.members,
-      lastSyncedAt: new Date(),
+      lastSyncedAt: syncedAt,
     };
   }
 
