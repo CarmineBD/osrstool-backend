@@ -1,5 +1,6 @@
 import { BadRequestException } from '@nestjs/common';
 import type { Repository } from 'typeorm';
+import { ConfigService } from '@nestjs/config';
 import { User } from '../auth/entities/user.entity';
 import { Item } from '../items/entities/item.entity';
 import type { ItemsMappingSyncService } from '../items/items-mapping-sync.service';
@@ -23,7 +24,29 @@ describe('AdminService', () => {
       ),
       find: jest.fn().mockResolvedValue([]),
     };
-    const countRepo = { count: jest.fn().mockResolvedValue(0) };
+    const userRepo = { count: jest.fn().mockResolvedValue(0) };
+    const itemRepo = {
+      count: jest.fn().mockResolvedValue(0),
+      query: jest.fn().mockResolvedValue([
+        {
+          id: 4151,
+          name: 'Abyssal whip',
+          icon_path: 'Abyssal whip.png',
+          created_at: '2026-07-14T18:09:09.834Z',
+        },
+      ]),
+    };
+    const questRepo = {
+      count: jest.fn().mockResolvedValue(0),
+      query: jest.fn().mockResolvedValue([
+        {
+          name: "Cook's Assistant",
+          slug: 'cooks-assistant',
+          created_at: '2026-02-11T21:32:13.214Z',
+        },
+      ]),
+    };
+    const methodRepo = { count: jest.fn().mockResolvedValue(0) };
     const variantRepo = {
       query: jest.fn((sql: string) => {
         if (sql.includes('GROUP BY method.enabled')) {
@@ -55,24 +78,37 @@ describe('AdminService', () => {
       }),
     };
     const profitRefresher = { refresh: jest.fn().mockResolvedValue(undefined) };
+    const config = {
+      get: jest.fn((key: string) =>
+        key === 'CDN_BASE' ? 'https://oldschool.runescape.wiki/images/' : undefined,
+      ),
+    };
 
     const service = new AdminService(
       executionRepo as unknown as Repository<AdminScriptExecution>,
-      countRepo as unknown as Repository<User>,
-      countRepo as unknown as Repository<Item>,
-      countRepo as unknown as Repository<Quest>,
-      countRepo as unknown as Repository<Method>,
+      userRepo as unknown as Repository<User>,
+      itemRepo as unknown as Repository<Item>,
+      questRepo as unknown as Repository<Quest>,
+      methodRepo as unknown as Repository<Method>,
       variantRepo as unknown as Repository<MethodVariant>,
       mappingSync as unknown as ItemsMappingSyncService,
       wikiSync as unknown as ItemsWikiSyncService,
       profitRefresher as unknown as MethodProfitRefresherService,
+      config as unknown as ConfigService,
     );
 
-    return { service, executionRepo, mappingSync, variantRepo };
+    return {
+      service,
+      executionRepo,
+      mappingSync,
+      variantRepo,
+      itemRepo,
+      questRepo,
+    };
   }
 
   it('returns total variants for enabled methods grouped by any xpHour skill on the method', async () => {
-    const { service, variantRepo } = createService();
+    const { service, variantRepo, itemRepo, questRepo } = createService();
 
     const response = await service.getOverview();
 
@@ -93,6 +129,25 @@ describe('AdminService', () => {
       { skill: 'Cooking', variants: 2 },
       { skill: 'Magic', variants: 1 },
     ]);
+    expect(itemRepo.query).toHaveBeenCalledWith(expect.stringContaining('FROM items'));
+    expect(questRepo.query).toHaveBeenCalledWith(expect.stringContaining('FROM quests'));
+    expect(response.data.latestCatalog).toEqual({
+      items: [
+        {
+          id: 4151,
+          name: 'Abyssal whip',
+          iconUrl: 'https://oldschool.runescape.wiki/images/Abyssal_whip.png',
+          addedAt: '2026-07-14T18:09:09.834Z',
+        },
+      ],
+      quests: [
+        {
+          name: "Cook's Assistant",
+          slug: 'cooks-assistant',
+          addedAt: '2026-02-11T21:32:13.214Z',
+        },
+      ],
+    });
   });
 
   it('records a successful mapping item sync execution', async () => {

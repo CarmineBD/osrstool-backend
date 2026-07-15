@@ -21,6 +21,7 @@ export const buildItemFixture = (overrides: Partial<Item> = {}): Item => {
     tradeable: true,
     members: true,
     lastSyncedAt: new Date('2026-01-31T19:30:00.000Z'),
+    createdAt: new Date('2026-01-31T19:30:00.000Z'),
   };
   return { ...base, ...overrides };
 };

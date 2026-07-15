@@ -1,4 +1,5 @@
 import { BadRequestException, Injectable } from '@nestjs/common';
+import { ConfigService } from '@nestjs/config';
 import { InjectRepository } from '@nestjs/typeorm';
 import { Repository } from 'typeorm';
 import { User } from '../auth/entities/user.entity';
@@ -16,6 +17,8 @@ type ScriptResult = Record<string, unknown>;
 
 @Injectable()
 export class AdminService {
+  private cdnBase?: string;
+
   constructor(
     @InjectRepository(AdminScriptExecution)
     private readonly executionRepo: Repository<AdminScriptExecution>,
@@ -32,6 +35,7 @@ export class AdminService {
     private readonly itemsMappingSyncService: ItemsMappingSyncService,
     private readonly itemsWikiSyncService: ItemsWikiSyncService,
     private readonly methodProfitRefresherService: MethodProfitRefresherService,
+    private readonly config: ConfigService,
   ) {}
 
   async getOverview() {
@@ -45,6 +49,8 @@ export class AdminService {
       variants,
       enabledMethodVariantsBySkill,
       latestExecutions,
+      latestItems,
+      latestQuests,
     ] = await Promise.all([
       this.userRepo.count(),
       this.itemRepo.count(),
@@ -55,6 +61,8 @@ export class AdminService {
       this.getMethodVariantCounts(),
       this.getEnabledMethodVariantsBySkill(),
       this.getLatestExecutionsByScript(),
+      this.getLatestItems(),
+      this.getLatestQuests(),
     ]);
 
     return {
@@ -72,6 +80,10 @@ export class AdminService {
           enabledMethodVariantsBySkill,
         },
         latestExecutions,
+        latestCatalog: {
+          items: latestItems,
+          quests: latestQuests,
+        },
       },
     };
   }
@@ -223,6 +235,65 @@ export class AdminService {
     }
 
     return latest;
+  }
+
+  private buildItemIconUrl(iconPath: string): string {
+    if (!this.cdnBase) {
+      const base = (
+        this.config.get<string>('CDN_BASE') ?? 'https://oldschool.runescape.wiki/images/'
+      ).replace(/\/+$/, '');
+      this.cdnBase = base;
+    }
+
+    const path = iconPath
+      .replace(/^\/+/, '')
+      .replace(/ /g, '_')
+      .replace(/\(/g, '%28')
+      .replace(/\)/g, '%29')
+      .replace(/'/g, '%27');
+
+    return `${this.cdnBase}/${path}`;
+  }
+
+  private async getLatestItems(): Promise<
+    Array<{ id: number; name: string; iconUrl: string; addedAt: string }>
+  > {
+    const rows = await this.itemRepo.query<
+      Array<{ id: number; name: string; icon_path: string; created_at: string | Date }>
+    >(
+      `
+        SELECT id, name, icon_path, created_at
+        FROM items
+        ORDER BY created_at DESC, id DESC
+        LIMIT 100
+      `,
+    );
+
+    return rows.map((row) => ({
+      id: Number(row.id),
+      name: row.name,
+      iconUrl: this.buildItemIconUrl(row.icon_path),
+      addedAt: new Date(row.created_at).toISOString(),
+    }));
+  }
+
+  private async getLatestQuests(): Promise<Array<{ name: string; slug: string; addedAt: string }>> {
+    const rows = await this.questRepo.query<
+      Array<{ name: string; slug: string; created_at: string | Date }>
+    >(
+      `
+        SELECT name, slug, created_at
+        FROM quests
+        ORDER BY created_at DESC, name ASC
+        LIMIT 5
+      `,
+    );
+
+    return rows.map((row) => ({
+      name: row.name,
+      slug: row.slug,
+      addedAt: new Date(row.created_at).toISOString(),
+    }));
   }
 
   private async runScript(
