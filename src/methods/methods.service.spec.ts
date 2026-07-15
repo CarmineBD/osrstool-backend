@@ -7,10 +7,11 @@ import { VariantHistory } from './entities/variant-history.entity';
 import { MethodLike } from './entities/method-like.entity';
 import { VariantSnapshotService } from '../variant-snapshots/variant-snapshot.service';
 import { RuneScapeApiService } from './RuneScapeApiService';
-import { buildMethodFixture } from '../testing/fixtures';
+import { buildItemFixture, buildMethodFixture } from '../testing/fixtures';
 import type { ConfigService } from '@nestjs/config';
 import { User } from '../auth/entities/user.entity';
 import { BadRequestException, ForbiddenException, UnauthorizedException } from '@nestjs/common';
+import { Item } from '../items/entities/item.entity';
 
 type MethodDetailsWithProfitResult = Awaited<
   ReturnType<MethodsService['findMethodDetailsWithProfit']>
@@ -1149,6 +1150,184 @@ describe('MethodsService variantCount', () => {
       perPage: 1,
       hasNext: true,
     });
+  });
+
+  it('includes auto-calculated tags on list variants', async () => {
+    const methodEntity = buildMethodFixture();
+    methodEntity.id = 'm1';
+    methodEntity.variants = [methodEntity.variants[0]];
+    methodEntity.variants[0].id = 'v1';
+    methodEntity.variants[0].ioItems = [
+      Object.assign(new VariantIoItem(), {
+        id: 1,
+        itemId: 100,
+        quantity: 1200,
+        type: 'input',
+        reason: null,
+        createdAt: new Date(),
+        variant: methodEntity.variants[0],
+      }),
+      Object.assign(new VariantIoItem(), {
+        id: 2,
+        itemId: 200,
+        quantity: 1500,
+        type: 'output',
+        reason: null,
+        createdAt: new Date(),
+        variant: methodEntity.variants[0],
+      }),
+    ];
+
+    const methodRepo = {
+      find: jest.fn().mockResolvedValue([methodEntity]),
+    } as unknown as Repository<Method>;
+
+    const historyRepo = {
+      query: jest.fn().mockResolvedValue([
+        {
+          variantId: 'v1',
+          minLowProfit: 100,
+          minHighProfit: 200,
+          sampleCount: 12,
+        },
+      ]),
+    } as unknown as Repository<VariantHistory>;
+
+    const itemRepo = {
+      find: jest
+        .fn()
+        .mockResolvedValue([
+          buildItemFixture({ id: 100, name: 'Coal', buyLimit: 4000 }),
+          buildItemFixture({ id: 200, name: 'Rune bar', buyLimit: 10000 }),
+        ]),
+    } as unknown as Repository<Item>;
+
+    const service = new MethodsService(
+      methodRepo,
+      {} as Repository<MethodVariant>,
+      {} as Repository<VariantIoItem>,
+      historyRepo,
+      createMethodLikeRepo(),
+      {} as Repository<User>,
+      {} as VariantSnapshotService,
+      {} as RuneScapeApiService,
+      { get: jest.fn().mockReturnValue('redis://localhost:6379') } as unknown as ConfigService,
+      itemRepo,
+    );
+
+    jest.spyOn(service as any, 'getAllMethodsProfits').mockResolvedValue({
+      m1: {
+        v1: { low: 8_100_000, high: 10_800_000 },
+      },
+    });
+    jest.spyOn(service as any, 'getItemPrices').mockResolvedValue({
+      100: { high: 12_000, low: 11_000 },
+      200: { high: 16_000, low: 15_000 },
+    });
+    jest.spyOn(service as any, 'getItemVolumes24h').mockResolvedValue({
+      100: { high24h: 960, low24h: 960 },
+      200: { high24h: 960, low24h: 960 },
+    });
+
+    const result = (await service.findAllWithProfit(
+      1,
+      10,
+      undefined,
+      { enabled: true },
+      { sortBy: 'highProfit', order: 'desc' },
+    )) as {
+      data: Array<{
+        variants: Array<{
+          tags: Array<{ label: string; description: string }>;
+        }>;
+      }>;
+    };
+
+    expect(result.data[0].variants[0].tags.map((tag) => tag.label)).toEqual([
+      'GE limits',
+      'High investment required',
+      'Not viable',
+      'Safe',
+      'Very Slow to buy inputs',
+      'Very Slow to sell outputs',
+    ]);
+    expect(result.data[0].variants[0].tags[0].description).toContain('Coal requires 1,200/hour');
+    expect(result.data[0].variants[0].tags[1].description).toContain('14,400,000 GP');
+    expect(result.data[0].variants[0].tags[2].description).toContain('1.4 days');
+  });
+
+  it('includes auto-calculated tags on method detail variants', async () => {
+    const methodEntity = buildMethodFixture();
+    methodEntity.id = 'm1';
+    methodEntity.enabled = true;
+    methodEntity.variants = [methodEntity.variants[0]];
+    methodEntity.variants[0].id = 'v1';
+    methodEntity.variants[0].ioItems = [
+      Object.assign(new VariantIoItem(), {
+        id: 1,
+        itemId: 100,
+        quantity: 10,
+        type: 'input',
+        reason: null,
+        createdAt: new Date(),
+        variant: methodEntity.variants[0],
+      }),
+      Object.assign(new VariantIoItem(), {
+        id: 2,
+        itemId: 200,
+        quantity: 10,
+        type: 'output',
+        reason: null,
+        createdAt: new Date(),
+        variant: methodEntity.variants[0],
+      }),
+    ];
+
+    const methodRepo = {
+      findOne: jest.fn().mockResolvedValue(methodEntity),
+    } as unknown as Repository<Method>;
+
+    const historyRepo = {
+      findOne: jest.fn().mockResolvedValue(null),
+      query: jest.fn().mockResolvedValue([]),
+    } as unknown as Repository<VariantHistory>;
+
+    const methodLikeRepo = {
+      count: jest.fn().mockResolvedValue(0),
+      exists: jest.fn().mockResolvedValue(false),
+    } as unknown as Repository<MethodLike>;
+
+    const service = new MethodsService(
+      methodRepo,
+      {} as Repository<MethodVariant>,
+      {} as Repository<VariantIoItem>,
+      historyRepo,
+      methodLikeRepo,
+      {} as Repository<User>,
+      {} as VariantSnapshotService,
+      {} as RuneScapeApiService,
+      { get: jest.fn().mockReturnValue('redis://localhost:6379') } as unknown as ConfigService,
+    );
+
+    jest.spyOn(service as any, 'getMethodProfits').mockResolvedValue({
+      v1: { low: -100, high: 200 },
+    });
+    jest.spyOn(service as any, 'getItemPrices').mockResolvedValue({
+      100: { high: 100, low: 90 },
+      200: { high: 150, low: 140 },
+    });
+    jest.spyOn(service as any, 'getItemVolumes24h').mockResolvedValue({
+      100: { high24h: 2400, low24h: 2400 },
+      200: { high24h: 2400, low24h: 2400 },
+    });
+
+    const result = (await service.findMethodDetailsWithProfit('m1')) as unknown as {
+      variants: Array<{ tags: Array<{ label: string }> }>;
+    };
+
+    expect(result.variants[0].tags).toEqual([
+      expect.objectContaining({ label: 'Risky to lose money' }),
+    ]);
   });
 
   it('denies method detail for disabled method when user is not super_admin', async () => {

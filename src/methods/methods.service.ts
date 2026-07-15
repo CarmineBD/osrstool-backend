@@ -30,6 +30,11 @@ import { ConfigService } from '@nestjs/config';
 import { User } from '../auth/entities/user.entity';
 import { calculateMarketImpact, type MarketImpactResult } from './market-impact-calculator';
 import { Item } from '../items/entities/item.entity';
+import {
+  buildVariantTags,
+  type VariantSafety24hStats,
+  type VariantTagItemMetadata,
+} from './variant-tags';
 
 // Definimos tipos para mayor seguridad
 interface Profit {
@@ -46,6 +51,13 @@ interface ItemPrice {
 interface ItemVolume24h {
   high24h?: number;
   low24h?: number;
+}
+
+interface VariantSafety24hRow {
+  variantId?: string;
+  minLowProfit?: number | string;
+  minHighProfit?: number | string;
+  sampleCount?: number | string;
 }
 
 interface VariantIoQuantity {
@@ -1670,6 +1682,81 @@ export class MethodsService implements OnModuleDestroy {
     return result;
   }
 
+  private async getItemMetadata(ids: number[]): Promise<Record<number, VariantTagItemMetadata>> {
+    if (!this.itemRepo || ids.length === 0) return {};
+
+    const uniqueIds = [...new Set(ids)].filter((id) => Number.isInteger(id) && id > 0);
+    if (uniqueIds.length === 0) return {};
+
+    const items = await this.itemRepo.find({
+      where: { id: In(uniqueIds) },
+      select: {
+        id: true,
+        name: true,
+        buyLimit: true,
+      },
+    });
+
+    return items.reduce<Record<number, VariantTagItemMetadata>>((acc, item) => {
+      acc[item.id] = {
+        name: item.name,
+        buyLimit: item.buyLimit,
+      };
+      return acc;
+    }, {});
+  }
+
+  private async getVariantSafety24hStats(
+    variantIds: string[],
+    since: Date,
+  ): Promise<Record<string, VariantSafety24hStats>> {
+    if (variantIds.length === 0 || typeof this.historyRepo.query !== 'function') {
+      return {};
+    }
+
+    const placeholders = variantIds.map((_, index) => `$${index + 1}`).join(', ');
+    const sinceParam = variantIds.length + 1;
+    const rawRows = (await this.historyRepo.query(
+      `
+        SELECT
+          variant_id AS "variantId",
+          MIN(low_profit::float) AS "minLowProfit",
+          MIN(high_profit::float) AS "minHighProfit",
+          COUNT(*)::int AS "sampleCount"
+        FROM variant_history
+        WHERE variant_id IN (${placeholders})
+          AND "timestamp" >= $${sinceParam}
+        GROUP BY variant_id
+      `,
+      [...variantIds, since.toISOString()],
+    )) as unknown;
+
+    const rows = Array.isArray(rawRows) ? (rawRows as VariantSafety24hRow[]) : [];
+    return rows.reduce<Record<string, VariantSafety24hStats>>((acc, row) => {
+      if (typeof row.variantId !== 'string' || row.variantId.length === 0) {
+        return acc;
+      }
+
+      const minLowProfit = Number(row.minLowProfit);
+      const minHighProfit = Number(row.minHighProfit);
+      const sampleCount = Number(row.sampleCount);
+      if (
+        !Number.isFinite(minLowProfit) ||
+        !Number.isFinite(minHighProfit) ||
+        !Number.isFinite(sampleCount)
+      ) {
+        return acc;
+      }
+
+      acc[row.variantId] = {
+        minLowProfit,
+        minHighProfit,
+        sampleCount,
+      };
+      return acc;
+    }, {});
+  }
+
   private collectItemIdsFromVariants(
     variants: Array<{ inputs: VariantIoQuantity[]; outputs: VariantIoQuantity[] }>,
   ): number[] {
@@ -2214,11 +2301,17 @@ export class MethodsService implements OnModuleDestroy {
 
     // Enriquecemos la lista (filtrada o no) con la información de profit proveniente de Redis
     const itemIds = this.collectItemIdsFromMethods(methodsToProcess);
-    const [allProfits, pricesByItem, volumes24hByItem] = await Promise.all([
-      this.getAllMethodsProfits(),
-      this.getItemPrices(itemIds),
-      this.getItemVolumes24h(itemIds),
-    ]);
+    const variantIds = methodsToProcess.flatMap((method) =>
+      method.variants.map((variant) => variant.id),
+    );
+    const [allProfits, pricesByItem, volumes24hByItem, itemMetadataById, safety24hByVariantId] =
+      await Promise.all([
+        this.getAllMethodsProfits(),
+        this.getItemPrices(itemIds),
+        this.getItemVolumes24h(itemIds),
+        this.getItemMetadata(itemIds),
+        this.getVariantSafety24hStats(variantIds, new Date(Date.now() - 24 * 60 * 60 * 1000)),
+      ]);
     const selectedSkill = filters.skill?.trim().toLowerCase() || undefined;
 
     let enrichedMethods = methodsToProcess
@@ -2267,6 +2360,21 @@ export class MethodsService implements OnModuleDestroy {
             outputMarketImpactSlow: marketImpact.outputMarketImpactSlow,
             marketImpactInstant: marketImpact.marketImpactInstant,
             marketImpactSlow: marketImpact.marketImpactSlow,
+            tags: buildVariantTags({
+              variant,
+              pricesByItem,
+              volumes24hByItem,
+              itemMetadataById,
+              lowProfit: profit.low,
+              highProfit: profit.high,
+              inputMarketImpactInstant: marketImpact.inputMarketImpactInstant,
+              inputMarketImpactSlow: marketImpact.inputMarketImpactSlow,
+              outputMarketImpactInstant: marketImpact.outputMarketImpactInstant,
+              outputMarketImpactSlow: marketImpact.outputMarketImpactSlow,
+              marketImpactInstant: marketImpact.marketImpactInstant,
+              marketImpactSlow: marketImpact.marketImpactSlow,
+              safety24h: safety24hByVariantId[variant.id] ?? null,
+            }),
           };
 
           if (selectedSkill) {
@@ -2485,23 +2593,38 @@ export class MethodsService implements OnModuleDestroy {
       this.findOne(id),
     );
     const itemIds = this.collectItemIdsFromVariants(methodDto.variants);
-    const [allProfits, pricesByItem, volumes24hByItem] = await Promise.all([
-      this.timeMethodDetailsStep(perfLogsEnabled, scope, 'getMethodProfits', () =>
-        this.getMethodProfits(methodDto.id),
-      ),
-      this.timeMethodDetailsStep(
-        perfLogsEnabled,
-        scope,
-        `getItemPrices items=${itemIds.length}`,
-        () => this.getItemPrices(itemIds),
-      ),
-      this.timeMethodDetailsStep(
-        perfLogsEnabled,
-        scope,
-        `getItemVolumes24h items=${itemIds.length}`,
-        () => this.getItemVolumes24h(itemIds),
-      ),
-    ]);
+    const variantIds = methodDto.variants.map((variant) => variant.id);
+    const [allProfits, pricesByItem, volumes24hByItem, itemMetadataById, safety24hByVariantId] =
+      await Promise.all([
+        this.timeMethodDetailsStep(perfLogsEnabled, scope, 'getMethodProfits', () =>
+          this.getMethodProfits(methodDto.id),
+        ),
+        this.timeMethodDetailsStep(
+          perfLogsEnabled,
+          scope,
+          `getItemPrices items=${itemIds.length}`,
+          () => this.getItemPrices(itemIds),
+        ),
+        this.timeMethodDetailsStep(
+          perfLogsEnabled,
+          scope,
+          `getItemVolumes24h items=${itemIds.length}`,
+          () => this.getItemVolumes24h(itemIds),
+        ),
+        this.timeMethodDetailsStep(
+          perfLogsEnabled,
+          scope,
+          `getItemMetadata items=${itemIds.length}`,
+          () => this.getItemMetadata(itemIds),
+        ),
+        this.timeMethodDetailsStep(
+          perfLogsEnabled,
+          scope,
+          `getVariantSafety24hStats variants=${variantIds.length}`,
+          () =>
+            this.getVariantSafety24hStats(variantIds, new Date(Date.now() - 24 * 60 * 60 * 1000)),
+        ),
+      ]);
 
     const enrichedVariants = await this.timeMethodDetailsStep(
       perfLogsEnabled,
@@ -2547,6 +2670,21 @@ export class MethodsService implements OnModuleDestroy {
               outputMarketImpactSlow: marketImpact.outputMarketImpactSlow,
               marketImpactInstant: marketImpact.marketImpactInstant,
               marketImpactSlow: marketImpact.marketImpactSlow,
+              tags: buildVariantTags({
+                variant,
+                pricesByItem,
+                volumes24hByItem,
+                itemMetadataById,
+                lowProfit: profit.low,
+                highProfit: profit.high,
+                inputMarketImpactInstant: marketImpact.inputMarketImpactInstant,
+                inputMarketImpactSlow: marketImpact.inputMarketImpactSlow,
+                outputMarketImpactInstant: marketImpact.outputMarketImpactInstant,
+                outputMarketImpactSlow: marketImpact.outputMarketImpactSlow,
+                marketImpactInstant: marketImpact.marketImpactInstant,
+                marketImpactSlow: marketImpact.marketImpactSlow,
+                safety24h: safety24hByVariantId[variant.id] ?? null,
+              }),
               trendLastHour: trends.lastHour,
               trendLast24h: trends.last24h,
               trendLastWeek: trends.lastWeek,

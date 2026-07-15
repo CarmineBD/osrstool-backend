@@ -63,6 +63,13 @@ const METHOD_EXAMPLE = {
       outputMarketImpactSlow: 0.38,
       marketImpactInstant: 0.32,
       marketImpactSlow: 0.21,
+      tags: [
+        {
+          label: 'Safe',
+          description:
+            'This method has stayed above break-even over the last 24 hours. Neither low profit nor high profit dropped below 0 GP.',
+        },
+      ],
       xpHour: [{ skill: 'Cooking', experience: 300000 }],
       wilderness: false,
     },

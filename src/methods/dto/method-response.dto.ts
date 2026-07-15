@@ -2,6 +2,11 @@
 import { IoItemDto } from './io-item.dto';
 import { XpHour, VariantRecommendations, VariantRequirements } from '../types';
 
+export class VariantTagResponseDto {
+  label: string;
+  description: string;
+}
+
 export class VariantResponseDto {
   id: string;
   slug: string;
@@ -23,6 +28,7 @@ export class VariantResponseDto {
   outputMarketImpactSlow?: number;
   marketImpactInstant?: number;
   marketImpactSlow?: number;
+  tags?: VariantTagResponseDto[];
   inputs: IoItemDto[];
   outputs: IoItemDto[];
 }
