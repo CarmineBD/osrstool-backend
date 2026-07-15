@@ -68,6 +68,7 @@ const METHOD_EXAMPLE = {
           label: 'Safe',
           description:
             'This method has stayed above break-even over the last 24 hours. Neither low profit nor high profit dropped below 0 GP.',
+          severity: 1,
         },
       ],
       xpHour: [{ skill: 'Cooking', experience: 300000 }],

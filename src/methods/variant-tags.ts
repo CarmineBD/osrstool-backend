@@ -14,6 +14,7 @@ const decimalFormatter = new Intl.NumberFormat('en-US', {
 export interface VariantTag {
   label: string;
   description: string;
+  severity: 1 | 2 | 3;
 }
 
 export interface VariantTagVariantItem {
@@ -227,6 +228,7 @@ export const buildVariantTags = ({
   if (geLimitedInputs.length > 0) {
     tags.push({
       label: 'GE limits',
+      severity: 2,
       description: [
         'Some required inputs exceed Grand Exchange buy limits.',
         ...geLimitedInputs.map(
@@ -253,6 +255,7 @@ export const buildVariantTags = ({
   ) {
     tags.push({
       label: 'High investment required',
+      severity: 2,
       description: `This method requires a high upfront investment. One hour of inputs costs about ${formatGp(
         totalInputCost,
       )}, which is higher than the method's best-case hourly profit of ${formatGp(highProfit)}.`,
@@ -267,6 +270,7 @@ export const buildVariantTags = ({
   ) {
     tags.push({
       label: 'Risky to lose money',
+      severity: 3,
       description:
         'This method can be profitable in the best case, but it can lose money in the worst case. Use caution.',
     });
@@ -279,6 +283,7 @@ export const buildVariantTags = ({
     const bestCaseDays = Math.min(marketImpactInstant, marketImpactSlow) / HOURS_IN_DAY;
     tags.push({
       label: 'Not viable',
+      severity: 3,
       description: `This method has extreme market impact. Even in the best case, operating at this one-hour scale may require about ${formatDays(
         bestCaseDays,
       )} to fully buy and sell through the market.`,
@@ -293,6 +298,7 @@ export const buildVariantTags = ({
   ) {
     tags.push({
       label: 'Safe',
+      severity: 1,
       description:
         'This method has stayed above break-even over the last 24 hours. Neither low profit nor high profit dropped below 0 GP.',
     });
@@ -311,6 +317,7 @@ export const buildVariantTags = ({
 
     tags.push({
       label: 'Very Slow to buy inputs',
+      severity: 2,
       description: [
         'The required input quantities are much higher than the market trades per hour, so buying inputs may take a long time at this scale.',
         ...inputBullets,
@@ -331,6 +338,7 @@ export const buildVariantTags = ({
 
     tags.push({
       label: 'Very Slow to sell outputs',
+      severity: 2,
       description: [
         'The generated output quantities are much higher than the market trades per hour, so selling outputs may take a long time at this scale.',
         ...outputBullets,

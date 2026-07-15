@@ -5,6 +5,7 @@ import { XpHour, VariantRecommendations, VariantRequirements } from '../types';
 export class VariantTagResponseDto {
   label: string;
   description: string;
+  severity: 1 | 2 | 3;
 }
 
 export class VariantResponseDto {

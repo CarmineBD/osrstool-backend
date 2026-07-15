@@ -1238,18 +1238,18 @@ describe('MethodsService variantCount', () => {
     )) as {
       data: Array<{
         variants: Array<{
-          tags: Array<{ label: string; description: string }>;
+          tags: Array<{ label: string; description: string; severity: number }>;
         }>;
       }>;
     };
 
-    expect(result.data[0].variants[0].tags.map((tag) => tag.label)).toEqual([
-      'GE limits',
-      'High investment required',
-      'Not viable',
-      'Safe',
-      'Very Slow to buy inputs',
-      'Very Slow to sell outputs',
+    expect(result.data[0].variants[0].tags.map((tag) => [tag.label, tag.severity])).toEqual([
+      ['GE limits', 2],
+      ['High investment required', 2],
+      ['Not viable', 3],
+      ['Safe', 1],
+      ['Very Slow to buy inputs', 2],
+      ['Very Slow to sell outputs', 2],
     ]);
     expect(result.data[0].variants[0].tags[0].description).toContain('Coal requires 1,200/hour');
     expect(result.data[0].variants[0].tags[1].description).toContain('14,400,000 GP');
@@ -1322,11 +1322,11 @@ describe('MethodsService variantCount', () => {
     });
 
     const result = (await service.findMethodDetailsWithProfit('m1')) as unknown as {
-      variants: Array<{ tags: Array<{ label: string }> }>;
+      variants: Array<{ tags: Array<{ label: string; severity: number }> }>;
     };
 
     expect(result.variants[0].tags).toEqual([
-      expect.objectContaining({ label: 'Risky to lose money' }),
+      expect.objectContaining({ label: 'Risky to lose money', severity: 3 }),
     ]);
   });
 
