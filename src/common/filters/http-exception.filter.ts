@@ -32,7 +32,7 @@ export class HttpExceptionFilter implements ExceptionFilter {
       const rawResponse = exception.getResponse();
       return {
         status,
-        code: status,
+        code: this.extractCode(rawResponse) ?? status,
         message: this.extractMessage(rawResponse) ?? 'Internal server error',
         details: this.extractDetails(rawResponse),
       };
@@ -71,8 +71,17 @@ export class HttpExceptionFilter implements ExceptionFilter {
     return undefined;
   }
 
+  private extractCode(rawResponse: unknown): number | string | undefined {
+    if (!rawResponse || typeof rawResponse !== 'object') return undefined;
+    const value = (rawResponse as { code?: unknown }).code;
+    if (typeof value === 'number' || typeof value === 'string') return value;
+    return undefined;
+  }
+
   private extractDetails(rawResponse: unknown): unknown {
     if (!rawResponse || typeof rawResponse !== 'object') return undefined;
+    const explicitDetails = (rawResponse as { details?: unknown }).details;
+    if (explicitDetails !== undefined) return explicitDetails;
     const value = (rawResponse as { message?: unknown }).message;
     if (Array.isArray(value)) return value;
     return undefined;
