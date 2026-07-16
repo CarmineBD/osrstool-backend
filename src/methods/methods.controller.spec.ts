@@ -128,3 +128,56 @@ describe('MethodsController trending profit endpoint', () => {
     });
   });
 });
+
+describe('MethodsController list endpoint', () => {
+  it('forwards show_only_free_to_play to the service query object', async () => {
+    const svc: { listWithProfitResponse: jest.Mock } = {
+      listWithProfitResponse: jest.fn().mockResolvedValue({ data: { methods: [] }, meta: {} }),
+    };
+
+    const controller = new MethodsController(svc as unknown as MethodsService);
+    const req = { headers: { authorization: 'Bearer token' } } as unknown as Request;
+
+    await controller.findAll(
+      'craft',
+      '1',
+      '10',
+      'zezima',
+      'Skilling',
+      undefined,
+      undefined,
+      undefined,
+      undefined,
+      undefined,
+      undefined,
+      'true',
+      undefined,
+      undefined,
+      'all',
+      'highProfit',
+      'desc',
+      req,
+    );
+
+    expect(svc.listWithProfitResponse).toHaveBeenCalledWith({
+      page: '1',
+      perPage: '10',
+      username: 'zezima',
+      name: 'craft',
+      category: 'Skilling',
+      clickIntensity: undefined,
+      afkiness: undefined,
+      riskLevel: undefined,
+      givesExperience: undefined,
+      skill: undefined,
+      showProfitables: undefined,
+      show_only_free_to_play: 'true',
+      enabled: undefined,
+      likedByMe: undefined,
+      variants: 'all',
+      sortBy: 'highProfit',
+      order: 'desc',
+      authorization: 'Bearer token',
+    });
+  });
+});

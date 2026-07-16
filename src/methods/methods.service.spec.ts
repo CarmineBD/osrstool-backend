@@ -954,6 +954,33 @@ describe('MethodsService variantCount', () => {
     ).rejects.toBeInstanceOf(BadRequestException);
   });
 
+  it('throws when members and show_only_free_to_play are used together', async () => {
+    const methodRepo = {
+      find: jest.fn().mockResolvedValue([]),
+    } as unknown as Repository<Method>;
+
+    const service = new MethodsService(
+      methodRepo,
+      {} as Repository<MethodVariant>,
+      {} as Repository<VariantIoItem>,
+      {} as Repository<VariantHistory>,
+      createMethodLikeRepo(),
+      {} as Repository<User>,
+      {} as VariantSnapshotService,
+      {} as RuneScapeApiService,
+      { get: jest.fn().mockReturnValue('redis://localhost:6379') } as unknown as ConfigService,
+    );
+
+    await expect(
+      service.listWithProfitResponse({
+        page: '1',
+        perPage: '10',
+        members: 'false',
+        show_only_free_to_play: 'true',
+      }),
+    ).rejects.toBeInstanceOf(BadRequestException);
+  });
+
   it('sorts by likes and includes likedByMe when auth token is present', async () => {
     const methodOne = buildMethodFixture();
     methodOne.id = 'm1';
