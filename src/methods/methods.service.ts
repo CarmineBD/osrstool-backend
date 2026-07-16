@@ -107,6 +107,7 @@ interface ListQuery {
   skill?: string;
   showProfitables?: string;
   members?: string | boolean;
+  show_only_free_to_play?: string | boolean;
   enabled?: string | boolean;
   likedByMe?: string | boolean;
   variants?: string;
@@ -354,6 +355,15 @@ export class MethodsService implements OnModuleDestroy {
     } = query;
 
     const enabledParsed = this.parseBooleanQueryParam(enabled, 'enabled');
+    const membersFilter = this.parseBooleanQueryParam(query.members, 'members');
+    const showOnlyFreeToPlayFilter = this.parseBooleanQueryParam(
+      query.show_only_free_to_play,
+      'show_only_free_to_play',
+    );
+
+    if (membersFilter != null && showOnlyFreeToPlayFilter != null) {
+      throw new BadRequestException('members and show_only_free_to_play cannot be used together');
+    }
 
     return {
       name,
@@ -366,7 +376,7 @@ export class MethodsService implements OnModuleDestroy {
       skill: skill ?? undefined,
       showProfitables:
         showProfitables === 'true' ? true : showProfitables === 'false' ? false : undefined,
-      members: this.parseBooleanQueryParam(query.members, 'members'),
+      members: showOnlyFreeToPlayFilter === true ? false : membersFilter,
       enabled: enabledParsed ?? true,
     };
   }

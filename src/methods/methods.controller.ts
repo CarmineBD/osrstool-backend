@@ -128,9 +128,10 @@ export class MethodsController {
     description: 'true or false',
   })
   @ApiQuery({
-    name: 'members',
+    name: 'show_only_free_to_play',
     required: false,
-    description: 'true to return only members variants, false to return only free-to-play variants',
+    description:
+      'true to return only free-to-play variants. false or omitted returns both free-to-play and members variants',
   })
   @ApiQuery({
     name: 'enabled',
@@ -179,7 +180,7 @@ export class MethodsController {
     @Query('givesExperience') givesExperience?: string,
     @Query('skill') skill?: string,
     @Query('showProfitables') showProfitables?: string,
-    @Query('members') members?: string | boolean,
+    @Query('show_only_free_to_play') showOnlyFreeToPlay?: string | boolean,
     @Query('enabled') enabled?: string | boolean,
     @Query('likedByMe') likedByMe?: string | boolean,
     @Query('variants') variants?: string,
@@ -199,7 +200,7 @@ export class MethodsController {
       givesExperience,
       skill,
       showProfitables,
-      members,
+      show_only_free_to_play: showOnlyFreeToPlay,
       enabled,
       likedByMe,
       variants,
