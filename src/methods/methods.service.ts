@@ -65,6 +65,10 @@ interface VariantIoQuantity {
   quantity: number;
 }
 
+interface VariantItemPayload {
+  id: number;
+}
+
 interface ListFilters {
   name?: string;
   category?: string;
@@ -257,6 +261,22 @@ interface SkillSummaryBySkill {
   bestProfit: SkillSummaryMethod | null;
   bestAfk: SkillSummaryMethod | null;
   bestXp: SkillSummaryMethod | null;
+}
+
+interface VariantMembershipValidationDraft {
+  variantTitle: string;
+  members: boolean;
+  itemIds: number[];
+}
+
+interface MembersOnlyItemConflict {
+  id: number;
+  name: string;
+}
+
+interface VariantMembersItemConflict {
+  variantTitle: string;
+  membersOnlyItems: MembersOnlyItemConflict[];
 }
 
 @Injectable()
@@ -1208,8 +1228,125 @@ export class MethodsService implements OnModuleDestroy {
     await this.assertIconItemIdsExist([updateDto.icon_id]);
   }
 
+  private normalizeVariantTitle(title?: string | null): string {
+    const normalized = title?.trim();
+    return normalized && normalized.length > 0 ? normalized : 'Untitled variant';
+  }
+
+  private collectItemIdsFromVariantPayload(
+    inputs: VariantItemPayload[] = [],
+    outputs: VariantItemPayload[] = [],
+  ): number[] {
+    return [...inputs, ...outputs]
+      .map((item) => item.id)
+      .filter((itemId) => Number.isInteger(itemId));
+  }
+
+  private async assertFreeToPlayVariantsOnlyUseFreeToPlayItems(
+    variants: VariantMembershipValidationDraft[],
+  ): Promise<void> {
+    const freeToPlayVariants = variants.filter(
+      (variant) => !variant.members && variant.itemIds.length > 0,
+    );
+    if (freeToPlayVariants.length === 0) return;
+    if (!this.itemRepo) {
+      throw new Error('Item repository is not configured');
+    }
+
+    const uniqueItemIds = [...new Set(freeToPlayVariants.flatMap((variant) => variant.itemIds))];
+    const items = await this.itemRepo.find({
+      select: { id: true, name: true, members: true },
+      where: { id: In(uniqueItemIds) },
+    });
+    const itemById = new Map(items.map((item) => [item.id, item]));
+
+    const conflicts = freeToPlayVariants.reduce<VariantMembersItemConflict[]>((acc, variant) => {
+      const membersOnlyItemsById = new Map<number, MembersOnlyItemConflict>();
+      for (const itemId of variant.itemIds) {
+        const item = itemById.get(itemId);
+        if (item?.members === true) {
+          membersOnlyItemsById.set(item.id, {
+            id: item.id,
+            name: item.name,
+          });
+        }
+      }
+
+      const membersOnlyItems = [...membersOnlyItemsById.values()].sort((a, b) =>
+        a.name.localeCompare(b.name),
+      );
+      if (membersOnlyItems.length > 0) {
+        acc.push({
+          variantTitle: variant.variantTitle,
+          membersOnlyItems,
+        });
+      }
+
+      return acc;
+    }, []);
+
+    if (conflicts.length === 0) return;
+
+    const conflictSummary = conflicts
+      .map(
+        (conflict) =>
+          `${conflict.variantTitle}: ${conflict.membersOnlyItems.map((item) => item.name).join(', ')}`,
+      )
+      .join(' | ');
+
+    throw new BadRequestException({
+      code: 'F2P_VARIANT_CONTAINS_MEMBERS_ITEMS',
+      message: `Free-to-play variants cannot include members-only items. Conflicts: ${conflictSummary}`,
+      details: {
+        variants: conflicts,
+      },
+    });
+  }
+
+  private async validateCreateVariantMembership(createDto: CreateMethodDto): Promise<void> {
+    await this.assertFreeToPlayVariantsOnlyUseFreeToPlayItems(
+      createDto.variants.map((variant) => ({
+        variantTitle: this.normalizeVariantTitle(variant.label),
+        members: variant.members ?? false,
+        itemIds: this.collectItemIdsFromVariantPayload(variant.inputs, variant.outputs),
+      })),
+    );
+  }
+
+  private async validateUpdateVariantMembership(
+    existingVariant: MethodVariant,
+    updateDto: UpdateVariantDto,
+  ): Promise<void> {
+    await this.assertFreeToPlayVariantsOnlyUseFreeToPlayItems([
+      {
+        variantTitle: this.normalizeVariantTitle(updateDto.label ?? existingVariant.label),
+        members: updateDto.members ?? existingVariant.members ?? false,
+        itemIds: this.collectItemIdsFromVariantPayload(updateDto.inputs, updateDto.outputs),
+      },
+    ]);
+  }
+
+  private async validateUpdateMethodVariantMembership(
+    method: Method,
+    updateDto: UpdateMethodDto,
+  ): Promise<void> {
+    const existingVariants = new Map(method.variants.map((variant) => [variant.id, variant]));
+    await this.assertFreeToPlayVariantsOnlyUseFreeToPlayItems(
+      (updateDto.variants ?? []).map((variant) => {
+        const existingVariant = variant.id ? existingVariants.get(variant.id) : undefined;
+
+        return {
+          variantTitle: this.normalizeVariantTitle(variant.label ?? existingVariant?.label),
+          members: variant.members ?? existingVariant?.members ?? false,
+          itemIds: this.collectItemIdsFromVariantPayload(variant.inputs, variant.outputs),
+        };
+      }),
+    );
+  }
+
   async create(createDto: CreateMethodDto): Promise<MethodDto> {
     await this.validateCreateIconIds(createDto);
+    await this.validateCreateVariantMembership(createDto);
 
     const { name, description, category, enabled, variants, icon_id } = createDto;
     const method = this.methodRepo.create({
@@ -1295,6 +1432,7 @@ export class MethodsService implements OnModuleDestroy {
     }
 
     await this.validateUpdateIconIds(method, updateDto);
+    await this.validateUpdateMethodVariantMembership(method, updateDto);
 
     const { variants = [], name, description, category, enabled, icon_id } = updateDto;
 
@@ -1453,6 +1591,7 @@ export class MethodsService implements OnModuleDestroy {
     if (!variant) throw new NotFoundException(`Variant ${id} not found`);
 
     await this.validateVariantIconId(dto);
+    await this.validateUpdateVariantMembership(variant, dto);
 
     const {
       inputs = [],

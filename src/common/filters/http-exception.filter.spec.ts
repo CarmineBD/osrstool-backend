@@ -37,6 +37,44 @@ describe('HttpExceptionFilter', () => {
     });
   });
 
+  it('preserves custom error codes and details from structured HttpException responses', () => {
+    const filter = new HttpExceptionFilter();
+    const { host, response } = createHost();
+
+    filter.catch(
+      new BadRequestException({
+        code: 'F2P_VARIANT_CONTAINS_MEMBERS_ITEMS',
+        message: 'Free-to-play variants cannot include members-only items.',
+        details: {
+          variants: [
+            {
+              variantTitle: 'Variant A',
+              membersOnlyItems: [{ id: 100, name: 'Members item' }],
+            },
+          ],
+        },
+      }),
+      host,
+    );
+
+    expect(response.status).toHaveBeenCalledWith(HttpStatus.BAD_REQUEST);
+    expect(response.json).toHaveBeenCalledWith({
+      status: 'error',
+      error: {
+        code: 'F2P_VARIANT_CONTAINS_MEMBERS_ITEMS',
+        message: 'Free-to-play variants cannot include members-only items.',
+        details: {
+          variants: [
+            {
+              variantTitle: 'Variant A',
+              membersOnlyItems: [{ id: 100, name: 'Members item' }],
+            },
+          ],
+        },
+      },
+    });
+  });
+
   it('translates oversized body parser errors into 413 responses', () => {
     const filter = new HttpExceptionFilter();
     const { host, response } = createHost();
