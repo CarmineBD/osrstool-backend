@@ -52,16 +52,28 @@ describe('Methods (e2e)', () => {
     ],
   });
 
-  const seedItems = async (...ids: number[]) => {
+  const seedItems = async (
+    ...items: Array<number | { id: number; members?: boolean; name?: string }>
+  ) => {
     const itemRepo = dataSource.getRepository(Item);
     await itemRepo.save(
-      ids.map((id) =>
-        buildItemFixture({
-          id,
-          name: `Item ${id}`,
-          iconPath: `Item_${id}.png`,
-        }),
-      ),
+      items.map((item) => {
+        const config =
+          typeof item === 'number'
+            ? { id: item, members: false, name: `Item ${item}` }
+            : {
+                id: item.id,
+                members: item.members ?? false,
+                name: item.name ?? `Item ${item.id}`,
+              };
+
+        return buildItemFixture({
+          id: config.id,
+          name: config.name,
+          iconPath: `Item_${config.id}.png`,
+          members: config.members,
+        });
+      }),
     );
   };
 
@@ -754,6 +766,67 @@ describe('Methods (e2e)', () => {
     expect(String(body.message)).toContain('999999');
   });
 
+  it('POST /methods rejects free-to-play variants that include members-only items', async () => {
+    await seedItems(
+      { id: 100, members: true, name: 'Abyssal whip' },
+      { id: 200, members: false, name: 'Lobster' },
+      { id: 300, members: true, name: 'Dragon bones' },
+      { id: 4151, members: false, name: 'Method icon' },
+      { id: 4152, members: false, name: 'Variant icon' },
+    );
+
+    const server = app.getHttpServer() as unknown as Server;
+    const payload = {
+      ...buildValidCreateMethodPayload(),
+      variants: [
+        {
+          label: 'F2P Cooking',
+          icon_id: 4152,
+          members: false,
+          inputs: [{ id: 100, quantity: 1, type: 'input' }],
+          outputs: [{ id: 200, quantity: 1, type: 'output' }],
+        },
+        {
+          label: 'F2P Prayer',
+          icon_id: 4152,
+          members: false,
+          inputs: [],
+          outputs: [{ id: 300, quantity: 1, type: 'output' }],
+        },
+      ],
+    };
+
+    const res = await request(server).post('/methods').send(payload).expect(400);
+
+    const body = res.body as {
+      status: string;
+      error: {
+        code: string;
+        message: string;
+        details: {
+          variants: Array<{
+            variantTitle: string;
+            membersOnlyItems: Array<{ id: number; name: string }>;
+          }>;
+        };
+      };
+    };
+
+    expect(body.status).toBe('error');
+    expect(body.error.code).toBe('F2P_VARIANT_CONTAINS_MEMBERS_ITEMS');
+    expect(body.error.message).toContain('Free-to-play variants cannot include members-only items');
+    expect(body.error.details.variants).toEqual([
+      {
+        variantTitle: 'F2P Cooking',
+        membersOnlyItems: [{ id: 100, name: 'Abyssal whip' }],
+      },
+      {
+        variantTitle: 'F2P Prayer',
+        membersOnlyItems: [{ id: 300, name: 'Dragon bones' }],
+      },
+    ]);
+  });
+
   it('PUT /methods/:id rejects icon_id values that do not exist in items', async () => {
     await seedItems(4151, 4152);
 
@@ -807,6 +880,80 @@ describe('Methods (e2e)', () => {
     expect(String(body.message)).toContain('999999');
   });
 
+  it('PUT /methods/:id rejects free-to-play variants that include members-only items', async () => {
+    await seedItems(
+      { id: 100, members: true, name: 'Abyssal whip' },
+      { id: 200, members: false, name: 'Lobster' },
+      { id: 4151, members: false, name: 'Method icon' },
+      { id: 4152, members: false, name: 'Variant icon' },
+    );
+
+    const methodRepo = dataSource.getRepository(Method);
+    const variantRepo = dataSource.getRepository(MethodVariant);
+
+    const savedMethod = await methodRepo.save({
+      name: 'Editable method',
+      slug: 'editable-method',
+      iconId: 4151,
+      description: 'Safe markdown',
+      category: 'Skilling',
+      enabled: true,
+    });
+
+    const savedVariant = await variantRepo.save({
+      label: 'Existing F2P variant',
+      slug: 'existing-f2p-variant',
+      iconId: 4152,
+      description: null,
+      xpHour: null,
+      clickIntensity: 1,
+      afkiness: 1,
+      riskLevel: '1',
+      requirements: null,
+      recommendations: null,
+      wilderness: false,
+      members: false,
+      actionsPerHour: 100,
+      method: savedMethod,
+    });
+
+    const server = app.getHttpServer() as unknown as Server;
+    const res = await request(server)
+      .put(`/methods/${savedMethod.id}`)
+      .send({
+        variants: [
+          {
+            id: savedVariant.id,
+            inputs: [{ id: 100, quantity: 1, type: 'input' }],
+            outputs: [{ id: 200, quantity: 1, type: 'output' }],
+          },
+        ],
+      })
+      .expect(400);
+
+    const body = res.body as {
+      status: string;
+      error: {
+        code: string;
+        details: {
+          variants: Array<{
+            variantTitle: string;
+            membersOnlyItems: Array<{ id: number; name: string }>;
+          }>;
+        };
+      };
+    };
+
+    expect(body.status).toBe('error');
+    expect(body.error.code).toBe('F2P_VARIANT_CONTAINS_MEMBERS_ITEMS');
+    expect(body.error.details.variants).toEqual([
+      {
+        variantTitle: 'Existing F2P variant',
+        membersOnlyItems: [{ id: 100, name: 'Abyssal whip' }],
+      },
+    ]);
+  });
+
   it('PUT /methods/variant/:id rejects icon_id values that do not exist in items', async () => {
     await seedItems(4151, 4152);
 
@@ -851,6 +998,75 @@ describe('Methods (e2e)', () => {
     const body = res.body as { message?: unknown };
     expect(String(body.message)).toContain('icon_id must reference an existing item');
     expect(String(body.message)).toContain('999999');
+  });
+
+  it('PUT /methods/variant/:id rejects free-to-play variants that include members-only items', async () => {
+    await seedItems(
+      { id: 100, members: true, name: 'Abyssal whip' },
+      { id: 200, members: false, name: 'Lobster' },
+      { id: 4151, members: false, name: 'Method icon' },
+      { id: 4152, members: false, name: 'Variant icon' },
+    );
+
+    const methodRepo = dataSource.getRepository(Method);
+    const variantRepo = dataSource.getRepository(MethodVariant);
+
+    const savedMethod = await methodRepo.save({
+      name: 'Variant edit method',
+      slug: 'variant-edit-method',
+      iconId: 4151,
+      description: 'Safe markdown',
+      category: 'Skilling',
+      enabled: true,
+    });
+
+    const savedVariant = await variantRepo.save({
+      label: 'Variant edit variant',
+      slug: 'variant-edit-variant',
+      iconId: 4152,
+      description: null,
+      xpHour: null,
+      clickIntensity: 1,
+      afkiness: 1,
+      riskLevel: '1',
+      requirements: null,
+      recommendations: null,
+      wilderness: false,
+      members: false,
+      actionsPerHour: 100,
+      method: savedMethod,
+    });
+
+    const server = app.getHttpServer() as unknown as Server;
+    const res = await request(server)
+      .put(`/methods/variant/${savedVariant.id}`)
+      .send({
+        inputs: [{ id: 100, quantity: 1, type: 'input' }],
+        outputs: [{ id: 200, quantity: 1, type: 'output' }],
+      })
+      .expect(400);
+
+    const body = res.body as {
+      status: string;
+      error: {
+        code: string;
+        details: {
+          variants: Array<{
+            variantTitle: string;
+            membersOnlyItems: Array<{ id: number; name: string }>;
+          }>;
+        };
+      };
+    };
+
+    expect(body.status).toBe('error');
+    expect(body.error.code).toBe('F2P_VARIANT_CONTAINS_MEMBERS_ITEMS');
+    expect(body.error.details.variants).toEqual([
+      {
+        variantTitle: 'Variant edit variant',
+        membersOnlyItems: [{ id: 100, name: 'Abyssal whip' }],
+      },
+    ]);
   });
 
   it('POST /methods rejects unsafe script content in method.description', async () => {

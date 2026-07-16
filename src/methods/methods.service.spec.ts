@@ -1438,6 +1438,140 @@ describe('MethodsService variantCount', () => {
     expect(result.status).toBe('ok');
     expect(result.data.method.id).toBe('m1');
   });
+
+  it('rejects create when free-to-play variants include members-only items', async () => {
+    const createMethod = jest.fn();
+    const saveMethod = jest.fn();
+    const methodRepo = {
+      create: createMethod,
+      save: saveMethod,
+    } as unknown as Repository<Method>;
+
+    const itemRepo = {
+      find: jest.fn().mockResolvedValue([
+        { id: 100, name: 'Members item', members: true },
+        { id: 101, name: 'Another members item', members: true },
+        { id: 4151, name: 'Method icon', members: false },
+        { id: 4152, name: 'Variant icon', members: false },
+      ]),
+    } as unknown as Repository<Item>;
+
+    const service = new MethodsService(
+      methodRepo,
+      {} as Repository<MethodVariant>,
+      {} as Repository<VariantIoItem>,
+      {} as Repository<VariantHistory>,
+      createMethodLikeRepo(),
+      {} as Repository<User>,
+      {} as VariantSnapshotService,
+      {} as RuneScapeApiService,
+      { get: jest.fn().mockReturnValue('redis://localhost:6379') } as unknown as ConfigService,
+      itemRepo,
+    );
+
+    await expect(
+      service.create({
+        name: 'Test method',
+        icon_id: 4151,
+        variants: [
+          {
+            label: 'Variant A',
+            icon_id: 4152,
+            members: false,
+            inputs: [{ id: 100, quantity: 1, type: 'input' }],
+            outputs: [],
+          },
+          {
+            label: 'Variant B',
+            icon_id: 4152,
+            members: false,
+            inputs: [],
+            outputs: [{ id: 101, quantity: 1, type: 'output' }],
+          },
+        ],
+      }),
+    ).rejects.toMatchObject({
+      response: {
+        code: 'F2P_VARIANT_CONTAINS_MEMBERS_ITEMS',
+        details: {
+          variants: [
+            {
+              variantTitle: 'Variant A',
+              membersOnlyItems: [{ id: 100, name: 'Members item' }],
+            },
+            {
+              variantTitle: 'Variant B',
+              membersOnlyItems: [{ id: 101, name: 'Another members item' }],
+            },
+          ],
+        },
+      },
+    });
+
+    expect(createMethod).not.toHaveBeenCalled();
+    expect(saveMethod).not.toHaveBeenCalled();
+  });
+
+  it('rejects updateVariant when the resulting free-to-play variant includes members-only items', async () => {
+    const existingMethod = { id: 'm1' } as Method;
+    const existingVariant = Object.assign(new MethodVariant(), {
+      id: 'v1',
+      label: 'Existing F2P variant',
+      members: false,
+      method: existingMethod,
+      ioItems: [],
+    });
+
+    const saveVariant = jest.fn();
+    const variantRepo = {
+      findOne: jest.fn().mockResolvedValue(existingVariant),
+      save: saveVariant,
+    } as unknown as Repository<MethodVariant>;
+
+    const deleteIoItems = jest.fn();
+    const ioRepo = {
+      delete: deleteIoItems,
+    } as unknown as Repository<VariantIoItem>;
+
+    const itemRepo = {
+      find: jest.fn().mockResolvedValue([{ id: 100, name: 'Members item', members: true }]),
+    } as unknown as Repository<Item>;
+
+    const service = new MethodsService(
+      {} as Repository<Method>,
+      variantRepo,
+      ioRepo,
+      {} as Repository<VariantHistory>,
+      createMethodLikeRepo(),
+      {} as Repository<User>,
+      {} as VariantSnapshotService,
+      {} as RuneScapeApiService,
+      { get: jest.fn().mockReturnValue('redis://localhost:6379') } as unknown as ConfigService,
+      itemRepo,
+    );
+
+    await expect(
+      service.updateVariant('v1', {
+        inputs: [{ id: 100, quantity: 1, type: 'input' }],
+        outputs: [],
+      }),
+    ).rejects.toMatchObject({
+      response: {
+        code: 'F2P_VARIANT_CONTAINS_MEMBERS_ITEMS',
+        details: {
+          variants: [
+            {
+              variantTitle: 'Existing F2P variant',
+              membersOnlyItems: [{ id: 100, name: 'Members item' }],
+            },
+          ],
+        },
+      },
+    });
+
+    expect(deleteIoItems).not.toHaveBeenCalled();
+    expect(saveVariant).not.toHaveBeenCalled();
+  });
 });
 
 describe('MethodsService trending profit', () => {
