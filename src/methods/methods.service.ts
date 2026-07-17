@@ -30,6 +30,15 @@ import { ConfigService } from '@nestjs/config';
 import { User } from '../auth/entities/user.entity';
 import { calculateMarketImpact, type MarketImpactResult } from './market-impact-calculator';
 import { Item } from '../items/entities/item.entity';
+import { METHOD_CATEGORY_VALUES } from './dto/method-category.constants';
+import { SKILL_KEY_VALUES } from './dto/skill.constants';
+import {
+  MAX_AFKINESS,
+  MAX_CLICK_INTENSITY,
+  MAX_RISK_LEVEL,
+  QUERY_SEARCH_MAX_LENGTH,
+  USERNAME_MAX_LENGTH,
+} from './dto/validation.constants';
 import {
   buildVariantTags,
   type VariantSafety24hStats,
@@ -279,6 +288,18 @@ interface VariantMembersItemConflict {
   membersOnlyItems: MembersOnlyItemConflict[];
 }
 
+const LIST_SORT_VALUES = [
+  'clickIntensity',
+  'afkiness',
+  'xpHour',
+  'highProfit',
+  'likes',
+  'gpPerXpLow',
+  'gpPerXpHigh',
+] as const;
+
+const SORT_ORDER_VALUES = ['asc', 'desc'] as const;
+
 @Injectable()
 export class MethodsService implements OnModuleDestroy {
   private readonly logger = new Logger(MethodsService.name);
@@ -376,6 +397,8 @@ export class MethodsService implements OnModuleDestroy {
 
     const enabledParsed = this.parseBooleanQueryParam(enabled, 'enabled');
     const membersFilter = this.parseBooleanQueryParam(query.members, 'members');
+    const givesExperienceFilter = this.parseBooleanQueryParam(givesExperience, 'givesExperience');
+    const showProfitablesFilter = this.parseBooleanQueryParam(showProfitables, 'showProfitables');
     const showOnlyFreeToPlayFilter = this.parseBooleanQueryParam(
       query.show_only_free_to_play,
       'show_only_free_to_play',
@@ -386,16 +409,18 @@ export class MethodsService implements OnModuleDestroy {
     }
 
     return {
-      name,
-      category: category ?? undefined,
-      clickIntensity: clickIntensity ? Number(clickIntensity) : undefined,
-      afkiness: afkiness ? Number(afkiness) : undefined,
-      riskLevel: riskLevel ? Number(riskLevel) : undefined,
-      givesExperience:
-        givesExperience === 'true' ? true : givesExperience === 'false' ? false : undefined,
-      skill: skill ?? undefined,
-      showProfitables:
-        showProfitables === 'true' ? true : showProfitables === 'false' ? false : undefined,
+      name: this.normalizeOptionalQueryString(name, 'name', QUERY_SEARCH_MAX_LENGTH),
+      category: this.parseOptionalCategoryQueryParam(category),
+      clickIntensity: this.parseOptionalBoundedIntegerQueryParam(
+        clickIntensity,
+        'clickIntensity',
+        MAX_CLICK_INTENSITY,
+      ),
+      afkiness: this.parseOptionalBoundedIntegerQueryParam(afkiness, 'afkiness', MAX_AFKINESS),
+      riskLevel: this.parseOptionalBoundedIntegerQueryParam(riskLevel, 'riskLevel', MAX_RISK_LEVEL),
+      givesExperience: givesExperienceFilter,
+      skill: this.parseOptionalSkillQueryParam(skill),
+      showProfitables: showProfitablesFilter,
       members: showOnlyFreeToPlayFilter === true ? false : membersFilter,
       enabled: enabledParsed ?? true,
     };
@@ -684,7 +709,12 @@ export class MethodsService implements OnModuleDestroy {
     authorization?: string,
     authenticatedUserId?: string | null,
   ): Promise<void> {
-    if (!username) return;
+    const normalizedUsername = this.normalizeOptionalQueryString(
+      username,
+      'username',
+      USERNAME_MAX_LENGTH,
+    );
+    if (!normalizedUsername) return;
 
     const userId = authenticatedUserId ?? (await this.verifySupabaseToken(authorization));
     const user = await this.userRepo.findOne({ where: { id: userId } });
@@ -694,25 +724,107 @@ export class MethodsService implements OnModuleDestroy {
     }
   }
 
+  private normalizeOptionalQueryString(
+    value: string | undefined,
+    paramName: string,
+    maxLength: number,
+  ): string | undefined {
+    if (value == null) return undefined;
+
+    const normalized = value.trim();
+    if (normalized.length === 0) return undefined;
+    if (normalized.length > maxLength) {
+      throw new BadRequestException(`${paramName} must be at most ${maxLength} characters`);
+    }
+
+    return normalized;
+  }
+
+  private parsePositiveIntegerQueryParam(
+    value: string | undefined,
+    paramName: string,
+    maxValue: number,
+  ): number {
+    const normalized = this.normalizeOptionalQueryString(value, paramName, 20) ?? '1';
+    const parsed = Number(normalized);
+
+    if (!Number.isInteger(parsed) || parsed < 1) {
+      throw new BadRequestException(`${paramName} must be a positive integer`);
+    }
+    if (parsed > maxValue) {
+      throw new BadRequestException(`${paramName} must be less than or equal to ${maxValue}`);
+    }
+
+    return parsed;
+  }
+
+  private parseOptionalBoundedIntegerQueryParam(
+    value: string | undefined,
+    paramName: string,
+    maxValue: number,
+  ): number | undefined {
+    const normalized = this.normalizeOptionalQueryString(value, paramName, 20);
+    if (normalized == null) return undefined;
+
+    const parsed = Number(normalized);
+    if (!Number.isInteger(parsed) || parsed < 0) {
+      throw new BadRequestException(`${paramName} must be a non-negative integer`);
+    }
+    if (parsed > maxValue) {
+      throw new BadRequestException(`${paramName} must be less than or equal to ${maxValue}`);
+    }
+
+    return parsed;
+  }
+
+  private parseOptionalCategoryQueryParam(value: string | undefined): string | undefined {
+    const normalized = this.normalizeOptionalQueryString(value, 'category', 30)?.toLowerCase();
+    if (normalized == null) return undefined;
+    if (!METHOD_CATEGORY_VALUES.includes(normalized as (typeof METHOD_CATEGORY_VALUES)[number])) {
+      throw new BadRequestException(
+        `category must be one of: ${METHOD_CATEGORY_VALUES.join(', ')}`,
+      );
+    }
+
+    return normalized;
+  }
+
+  private parseOptionalSkillQueryParam(value: string | undefined): string | undefined {
+    const normalized = this.normalizeOptionalQueryString(value, 'skill', 30)?.toLowerCase();
+    if (normalized == null) return undefined;
+    if (!SKILL_KEY_VALUES.includes(normalized as (typeof SKILL_KEY_VALUES)[number])) {
+      throw new BadRequestException(`skill must be one of: ${SKILL_KEY_VALUES.join(', ')}`);
+    }
+
+    return normalized;
+  }
+
   private buildSortOptions(query: ListQuery): SortOptions {
-    const { sortBy = 'highProfit', order = 'desc' } = query;
+    const sortBy = this.normalizeOptionalQueryString(query.sortBy, 'sortBy', 20) ?? 'highProfit';
+    const order =
+      this.normalizeOptionalQueryString(query.order, 'order', 4)?.toLowerCase() ?? 'desc';
+
+    if (!LIST_SORT_VALUES.includes(sortBy as (typeof LIST_SORT_VALUES)[number])) {
+      throw new BadRequestException(`sortBy must be one of: ${LIST_SORT_VALUES.join(', ')}`);
+    }
+    if (!SORT_ORDER_VALUES.includes(order as (typeof SORT_ORDER_VALUES)[number])) {
+      throw new BadRequestException(`order must be one of: ${SORT_ORDER_VALUES.join(', ')}`);
+    }
+
     return {
-      sortBy: sortBy as
-        | 'clickIntensity'
-        | 'afkiness'
-        | 'xpHour'
-        | 'highProfit'
-        | 'likes'
-        | 'gpPerXpLow'
-        | 'gpPerXpHigh',
-      order: (order as 'asc' | 'desc') ?? 'desc',
+      sortBy: sortBy as SortOptions['sortBy'],
+      order: order as SortOptions['order'],
     };
   }
 
   async listWithProfitResponse(query: ListQuery) {
-    const { page = '1', perPage = '10', username } = query;
-    const p = parseInt(page, 10);
-    const pp = parseInt(perPage, 10);
+    const username = this.normalizeOptionalQueryString(
+      query.username,
+      'username',
+      USERNAME_MAX_LENGTH,
+    );
+    const p = this.parsePositiveIntegerQueryParam(query.page, 'page', 100);
+    const pp = this.parsePositiveIntegerQueryParam(query.perPage, 'perPage', 100);
     const variantsMode = this.parseVariantsQueryParam(query.variants);
     const likedByMeFilter = this.parseBooleanQueryParam(query.likedByMe, 'likedByMe');
     const authenticatedUserId = await this.resolveAuthenticatedUserId(query.authorization);
@@ -762,9 +874,13 @@ export class MethodsService implements OnModuleDestroy {
   }
 
   async listTrendingProfitResponse(query: TrendingProfitQuery) {
-    const { page = '1', perPage = '10', username } = query;
-    const p = parseInt(page, 10);
-    const pp = parseInt(perPage, 10);
+    const username = this.normalizeOptionalQueryString(
+      query.username,
+      'username',
+      USERNAME_MAX_LENGTH,
+    );
+    const p = this.parsePositiveIntegerQueryParam(query.page, 'page', 100);
+    const pp = this.parsePositiveIntegerQueryParam(query.perPage, 'perPage', 100);
     const variantsMode = this.parseVariantsQueryParam(query.variants);
     const likedByMeFilter = this.parseBooleanQueryParam(query.likedByMe, 'likedByMe');
     const authenticatedUserId = await this.resolveAuthenticatedUserId(query.authorization);
@@ -819,9 +935,18 @@ export class MethodsService implements OnModuleDestroy {
     authorization?: string,
     enabledParam?: string | boolean,
   ) {
+    const normalizedUsername = this.normalizeOptionalQueryString(
+      username,
+      'username',
+      USERNAME_MAX_LENGTH,
+    );
     const authenticatedUserId = await this.resolveAuthenticatedUserId(authorization);
-    await this.assertRegisteredUserForUsername(username, authorization, authenticatedUserId);
-    const { userInfo } = await this.fetchUserInfo(username);
+    await this.assertRegisteredUserForUsername(
+      normalizedUsername,
+      authorization,
+      authenticatedUserId,
+    );
+    const { userInfo } = await this.fetchUserInfo(normalizedUsername);
     if (enabledParam != null) {
       await this.assertSuperAdminForEnabledQueryParam(authorization);
     }
@@ -1035,6 +1160,11 @@ export class MethodsService implements OnModuleDestroy {
     const perfLogsEnabled = this.isMethodDetailsPerfLogEnabled();
     const scope = `methodDetails id=${id}`;
     const totalStartedAt = performance.now();
+    const normalizedUsername = this.normalizeOptionalQueryString(
+      username,
+      'username',
+      USERNAME_MAX_LENGTH,
+    );
 
     const authenticatedUserId = await this.timeMethodDetailsStep(
       perfLogsEnabled,
@@ -1049,13 +1179,18 @@ export class MethodsService implements OnModuleDestroy {
       perfLogsEnabled,
       scope,
       'assertRegisteredUserForUsername',
-      () => this.assertRegisteredUserForUsername(username, authorization, authenticatedUserId),
+      () =>
+        this.assertRegisteredUserForUsername(
+          normalizedUsername,
+          authorization,
+          authenticatedUserId,
+        ),
     );
     const { userInfo, warnings } = await this.timeMethodDetailsStep(
       perfLogsEnabled,
       scope,
       'fetchUserInfo',
-      () => this.fetchUserInfo(username),
+      () => this.fetchUserInfo(normalizedUsername),
     );
     const method = await this.timeMethodDetailsStep(
       perfLogsEnabled,
@@ -1080,7 +1215,7 @@ export class MethodsService implements OnModuleDestroy {
       data: { method, user: userInfo },
       warnings,
       meta: {
-        ...(username ? { username } : {}),
+        ...(normalizedUsername ? { username: normalizedUsername } : {}),
       },
     };
   }

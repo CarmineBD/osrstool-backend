@@ -1091,6 +1091,75 @@ describe('Methods (e2e)', () => {
     expectUnsafeMarkdownValidationMessage(res.body as { message?: unknown });
   });
 
+  it('POST /methods rejects io quantities with too many decimal places', async () => {
+    await seedItems(100, 200, 4151, 4152);
+
+    const server = app.getHttpServer() as unknown as Server;
+    const payload = buildValidCreateMethodPayload();
+    payload.variants[0].inputs = [
+      { id: 100, quantity: 1.1234567, type: 'input', reason: 'Reason text' },
+    ];
+
+    const res = await request(server).post('/methods').send(payload).expect(400);
+    const body = res.body as { message?: unknown };
+    const messages = Array.isArray(body.message)
+      ? body.message.map(String)
+      : [String(body.message)];
+
+    expect(
+      messages.some((message) =>
+        message.includes('quantity must be a number conforming to the specified constraints'),
+      ),
+    ).toBe(true);
+  });
+
+  it('POST /methods rejects variants with more than 200 inputs', async () => {
+    await seedItems(100, 200, 4151, 4152);
+
+    const server = app.getHttpServer() as unknown as Server;
+    const payload = buildValidCreateMethodPayload();
+    payload.variants[0].inputs = Array.from({ length: 201 }, () => ({
+      id: 100,
+      quantity: 1,
+      type: 'input' as const,
+    }));
+
+    const res = await request(server).post('/methods').send(payload).expect(400);
+    const body = res.body as { message?: unknown };
+    const messages = Array.isArray(body.message)
+      ? body.message.map(String)
+      : [String(body.message)];
+
+    expect(
+      messages.some((message) => message.includes('inputs must contain no more than 200 elements')),
+    ).toBe(true);
+  });
+
+  it('POST /methods rejects requirements with more than 100 total entries', async () => {
+    await seedItems(100, 200, 4151, 4152);
+
+    const server = app.getHttpServer() as unknown as Server;
+    const payload = buildValidCreateMethodPayload();
+    payload.variants[0].requirements = {
+      levels: Array.from({ length: 101 }, () => ({
+        skill: 'magic',
+        level: 1,
+      })),
+    };
+
+    const res = await request(server).post('/methods').send(payload).expect(400);
+    const body = res.body as { message?: unknown };
+    const messages = Array.isArray(body.message)
+      ? body.message.map(String)
+      : [String(body.message)];
+
+    expect(
+      messages.some((message) =>
+        message.includes('requirements must contain at most 100 total entries'),
+      ),
+    ).toBe(true);
+  });
+
   it('PUT /methods/variant/:id rejects javascript: links in snapshotDescription', async () => {
     const methodRepo = dataSource.getRepository(Method);
     const variantRepo = dataSource.getRepository(MethodVariant);

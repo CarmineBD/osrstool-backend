@@ -10,6 +10,7 @@ import { Quest } from '../catalogs/entities/quest.entity';
 import { Method } from '../methods/entities/method.entity';
 import { MethodVariant } from '../methods/entities/variant.entity';
 import { MethodProfitRefresherService } from '../method-profit-refresher/method-profit-refresher.service';
+import { ADMIN_SCRIPT_NAME_MAX_LENGTH } from '../methods/dto/validation.constants';
 import { SyncItemsDto } from './dto/sync-items.dto';
 import { AdminScriptExecution } from './entities/admin-script-execution.entity';
 
@@ -90,7 +91,8 @@ export class AdminService {
 
   async listExecutions(limitRaw?: string, scriptName?: string) {
     const limit = this.parseLimit(limitRaw);
-    const where = scriptName ? { scriptName } : {};
+    const normalizedScriptName = this.parseScriptName(scriptName);
+    const where = normalizedScriptName ? { scriptName: normalizedScriptName } : {};
     const executions = await this.executionRepo.find({
       where,
       order: { startedAt: 'DESC' },
@@ -99,7 +101,7 @@ export class AdminService {
 
     return {
       data: executions,
-      meta: { limit, scriptName: scriptName ?? null },
+      meta: { limit, scriptName: normalizedScriptName ?? null },
     };
   }
 
@@ -344,6 +346,20 @@ export class AdminService {
       throw new BadRequestException('limit must be a positive integer');
     }
     return Math.min(parsed, 100);
+  }
+
+  private parseScriptName(scriptName?: string): string | undefined {
+    if (scriptName == null) return undefined;
+
+    const normalized = scriptName.trim();
+    if (normalized.length === 0) return undefined;
+    if (normalized.length > ADMIN_SCRIPT_NAME_MAX_LENGTH) {
+      throw new BadRequestException(
+        `scriptName must be at most ${ADMIN_SCRIPT_NAME_MAX_LENGTH} characters`,
+      );
+    }
+
+    return normalized;
   }
 
   private toErrorMessage(error: unknown): string {

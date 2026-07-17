@@ -1,14 +1,12 @@
-// src/methods/dto/io-item.dto.ts
-import { IsIn, IsInt, IsNumber, IsOptional, IsString, Max, MaxLength, Min } from 'class-validator';
+import { IsInt, IsNumber, IsOptional, IsString, MaxLength, Max, Min } from 'class-validator';
 import { IsSafeMarkdown } from '../../common/validators/is-safe-markdown.validator';
 import {
   MAX_ITEM_QUANTITY,
   MAX_ITEM_QUANTITY_DECIMAL_PLACES,
   REASON_MAX_LENGTH,
 } from './validation.constants';
-import { TrimString } from './transforms';
 
-export class IoItemDto {
+export class RequirementItemDto {
   @IsInt()
   @Min(1)
   id: number;
@@ -22,13 +20,9 @@ export class IoItemDto {
   @Max(MAX_ITEM_QUANTITY)
   quantity: number;
 
-  @IsIn(['input', 'output'])
-  type: 'input' | 'output';
-
   @IsOptional()
-  @TrimString()
   @IsString()
   @MaxLength(REASON_MAX_LENGTH)
   @IsSafeMarkdown()
-  reason?: string | null;
+  reason?: string;
 }

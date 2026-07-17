@@ -26,6 +26,7 @@ export interface RequirementQuest {
 export interface RequirementDiary {
   name: string;
   tier: 'easy' | 'medium' | 'hard' | 'elite';
+  stage?: number;
   reason?: string;
 }
 
@@ -34,6 +35,10 @@ export interface VariantRequirements {
   levels?: RequirementLevel[];
   quests?: RequirementQuest[];
   achievement_diaries?: RequirementDiary[];
+  miniquests?: unknown;
+  minigames?: unknown;
+  events?: unknown;
+  meta?: unknown;
 }
 
 export type VariantRecommendations = VariantRequirements;
