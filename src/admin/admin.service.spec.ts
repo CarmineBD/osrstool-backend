@@ -185,4 +185,12 @@ describe('AdminService', () => {
       service.runItemsSync({ source: 'other' as 'mapping' }, 'user-1'),
     ).rejects.toBeInstanceOf(BadRequestException);
   });
+
+  it('rejects overlong scriptName filters', async () => {
+    const { service } = createService();
+
+    await expect(service.listExecutions(undefined, 'x'.repeat(161))).rejects.toBeInstanceOf(
+      BadRequestException,
+    );
+  });
 });
