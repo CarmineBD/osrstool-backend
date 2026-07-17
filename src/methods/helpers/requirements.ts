@@ -7,6 +7,20 @@ import {
 } from '../types';
 import { MethodDto } from '../dto/method.dto';
 
+function normalizeUserLevels(levels: UserInfo['levels']): Record<string, number> {
+  return Object.entries(levels).reduce(
+    (acc, [skill, level]) => {
+      acc[skill.trim().toLowerCase()] = level;
+      return acc;
+    },
+    {} as Record<string, number>,
+  );
+}
+
+function isCombatRequirementSkill(skill: string): boolean {
+  return skill.trim().toLowerCase() === 'combat';
+}
+
 export function filterMethodsByUserStats(methods: MethodDto[], userInfo: UserInfo): MethodDto[] {
   // Build a lower-cased quest map for quick lookup.
   const userQuests = Object.entries(userInfo.quests).reduce(
@@ -16,6 +30,7 @@ export function filterMethodsByUserStats(methods: MethodDto[], userInfo: UserInf
     },
     {} as Record<string, number>,
   );
+  const normalizedLevels = normalizeUserLevels(userInfo.levels);
 
   return methods.reduce<MethodDto[]>((acc, method) => {
     const validVariants = method.variants.filter((variant) => {
@@ -24,11 +39,11 @@ export function filterMethodsByUserStats(methods: MethodDto[], userInfo: UserInf
 
       if (reqLevels) {
         for (const lvl of reqLevels) {
-          if (lvl.skill === 'Combat') {
-            for (const stat of ['Strength', 'Defence', 'Attack']) {
-              if ((userInfo.levels[stat] ?? 0) < lvl.level) return false;
+          if (isCombatRequirementSkill(lvl.skill)) {
+            for (const stat of ['strength', 'defence', 'attack']) {
+              if ((normalizedLevels[stat] ?? 0) < lvl.level) return false;
             }
-          } else if ((userInfo.levels[lvl.skill] ?? 0) < lvl.level) {
+          } else if ((normalizedLevels[lvl.skill.trim().toLowerCase()] ?? 0) < lvl.level) {
             return false;
           }
         }
@@ -70,19 +85,20 @@ export function computeMissingRequirements(
 ): VariantRequirements | null {
   if (!requirements) return null;
   const missing: VariantRequirements = {};
+  const normalizedLevels = normalizeUserLevels(userInfo.levels);
 
   const { levels, quests, achievement_diaries } = requirements;
 
   if (levels) {
     const levelMissing: RequirementLevel[] = [];
     for (const lvl of levels) {
-      if (lvl.skill === 'Combat') {
-        for (const stat of ['Strength', 'Defence', 'Attack']) {
-          if ((userInfo.levels[stat] ?? 0) < lvl.level) {
+      if (isCombatRequirementSkill(lvl.skill)) {
+        for (const stat of ['strength', 'defence', 'attack']) {
+          if ((normalizedLevels[stat] ?? 0) < lvl.level) {
             levelMissing.push({ skill: stat, level: lvl.level });
           }
         }
-      } else if ((userInfo.levels[lvl.skill] ?? 0) < lvl.level) {
+      } else if ((normalizedLevels[lvl.skill.trim().toLowerCase()] ?? 0) < lvl.level) {
         levelMissing.push(lvl);
       }
     }
