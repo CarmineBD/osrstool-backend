@@ -82,6 +82,7 @@ const METHOD_TAGS_EXAMPLE = VARIANT_TAG_DEFINITIONS.map((tag) => ({
   key: tag.key,
   label: tag.label,
   severity: tag.severity,
+  description: tag.description,
 }));
 
 @ApiTags('methods')
