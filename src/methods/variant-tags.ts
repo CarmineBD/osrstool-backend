@@ -37,7 +37,23 @@ export interface VariantTagDefinition {
   key: VariantTagQueryValue;
   label: string;
   severity: 1 | 2 | 3;
+  description: string;
 }
+
+const VARIANT_TAG_DESCRIPTION_BY_QUERY_VALUE: Record<VariantTagQueryValue, string> = {
+  ge_limits: 'Some required inputs exceed Grand Exchange buy limits at the one-hour scale.',
+  high_investment_required:
+    "This method requires a high upfront investment. One hour of inputs costs more than the method's best-case hourly profit.",
+  risky_to_lose_money:
+    'This method can be profitable in the best case, but it can lose money in the worst case.',
+  not_viable:
+    'This method has extreme market impact. Operating it at the one-hour scale may take days to fully buy and sell through the market.',
+  safe: 'This method stayed above break-even over the last 24 hours.',
+  very_slow_to_buy_inputs:
+    'Buying the required inputs may take a long time because hourly demand is much higher than market volume.',
+  very_slow_to_sell_outputs:
+    'Selling the generated outputs may take a long time because hourly supply is much higher than market volume.',
+};
 
 export const VARIANT_TAG_QUERY_VALUES = Object.keys(
   VARIANT_TAG_LABEL_BY_QUERY_VALUE,
@@ -48,6 +64,7 @@ export const VARIANT_TAG_DEFINITIONS: VariantTagDefinition[] = VARIANT_TAG_QUERY
     key,
     label: VARIANT_TAG_LABEL_BY_QUERY_VALUE[key],
     severity: VARIANT_TAG_SEVERITY_BY_QUERY_VALUE[key],
+    description: VARIANT_TAG_DESCRIPTION_BY_QUERY_VALUE[key],
   }),
 );
 
@@ -67,6 +84,7 @@ const getVariantTagDefinition = (queryValue: VariantTagQueryValue): VariantTagDe
     key: queryValue,
     label: VARIANT_TAG_LABEL_BY_QUERY_VALUE[queryValue],
     severity: VARIANT_TAG_SEVERITY_BY_QUERY_VALUE[queryValue],
+    description: VARIANT_TAG_DESCRIPTION_BY_QUERY_VALUE[queryValue],
   };
 
 export const getVariantTagQueryValue = (label: string): VariantTagQueryValue | undefined =>
