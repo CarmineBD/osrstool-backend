@@ -26,6 +26,23 @@ describe('Methods (e2e)', () => {
   let app: INestApplication;
   let dataSource: DataSource;
 
+  type CreateMethodPayload = {
+    name: string;
+    icon_id: number;
+    description: string;
+    category: string;
+    enabled: boolean;
+    variants: Array<{
+      label: string;
+      icon_id: number;
+      description?: string;
+      members?: boolean;
+      requirements?: Record<string, unknown>;
+      inputs: Array<{ id: number; quantity: number; type: 'input' | 'output'; reason?: string }>;
+      outputs: Array<{ id: number; quantity: number; type: 'input' | 'output'; reason?: string }>;
+    }>;
+  };
+
   const expectUnsafeMarkdownValidationMessage = (body: { message?: unknown }): void => {
     const messages = Array.isArray(body.message)
       ? body.message.map(String)
@@ -35,7 +52,7 @@ describe('Methods (e2e)', () => {
     ).toBe(true);
   };
 
-  const buildValidCreateMethodPayload = () => ({
+  const buildValidCreateMethodPayload = (): CreateMethodPayload => ({
     name: 'Validated method',
     icon_id: 4151,
     description: 'Texto **markdown** con [link](https://example.com)',
@@ -465,6 +482,78 @@ describe('Methods (e2e)', () => {
     expect(body.data.methods[1].variants[0]).toMatchObject({
       members: false,
     });
+  });
+
+  it('GET /methods?ignoredTags=safe&variants=all excludes variants that contain ignored tags', async () => {
+    const methodRepo = dataSource.getRepository(Method);
+    const variantRepo = dataSource.getRepository(MethodVariant);
+    const historyRepo = dataSource.getRepository(VariantHistory);
+    const seed = buildMethodFixture();
+
+    const savedMethod = await methodRepo.save({
+      name: seed.name,
+      slug: seed.slug,
+      description: seed.description,
+      category: seed.category,
+    });
+
+    const [variantA, variantB] = seed.variants;
+    const savedVariantA = await variantRepo.save({
+      label: variantA.label,
+      slug: variantA.slug,
+      description: variantA.description,
+      xpHour: variantA.xpHour,
+      clickIntensity: variantA.clickIntensity,
+      afkiness: variantA.afkiness,
+      riskLevel: variantA.riskLevel,
+      requirements: variantA.requirements,
+      recommendations: variantA.recommendations,
+      wilderness: variantA.wilderness,
+      actionsPerHour: variantA.actionsPerHour,
+      method: savedMethod,
+    });
+
+    const savedVariantB = await variantRepo.save({
+      label: variantB.label,
+      slug: variantB.slug,
+      description: variantB.description,
+      xpHour: variantB.xpHour,
+      clickIntensity: variantB.clickIntensity,
+      afkiness: variantB.afkiness,
+      riskLevel: variantB.riskLevel,
+      requirements: variantB.requirements,
+      recommendations: variantB.recommendations,
+      wilderness: variantB.wilderness,
+      actionsPerHour: variantB.actionsPerHour,
+      method: savedMethod,
+    });
+
+    await historyRepo.save(
+      historyRepo.create({
+        variant: savedVariantB,
+        timestamp: new Date(),
+        lowProfit: 100,
+        highProfit: 200,
+      }),
+    );
+
+    mockRedisProfits({
+      [savedMethod.id]: {
+        [savedVariantA.id]: { low: 50, high: 150 },
+        [savedVariantB.id]: { low: 100, high: 200 },
+      },
+    });
+
+    const server = app.getHttpServer() as unknown as Server;
+    const res = await request(server).get('/methods?ignoredTags=safe&variants=all').expect(200);
+
+    const body = res.body as {
+      data: { methods: Array<{ variants: Array<{ id: string; tags: Array<{ label: string }> }> }> };
+    };
+
+    expect(body.data.methods).toHaveLength(1);
+    expect(body.data.methods[0].variants[0].id).toBe(savedVariantA.id);
+    expect(body.data.methods[0].variants[0].tags.map((tag) => tag.label)).not.toContain('Safe');
   });
 
   it('GET /methods/trending-profit returns methods ordered by profit growth', async () => {
