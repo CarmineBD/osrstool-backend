@@ -14,7 +14,6 @@ import { Method } from './entities/method.entity';
 import { MethodVariant } from './entities/variant.entity';
 import { VariantIoItem } from './entities/io-item.entity';
 import { VariantHistory } from './entities/variant-history.entity';
-import { MethodLike } from './entities/method-like.entity';
 import { CreateMethodDto } from './dto/create-method.dto';
 import { UpdateMethodDto } from './dto/update-method.dto';
 import { UpdateMethodBasicDto } from './dto/update-method-basic.dto';
@@ -226,8 +225,6 @@ interface MethodDetailsWithProfit {
   description?: string;
   category?: string;
   enabled: boolean;
-  likes: number;
-  likedByMe?: boolean;
   variants: Array<Record<string, unknown>>;
 }
 
@@ -252,6 +249,8 @@ interface SkillSummaryVariant {
   outputMarketImpactSlow: number;
   marketImpactInstant: number;
   marketImpactSlow: number;
+  likes: number;
+  likedByMe?: boolean;
 }
 
 interface SkillSummaryMethod {
@@ -263,8 +262,6 @@ interface SkillSummaryMethod {
   enabled: boolean;
   variants: SkillSummaryVariant[];
   variantCount: number;
-  likes: number;
-  likedByMe?: boolean;
 }
 
 interface SkillSummaryCandidate {
@@ -328,8 +325,9 @@ export class MethodsService implements OnModuleDestroy {
     @InjectRepository(VariantHistory)
     private readonly historyRepo: Repository<VariantHistory>,
 
-    @InjectRepository(MethodLike)
-    private readonly methodLikeRepo: Repository<MethodLike>,
+    // Kept only to preserve constructor compatibility in older tests/mocks.
+    @InjectRepository(MethodVariant)
+    private readonly _legacyVariantLikesRepo: Repository<MethodVariant>,
 
     @InjectRepository(User)
     private readonly userRepo: Repository<User>,
@@ -625,11 +623,13 @@ export class MethodsService implements OnModuleDestroy {
     return this.verifySupabaseToken(authorization);
   }
 
-  private async ensureMethodExists(methodId: string): Promise<void> {
-    const methodExists = await this.methodRepo.exists({ where: { id: methodId } });
-    if (!methodExists) {
-      throw new NotFoundException(`Method ${methodId} not found`);
+  private async ensureVariantExists(variantId: string): Promise<MethodVariant> {
+    const variant = await this.variantRepo.findOne({ where: { id: variantId } });
+    if (!variant) {
+      throw new NotFoundException(`Method variant ${variantId} not found`);
     }
+
+    return variant;
   }
 
   private async ensureUserExists(userId: string, email?: string | null): Promise<void> {
@@ -654,55 +654,43 @@ export class MethodsService implements OnModuleDestroy {
     }
   }
 
-  private async getLikesCountMap(methodIds: string[]): Promise<Record<string, number>> {
-    if (methodIds.length === 0) return {};
-
-    const rows = await this.methodLikeRepo
-      .createQueryBuilder('method_like')
-      .select('method_like.method_id', 'methodId')
-      .addSelect('COUNT(*)', 'likesCount')
-      .where('method_like.method_id IN (:...methodIds)', { methodIds })
-      .groupBy('method_like.method_id')
-      .getRawMany<{ methodId: string; likesCount: string }>();
-
-    return rows.reduce<Record<string, number>>((acc, row) => {
-      acc[row.methodId] = Number(row.likesCount);
-      return acc;
-    }, {});
+  private getVariantLikesCount(variant: { likesCount?: number | null }): number {
+    return variant.likesCount ?? 0;
   }
 
-  private async getLikedMethodIdsByUser(userId: string, methodIds: string[]): Promise<Set<string>> {
-    if (methodIds.length === 0) return new Set<string>();
-
-    const rows = await this.methodLikeRepo.find({
-      where: {
-        userId,
-        methodId: In(methodIds),
-      },
-      select: {
-        methodId: true,
-      },
-    });
-
-    return new Set(rows.map((row) => row.methodId));
+  private isVariantLikedByUser(
+    variant: { likedUserIds?: string[] | null },
+    userId?: string,
+  ): boolean {
+    if (!userId) return false;
+    return (variant.likedUserIds ?? []).includes(userId);
   }
 
-  async likeMethod(methodId: string, userId: string, email?: string | null): Promise<void> {
-    await this.ensureMethodExists(methodId);
+  async likeVariant(variantId: string, userId: string, email?: string | null): Promise<void> {
+    const variant = await this.ensureVariantExists(variantId);
     await this.ensureUserExists(userId, email);
 
-    await this.methodLikeRepo
-      .createQueryBuilder()
-      .insert()
-      .into(MethodLike)
-      .values({ methodId, userId, createdAt: new Date() })
-      .orIgnore()
-      .execute();
+    const likedUserIds = variant.likedUserIds ?? [];
+    if (likedUserIds.includes(userId)) {
+      return;
+    }
+
+    variant.likedUserIds = [...likedUserIds, userId];
+    variant.likesCount = this.getVariantLikesCount(variant) + 1;
+    await this.variantRepo.save(variant);
   }
 
-  async unlikeMethod(methodId: string, userId: string): Promise<void> {
-    await this.ensureMethodExists(methodId);
-    await this.methodLikeRepo.delete({ methodId, userId });
+  async unlikeVariant(variantId: string, userId: string): Promise<void> {
+    const variant = await this.ensureVariantExists(variantId);
+    const likedUserIds = variant.likedUserIds ?? [];
+
+    if (!likedUserIds.includes(userId)) {
+      return;
+    }
+
+    variant.likedUserIds = likedUserIds.filter((likedUserId) => likedUserId !== userId);
+    variant.likesCount = Math.max(this.getVariantLikesCount(variant) - 1, 0);
+    await this.variantRepo.save(variant);
   }
 
   private async assertSuperAdmin(
@@ -1152,7 +1140,7 @@ export class MethodsService implements OnModuleDestroy {
       this.getItemVolumes24h(itemIds),
     ]);
 
-    let methods = methodsToProcess
+    const methods = methodsToProcess
       .map((method) => {
         const methodProfits = allProfits[method.id] ?? {};
         const variants: SkillSummaryVariant[] = method.variants.map((variant) => {
@@ -1184,6 +1172,10 @@ export class MethodsService implements OnModuleDestroy {
             outputMarketImpactSlow: marketImpact.outputMarketImpactSlow,
             marketImpactInstant: marketImpact.marketImpactInstant,
             marketImpactSlow: marketImpact.marketImpactSlow,
+            likes: this.getVariantLikesCount(variant),
+            ...(likedByUserId
+              ? { likedByMe: this.isVariantLikedByUser(variant, likedByUserId) }
+              : {}),
           };
         });
 
@@ -1195,18 +1187,6 @@ export class MethodsService implements OnModuleDestroy {
         };
       })
       .filter((method) => method.variants.length > 0) as SkillSummaryMethod[];
-
-    const methodIds = methods.map((method) => method.id);
-    const likesCountMap = await this.getLikesCountMap(methodIds);
-    const likedMethodIds = likedByUserId
-      ? await this.getLikedMethodIdsByUser(likedByUserId, methodIds)
-      : new Set<string>();
-
-    methods = methods.map((method) => ({
-      ...method,
-      likes: likesCountMap[method.id] ?? 0,
-      ...(likedByUserId ? { likedByMe: likedMethodIds.has(method.id) } : {}),
-    }));
 
     return methods;
   }
@@ -2501,6 +2481,10 @@ export class MethodsService implements OnModuleDestroy {
             marketImpactInstant: marketImpact.marketImpactInstant,
             marketImpactSlow: marketImpact.marketImpactSlow,
             profitGrowth: this.toPublicProfitGrowthMetrics(profitGrowthMetrics),
+            likes: this.getVariantLikesCount(variant),
+            ...(likeOptions.likedByUserId
+              ? { likedByMe: this.isVariantLikedByUser(variant, likeOptions.likedByUserId) }
+              : {}),
           };
 
           if (selectedSkill) {
@@ -2549,6 +2533,10 @@ export class MethodsService implements OnModuleDestroy {
           return true;
         });
 
+        if (likeOptions.onlyLikedByMe) {
+          enrichedVariants = enrichedVariants.filter((variant) => variant.likedByMe === true);
+        }
+
         return { ...method, variants: enrichedVariants };
       })
       .filter((m) => {
@@ -2586,24 +2574,6 @@ export class MethodsService implements OnModuleDestroy {
       });
     }
 
-    const methodIds = enrichedMethods.map((method) => method.id);
-    const likesCountMap = await this.getLikesCountMap(methodIds);
-    const likedMethodIds = likeOptions.likedByUserId
-      ? await this.getLikedMethodIdsByUser(likeOptions.likedByUserId, methodIds)
-      : new Set<string>();
-
-    enrichedMethods = enrichedMethods.map((method) => ({
-      ...method,
-      likes: likesCountMap[method.id] ?? 0,
-      ...(likeOptions.likedByUserId ? { likedByMe: likedMethodIds.has(method.id) } : {}),
-    }));
-
-    if (likeOptions.onlyLikedByMe) {
-      enrichedMethods = enrichedMethods.filter((method) =>
-        likeOptions.likedByUserId ? likedMethodIds.has(method.id) : false,
-      );
-    }
-
     enrichedMethods.sort((a, b) => compareGrowthDesc(a.variants[0], b.variants[0]));
 
     const total = enrichedMethods.length;
@@ -2622,7 +2592,7 @@ export class MethodsService implements OnModuleDestroy {
     likeOptions: ListLikeOptions = {},
     variantsMode: VariantsMode = 'best',
   ): Promise<{ data: any[]; total: number }> {
-    // Obtenemos todos los métodos para poder ordenarlos por profit posteriormente
+    // Obtenemos todos los mÃƒÂ©todos para poder ordenarlos por profit posteriormente
     const allEntities = await this.methodRepo.find({
       where: { enabled: filters.enabled },
       relations: ['variants', 'variants.ioItems'],
@@ -2633,12 +2603,12 @@ export class MethodsService implements OnModuleDestroy {
     }, {});
     let methodsToProcess = allEntities.map((m) => this.toDto(m));
 
-    // Si se pasó el objeto userLevels, filtramos los métodos antes de enriquecerlos
+    // Si se pasÃƒÂ³ el objeto userLevels, filtramos los mÃƒÂ©todos antes de enriquecerlos
     if (userInfo) {
       methodsToProcess = filterMethodsByUserStats(methodsToProcess, userInfo);
     }
 
-    // Enriquecemos la lista (filtrada o no) con la información de profit proveniente de Redis
+    // Enriquecemos la lista (filtrada o no) con la informaciÃƒÂ³n de profit proveniente de Redis
     const itemIds = this.collectItemIdsFromMethods(methodsToProcess);
     const variantIds = methodsToProcess.flatMap((method) =>
       method.variants.map((variant) => variant.id),
@@ -2714,6 +2684,10 @@ export class MethodsService implements OnModuleDestroy {
               marketImpactSlow: marketImpact.marketImpactSlow,
               safety24h: safety24hByVariantId[variant.id] ?? null,
             }),
+            likes: this.getVariantLikesCount(variant),
+            ...(likeOptions.likedByUserId
+              ? { likedByMe: this.isVariantLikedByUser(variant, likeOptions.likedByUserId) }
+              : {}),
           };
 
           if (selectedSkill) {
@@ -2762,6 +2736,10 @@ export class MethodsService implements OnModuleDestroy {
           return true;
         });
 
+        if (likeOptions.onlyLikedByMe) {
+          enrichedVariants = enrichedVariants.filter((variant) => variant.likedByMe === true);
+        }
+
         return { ...method, variants: enrichedVariants };
       })
       .filter((m) => {
@@ -2794,25 +2772,7 @@ export class MethodsService implements OnModuleDestroy {
       });
     }
 
-    const methodIds = enrichedMethods.map((method) => method.id);
-    const likesCountMap = await this.getLikesCountMap(methodIds);
-    const likedMethodIds = likeOptions.likedByUserId
-      ? await this.getLikedMethodIdsByUser(likeOptions.likedByUserId, methodIds)
-      : new Set<string>();
-
-    enrichedMethods = enrichedMethods.map((method) => ({
-      ...method,
-      likes: likesCountMap[method.id] ?? 0,
-      ...(likeOptions.likedByUserId ? { likedByMe: likedMethodIds.has(method.id) } : {}),
-    }));
-
-    if (likeOptions.onlyLikedByMe) {
-      enrichedMethods = enrichedMethods.filter((method) =>
-        likeOptions.likedByUserId ? likedMethodIds.has(method.id) : false,
-      );
-    }
-
-    // Ordenamiento según los parámetros recibidos
+    // Ordenamiento segÃƒÂºn los parÃƒÂ¡metros recibidos
     const comparator = (a: number, b: number) => (sort.order === 'asc' ? a - b : b - a);
 
     const getXpSum = (v: { xpHour?: XpHour | null }): number =>
@@ -2821,7 +2781,6 @@ export class MethodsService implements OnModuleDestroy {
     enrichedMethods.sort(
       (
         a: {
-          likes?: number;
           variants: Array<{
             clickIntensity?: number | null;
             afkiness?: number | null;
@@ -2829,10 +2788,10 @@ export class MethodsService implements OnModuleDestroy {
             highProfit?: number | null;
             gpPerXpLow?: number | null;
             gpPerXpHigh?: number | null;
+            likes?: number | null;
           }>;
         },
         b: {
-          likes?: number;
           variants: Array<{
             clickIntensity?: number | null;
             afkiness?: number | null;
@@ -2840,6 +2799,7 @@ export class MethodsService implements OnModuleDestroy {
             highProfit?: number | null;
             gpPerXpLow?: number | null;
             gpPerXpHigh?: number | null;
+            likes?: number | null;
           }>;
         },
       ) => {
@@ -2854,8 +2814,8 @@ export class MethodsService implements OnModuleDestroy {
             // For xpHour sorting, use the total experience sum of the variant.
             return comparator(getXpSum(va), getXpSum(vb));
           case 'likes': {
-            const likesA = a.likes ?? 0;
-            const likesB = b.likes ?? 0;
+            const likesA = va.likes ?? 0;
+            const likesB = vb.likes ?? 0;
             return comparator(likesA, likesB);
           }
           case 'gpPerXpLow':
@@ -2973,7 +2933,7 @@ export class MethodsService implements OnModuleDestroy {
       () =>
         Promise.all(
           methodDto.variants.map(async (variant) => {
-            // Si solo hay una variante se utiliza el id del método; de lo contrario se usa una clave compuesta
+            // Si solo hay una variante se utiliza el id del mÃƒÂ©todo; de lo contrario se usa una clave compuesta
             const profitKey = variant.id;
             const profit = allProfits[profitKey] ?? { low: 0, high: 0 };
             const marketImpact = this.calculateVariantMarketImpact(
@@ -2992,9 +2952,14 @@ export class MethodsService implements OnModuleDestroy {
             const missingRequirements = userInfo
               ? computeMissingRequirements(variant.requirements ?? null, userInfo)
               : null;
+            const {
+              likedUserIds: _likedUserIds,
+              likesCount: _likesCount,
+              ...variantWithoutLikeData
+            } = variant;
 
             return {
-              ...variant,
+              ...variantWithoutLikeData,
               // Se calculan campos a partir de Redis
               clickIntensity: variant.clickIntensity,
               afkiness: variant.afkiness,
@@ -3010,6 +2975,10 @@ export class MethodsService implements OnModuleDestroy {
               outputMarketImpactSlow: marketImpact.outputMarketImpactSlow,
               marketImpactInstant: marketImpact.marketImpactInstant,
               marketImpactSlow: marketImpact.marketImpactSlow,
+              likes: this.getVariantLikesCount(variant),
+              ...(likedByUserId
+                ? { likedByMe: this.isVariantLikedByUser(variant, likedByUserId) }
+                : {}),
               tags: buildVariantTags({
                 variant,
                 pricesByItem,
@@ -3033,20 +3002,6 @@ export class MethodsService implements OnModuleDestroy {
           }),
         ),
     );
-    const [likes, likedByMe] = await this.timeMethodDetailsStep(
-      perfLogsEnabled,
-      scope,
-      'loadLikes',
-      () =>
-        Promise.all([
-          this.methodLikeRepo.count({ where: { methodId: methodDto.id } }),
-          likedByUserId
-            ? this.methodLikeRepo.exists({
-                where: { methodId: methodDto.id, userId: likedByUserId },
-              })
-            : Promise.resolve(false),
-        ]),
-    );
 
     if (perfLogsEnabled) {
       this.logger.log(
@@ -3062,8 +3017,6 @@ export class MethodsService implements OnModuleDestroy {
       description: methodDto.description,
       category: methodDto.category,
       enabled: methodDto.enabled,
-      likes,
-      ...(likedByUserId ? { likedByMe } : {}),
       variants: enrichedVariants,
     };
   }
