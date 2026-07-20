@@ -17,6 +17,8 @@ export interface VariantDto {
   xpHour?: XpHour | null;
   wilderness?: boolean;
   members?: boolean;
+  likesCount?: number;
+  likedUserIds?: string[];
 }
 
 export class MethodDto {
@@ -77,6 +79,8 @@ export class MethodDto {
       recommendations: VariantRecommendations | null;
       wilderness: boolean;
       members?: boolean;
+      likesCount?: number;
+      likedUserIds?: string[];
     }>;
   }): MethodDto {
     const variants = e.variants.map((variant) => {
@@ -111,6 +115,8 @@ export class MethodDto {
         recommendations: variant.recommendations,
         wilderness: variant.wilderness,
         members: variant.members ?? false,
+        likesCount: variant.likesCount ?? 0,
+        likedUserIds: variant.likedUserIds ?? [],
       };
     });
     return new MethodDto(

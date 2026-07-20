@@ -5,10 +5,10 @@ import { AuthService } from './auth.service';
 import { SupabaseAuthGuard } from './supabase-auth.guard';
 import { SuperAdminGuard } from './super-admin.guard';
 import { User } from './entities/user.entity';
-import { MethodLike } from '../methods/entities/method-like.entity';
+import { MethodVariant } from '../methods/entities/variant.entity';
 
 @Module({
-  imports: [TypeOrmModule.forFeature([User, MethodLike])],
+  imports: [TypeOrmModule.forFeature([User, MethodVariant])],
   controllers: [AuthController],
   providers: [SupabaseAuthGuard, SuperAdminGuard, AuthService],
   exports: [SupabaseAuthGuard, SuperAdminGuard, AuthService],
