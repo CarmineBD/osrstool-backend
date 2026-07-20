@@ -185,13 +185,33 @@ describe('MethodsController list endpoint', () => {
 
   it('returns the variant tags catalog from the service', () => {
     const svc: { listVariantTagsResponse: jest.Mock } = {
-      listVariantTagsResponse: jest.fn().mockReturnValue({ data: { tags: [{ key: 'safe' }] } }),
+      listVariantTagsResponse: jest.fn().mockReturnValue({
+        data: {
+          tags: [
+            {
+              key: 'safe',
+              label: 'Safe',
+              severity: 1,
+              description: 'This method stayed above break-even over the last 24 hours.',
+            },
+          ],
+        },
+      }),
     };
 
     const controller = new MethodsController(svc as unknown as MethodsService);
 
     expect(controller.listVariantTags()).toEqual({
-      data: { tags: [{ key: 'safe' }] },
+      data: {
+        tags: [
+          {
+            key: 'safe',
+            label: 'Safe',
+            severity: 1,
+            description: 'This method stayed above break-even over the last 24 hours.',
+          },
+        ],
+      },
     });
     expect(svc.listVariantTagsResponse).toHaveBeenCalledTimes(1);
   });
