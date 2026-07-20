@@ -3,15 +3,15 @@ import { InjectRepository } from '@nestjs/typeorm';
 import { Repository } from 'typeorm';
 import type { AuthenticatedUser } from './auth.types';
 import { User } from './entities/user.entity';
-import { MethodLike } from '../methods/entities/method-like.entity';
+import { MethodVariant } from '../methods/entities/variant.entity';
 
 @Injectable()
 export class AuthService {
   constructor(
     @InjectRepository(User)
     private readonly userRepo: Repository<User>,
-    @InjectRepository(MethodLike)
-    private readonly methodLikeRepo: Repository<MethodLike>,
+    @InjectRepository(MethodVariant)
+    private readonly variantRepo: Repository<MethodVariant>,
   ) {}
 
   async getOrCreateUser(authUser: Pick<AuthenticatedUser, 'id' | 'email'>): Promise<User> {
@@ -38,6 +38,9 @@ export class AuthService {
   }
 
   async getGivenLikesCount(userId: string): Promise<number> {
-    return this.methodLikeRepo.count({ where: { userId } });
+    return this.variantRepo
+      .createQueryBuilder('method_variant')
+      .where(':userId = ANY(method_variant.liked_user_ids)', { userId })
+      .getCount();
   }
 }

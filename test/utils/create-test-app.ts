@@ -15,7 +15,6 @@ import { VariantHistoryDaily } from '../../src/methods/entities/variant-history-
 import { VariantSnapshot } from '../../src/methods/entities/variant-snapshot.entity';
 import { VariantIoItemSnapshot } from '../../src/methods/entities/io-item-snapshot.entity';
 import { User } from '../../src/auth/entities/user.entity';
-import { MethodLike } from '../../src/methods/entities/method-like.entity';
 import { ItemVolumeBucket } from '../../src/item-volumes/entities/item-volume-bucket.entity';
 import { CatalogsModule } from '../../src/catalogs/catalogs.module';
 import { AchievementDiary } from '../../src/catalogs/entities/achievement-diary.entity';
@@ -74,7 +73,6 @@ export const createTestApp = async (): Promise<TestApp> => {
           VariantSnapshot,
           VariantIoItemSnapshot,
           User,
-          MethodLike,
           ItemVolumeBucket,
           AchievementDiary,
           Quest,

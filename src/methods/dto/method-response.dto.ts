@@ -29,6 +29,8 @@ export class VariantResponseDto {
   outputMarketImpactSlow?: number;
   marketImpactInstant?: number;
   marketImpactSlow?: number;
+  likes?: number;
+  likedByMe?: boolean;
   tags?: VariantTagResponseDto[];
   inputs: IoItemDto[];
   outputs: IoItemDto[];

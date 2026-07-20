@@ -44,8 +44,6 @@ const METHOD_EXAMPLE = {
   description: 'Cook karambwans for profit.',
   category: 'Cooking',
   enabled: true,
-  likes: 120,
-  likedByMe: false,
   variants: [
     {
       id: 'v_456',
@@ -64,6 +62,8 @@ const METHOD_EXAMPLE = {
       outputMarketImpactSlow: 0.38,
       marketImpactInstant: 0.32,
       marketImpactSlow: 0.21,
+      likes: 120,
+      likedByMe: false,
       tags: [
         {
           label: 'Safe',
@@ -155,7 +155,8 @@ export class MethodsController {
   @ApiQuery({
     name: 'likedByMe',
     required: false,
-    description: 'true to return only methods liked by the authenticated user',
+    description:
+      'true to return only methods with at least one visible variant liked by the authenticated user',
   })
   @ApiQuery({
     name: 'variants',
@@ -316,7 +317,8 @@ export class MethodsController {
   @ApiQuery({
     name: 'likedByMe',
     required: false,
-    description: 'true to return only methods liked by the authenticated user',
+    description:
+      'true to return only methods with at least one visible variant liked by the authenticated user',
   })
   @ApiQuery({
     name: 'variants',
@@ -414,39 +416,40 @@ export class MethodsController {
     });
   }
 
-  @Post(':methodId/like')
+  @Post('variant/:variantId/like')
   @UseGuards(SupabaseAuthGuard)
   @ApiBearerAuth()
   @ApiOperation({
-    summary: 'Like method',
-    description: 'Creates a like for the authenticated user. Idempotent if already liked.',
+    summary: 'Like method variant',
+    description:
+      'Creates a like for the authenticated user on a method variant. Idempotent if already liked.',
   })
   @ApiOkResponse({ description: 'Like created', schema: { example: { data: { liked: true } } } })
   @ApiUnauthorizedResponse({ description: 'Missing, invalid, or expired bearer token' })
-  async likeMethod(@Param('methodId') methodId: string, @Req() req: RequestWithUser) {
+  async likeVariant(@Param('variantId') variantId: string, @Req() req: RequestWithUser) {
     if (!req.user?.id) {
       throw new ForbiddenException('Authenticated user id is required');
     }
 
-    await this.svc.likeMethod(methodId, req.user.id, req.user.email);
+    await this.svc.likeVariant(variantId, req.user.id, req.user.email);
     return { data: { liked: true } };
   }
 
-  @Delete(':methodId/like')
+  @Delete('variant/:variantId/like')
   @UseGuards(SupabaseAuthGuard)
   @ApiBearerAuth()
   @ApiOperation({
-    summary: 'Unlike method',
-    description: 'Removes the like for the authenticated user.',
+    summary: 'Unlike method variant',
+    description: 'Removes the like for the authenticated user on a method variant.',
   })
   @ApiOkResponse({ description: 'Like removed', schema: { example: { data: { liked: false } } } })
   @ApiUnauthorizedResponse({ description: 'Missing, invalid, or expired bearer token' })
-  async unlikeMethod(@Param('methodId') methodId: string, @Req() req: RequestWithUser) {
+  async unlikeVariant(@Param('variantId') variantId: string, @Req() req: RequestWithUser) {
     if (!req.user?.id) {
       throw new ForbiddenException('Authenticated user id is required');
     }
 
-    await this.svc.unlikeMethod(methodId, req.user.id);
+    await this.svc.unlikeVariant(variantId, req.user.id);
     return { data: { liked: false } };
   }
 

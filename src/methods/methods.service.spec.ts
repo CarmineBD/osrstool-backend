@@ -4,7 +4,6 @@ import { MethodVariant } from './entities/variant.entity';
 import { Repository } from 'typeorm';
 import { VariantIoItem } from './entities/io-item.entity';
 import { VariantHistory } from './entities/variant-history.entity';
-import { MethodLike } from './entities/method-like.entity';
 import { VariantSnapshotService } from '../variant-snapshots/variant-snapshot.service';
 import { RuneScapeApiService } from './RuneScapeApiService';
 import { buildItemFixture, buildMethodFixture } from '../testing/fixtures';
@@ -26,25 +25,8 @@ jest.mock('ioredis', () => ({
   default: jest.fn().mockImplementation(() => ({ call, quit })),
 }));
 
-const createMethodLikeRepo = (
-  likeCountRows: Array<{ methodId: string; likesCount: string }> = [],
-  likedMethodIds: string[] = [],
-): Repository<MethodLike> => {
-  const queryBuilder = {
-    select: jest.fn().mockReturnThis(),
-    addSelect: jest.fn().mockReturnThis(),
-    where: jest.fn().mockReturnThis(),
-    groupBy: jest.fn().mockReturnThis(),
-    getRawMany: jest.fn().mockResolvedValue(likeCountRows),
-  };
-
-  return {
-    createQueryBuilder: jest.fn().mockReturnValue(queryBuilder),
-    find: jest
-      .fn()
-      .mockResolvedValue(likedMethodIds.map((methodId) => ({ methodId }) as MethodLike)),
-  } as unknown as Repository<MethodLike>;
-};
+const createMethodLikeRepo = (): Repository<MethodVariant> =>
+  ({}) as unknown as Repository<MethodVariant>;
 
 describe('MethodsService variantCount', () => {
   beforeEach(() => {
@@ -1172,6 +1154,10 @@ describe('MethodsService variantCount', () => {
     methodOne.id = 'm1';
     methodOne.variants[0].id = 'm1v1';
     methodOne.variants[1].id = 'm1v2';
+    methodOne.variants[0].likesCount = 1;
+    methodOne.variants[0].likedUserIds = [];
+    methodOne.variants[1].likesCount = 0;
+    methodOne.variants[1].likedUserIds = [];
 
     const methodTwo = buildMethodFixture();
     methodTwo.id = 'm2';
@@ -1179,6 +1165,10 @@ describe('MethodsService variantCount', () => {
     methodTwo.slug = 'method-two';
     methodTwo.variants[0].id = 'm2v1';
     methodTwo.variants[1].id = 'm2v2';
+    methodTwo.variants[0].likesCount = 5;
+    methodTwo.variants[0].likedUserIds = ['user-1'];
+    methodTwo.variants[1].likesCount = 0;
+    methodTwo.variants[1].likedUserIds = [];
 
     const methodRepo = {
       find: jest.fn().mockResolvedValue([methodOne, methodTwo]),
@@ -1189,13 +1179,7 @@ describe('MethodsService variantCount', () => {
       {} as Repository<MethodVariant>,
       {} as Repository<VariantIoItem>,
       {} as Repository<VariantHistory>,
-      createMethodLikeRepo(
-        [
-          { methodId: 'm1', likesCount: '1' },
-          { methodId: 'm2', likesCount: '5' },
-        ],
-        ['m2'],
-      ),
+      createMethodLikeRepo(),
       {} as Repository<User>,
       {} as VariantSnapshotService,
       {} as RuneScapeApiService,
@@ -1227,20 +1211,21 @@ describe('MethodsService variantCount', () => {
       authorization: 'Bearer token',
     })) as {
       data: {
-        methods: Array<{ id: string; likes: number; likedByMe: boolean }>;
+        methods: Array<{
+          id: string;
+          variants: Array<{ id: string; likes: number; likedByMe: boolean }>;
+        }>;
       };
     };
 
     expect(result.data.methods).toHaveLength(2);
     expect(result.data.methods[0]).toMatchObject({
       id: 'm2',
-      likes: 5,
-      likedByMe: true,
+      variants: [{ id: 'm2v1', likes: 5, likedByMe: true }],
     });
     expect(result.data.methods[1]).toMatchObject({
       id: 'm1',
-      likes: 1,
-      likedByMe: false,
+      variants: [{ id: 'm1v1', likes: 1, likedByMe: false }],
     });
   });
 
@@ -1563,10 +1548,7 @@ describe('MethodsService variantCount', () => {
       query: jest.fn().mockResolvedValue([]),
     } as unknown as Repository<VariantHistory>;
 
-    const methodLikeRepo = {
-      count: jest.fn().mockResolvedValue(0),
-      exists: jest.fn().mockResolvedValue(false),
-    } as unknown as Repository<MethodLike>;
+    const methodLikeRepo = {} as unknown as Repository<MethodVariant>;
 
     const service = new MethodsService(
       methodRepo,
@@ -1627,7 +1609,6 @@ describe('MethodsService variantCount', () => {
       id: 'm1',
       enabled: false,
       variants: [],
-      likes: 0,
       name: 'Method 1',
       slug: 'method-1',
     };
@@ -1667,7 +1648,6 @@ describe('MethodsService variantCount', () => {
       id: 'm1',
       enabled: false,
       variants: [],
-      likes: 0,
       name: 'Method 1',
       slug: 'method-1',
     };

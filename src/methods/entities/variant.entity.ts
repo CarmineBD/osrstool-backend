@@ -37,7 +37,7 @@ export class MethodVariant {
   @Column({ name: 'icon_id', type: 'int', nullable: true })
   iconId?: number | null;
 
-  // Aquí forzamos que xpHour se guarde/lea de la columna xp_hour
+  // AquÃƒÂ­ forzamos que xpHour se guarde/lea de la columna xp_hour
   @Column({
     name: 'xp_hour',
     type: 'jsonb',
@@ -73,6 +73,17 @@ export class MethodVariant {
     nullable: true,
   })
   actionsPerHour: number;
+
+  @Column({ name: 'likes_count', type: 'int', default: 0 })
+  likesCount?: number;
+
+  @Column({
+    name: 'liked_user_ids',
+    type: 'text',
+    array: true,
+    default: () => "'{}'",
+  })
+  likedUserIds?: string[];
 
   @CreateDateColumn({ name: 'created_at' })
   createdAt: Date;
