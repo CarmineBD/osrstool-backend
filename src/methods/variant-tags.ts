@@ -11,6 +11,67 @@ const decimalFormatter = new Intl.NumberFormat('en-US', {
   maximumFractionDigits: 1,
 });
 
+const VARIANT_TAG_LABEL_BY_QUERY_VALUE = {
+  ge_limits: 'GE limits',
+  high_investment_required: 'High investment required',
+  risky_to_lose_money: 'Risky to lose money',
+  not_viable: 'Not viable',
+  safe: 'Safe',
+  very_slow_to_buy_inputs: 'Very Slow to buy inputs',
+  very_slow_to_sell_outputs: 'Very Slow to sell outputs',
+} as const;
+
+export type VariantTagQueryValue = keyof typeof VARIANT_TAG_LABEL_BY_QUERY_VALUE;
+
+const VARIANT_TAG_SEVERITY_BY_QUERY_VALUE: Record<VariantTagQueryValue, 1 | 2 | 3> = {
+  ge_limits: 2,
+  high_investment_required: 2,
+  risky_to_lose_money: 3,
+  not_viable: 3,
+  safe: 1,
+  very_slow_to_buy_inputs: 2,
+  very_slow_to_sell_outputs: 2,
+};
+
+export interface VariantTagDefinition {
+  key: VariantTagQueryValue;
+  label: string;
+  severity: 1 | 2 | 3;
+}
+
+export const VARIANT_TAG_QUERY_VALUES = Object.keys(
+  VARIANT_TAG_LABEL_BY_QUERY_VALUE,
+) as VariantTagQueryValue[];
+
+export const VARIANT_TAG_DEFINITIONS: VariantTagDefinition[] = VARIANT_TAG_QUERY_VALUES.map(
+  (key) => ({
+    key,
+    label: VARIANT_TAG_LABEL_BY_QUERY_VALUE[key],
+    severity: VARIANT_TAG_SEVERITY_BY_QUERY_VALUE[key],
+  }),
+);
+
+const VARIANT_TAG_DEFINITION_BY_QUERY_VALUE = new Map<VariantTagQueryValue, VariantTagDefinition>(
+  VARIANT_TAG_DEFINITIONS.map((definition) => [definition.key, definition]),
+);
+
+const VARIANT_TAG_QUERY_VALUE_BY_LABEL = new Map<string, VariantTagQueryValue>(
+  Object.entries(VARIANT_TAG_LABEL_BY_QUERY_VALUE).map(([queryValue, label]) => [
+    label,
+    queryValue as VariantTagQueryValue,
+  ]),
+);
+
+const getVariantTagDefinition = (queryValue: VariantTagQueryValue): VariantTagDefinition =>
+  VARIANT_TAG_DEFINITION_BY_QUERY_VALUE.get(queryValue) ?? {
+    key: queryValue,
+    label: VARIANT_TAG_LABEL_BY_QUERY_VALUE[queryValue],
+    severity: VARIANT_TAG_SEVERITY_BY_QUERY_VALUE[queryValue],
+  };
+
+export const getVariantTagQueryValue = (label: string): VariantTagQueryValue | undefined =>
+  VARIANT_TAG_QUERY_VALUE_BY_LABEL.get(label);
+
 export interface VariantTag {
   label: string;
   description: string;
@@ -226,9 +287,10 @@ export const buildVariantTags = ({
     .filter((entry): entry is NonNullable<typeof entry> => entry != null);
 
   if (geLimitedInputs.length > 0) {
+    const tagDefinition = getVariantTagDefinition('ge_limits');
     tags.push({
-      label: 'GE limits',
-      severity: 2,
+      label: tagDefinition.label,
+      severity: tagDefinition.severity,
       description: [
         'Some required inputs exceed Grand Exchange buy limits.',
         ...geLimitedInputs.map(
@@ -253,9 +315,10 @@ export const buildVariantTags = ({
     Number.isFinite(highProfit) &&
     totalInputCost > highProfit
   ) {
+    const tagDefinition = getVariantTagDefinition('high_investment_required');
     tags.push({
-      label: 'High investment required',
-      severity: 2,
+      label: tagDefinition.label,
+      severity: tagDefinition.severity,
       description: `This method requires a high upfront investment. One hour of inputs costs about ${formatGp(
         totalInputCost,
       )}, which is higher than the method's best-case hourly profit of ${formatGp(highProfit)}.`,
@@ -268,9 +331,10 @@ export const buildVariantTags = ({
     lowProfit < 0 &&
     highProfit > 0
   ) {
+    const tagDefinition = getVariantTagDefinition('risky_to_lose_money');
     tags.push({
-      label: 'Risky to lose money',
-      severity: 3,
+      label: tagDefinition.label,
+      severity: tagDefinition.severity,
       description:
         'This method can be profitable in the best case, but it can lose money in the worst case. Use caution.',
     });
@@ -281,9 +345,10 @@ export const buildVariantTags = ({
     marketImpactSlow > VERY_SLOW_MARKET_IMPACT_THRESHOLD
   ) {
     const bestCaseDays = Math.min(marketImpactInstant, marketImpactSlow) / HOURS_IN_DAY;
+    const tagDefinition = getVariantTagDefinition('not_viable');
     tags.push({
-      label: 'Not viable',
-      severity: 3,
+      label: tagDefinition.label,
+      severity: tagDefinition.severity,
       description: `This method has extreme market impact. Even in the best case, operating at this one-hour scale may require about ${formatDays(
         bestCaseDays,
       )} to fully buy and sell through the market.`,
@@ -296,9 +361,10 @@ export const buildVariantTags = ({
     safety24h.minLowProfit >= 0 &&
     safety24h.minHighProfit >= 0
   ) {
+    const tagDefinition = getVariantTagDefinition('safe');
     tags.push({
-      label: 'Safe',
-      severity: 1,
+      label: tagDefinition.label,
+      severity: tagDefinition.severity,
       description:
         'This method has stayed above break-even over the last 24 hours. Neither low profit nor high profit dropped below 0 GP.',
     });
@@ -315,9 +381,10 @@ export const buildVariantTags = ({
       itemMetadataById,
     ).map(buildVolumeBullet);
 
+    const tagDefinition = getVariantTagDefinition('very_slow_to_buy_inputs');
     tags.push({
-      label: 'Very Slow to buy inputs',
-      severity: 2,
+      label: tagDefinition.label,
+      severity: tagDefinition.severity,
       description: [
         'The required input quantities are much higher than the market trades per hour, so buying inputs may take a long time at this scale.',
         ...inputBullets,
@@ -336,9 +403,10 @@ export const buildVariantTags = ({
       itemMetadataById,
     ).map(buildVolumeBullet);
 
+    const tagDefinition = getVariantTagDefinition('very_slow_to_sell_outputs');
     tags.push({
-      label: 'Very Slow to sell outputs',
-      severity: 2,
+      label: tagDefinition.label,
+      severity: tagDefinition.severity,
       description: [
         'The generated output quantities are much higher than the market trades per hour, so selling outputs may take a long time at this scale.',
         ...outputBullets,

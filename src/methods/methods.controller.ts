@@ -27,6 +27,7 @@ import { CreateMethodDto, UpdateMethodDto, UpdateMethodBasicDto, UpdateVariantDt
 import { SupabaseAuthGuard } from '../auth/supabase-auth.guard';
 import { SuperAdminGuard } from '../auth/super-admin.guard';
 import type { AuthenticatedUser } from '../auth/auth.types';
+import { VARIANT_TAG_DEFINITIONS, VARIANT_TAG_QUERY_VALUES } from './variant-tags';
 
 interface PaginatedResult {
   data: any[];
@@ -76,6 +77,12 @@ const METHOD_EXAMPLE = {
     },
   ],
 };
+
+const METHOD_TAGS_EXAMPLE = VARIANT_TAG_DEFINITIONS.map((tag) => ({
+  key: tag.key,
+  label: tag.label,
+  severity: tag.severity,
+}));
 
 @ApiTags('methods')
 @Controller('methods')
@@ -156,6 +163,11 @@ export class MethodsController {
     description:
       'best (default) returns only the best-profit variant per method. all returns one method entry per variant.',
   })
+  @ApiQuery({
+    name: 'ignoredTags',
+    required: false,
+    description: `Comma-separated or repeated variant tag keys to ignore. Accepted values: ${VARIANT_TAG_QUERY_VALUES.join(', ')}`,
+  })
   @ApiQuery({ name: 'order', required: false, description: 'asc or desc' })
   @ApiOkResponse({
     description: 'Methods list',
@@ -184,6 +196,7 @@ export class MethodsController {
     @Query('enabled') enabled?: string | boolean,
     @Query('likedByMe') likedByMe?: string | boolean,
     @Query('variants') variants?: string,
+    @Query('ignoredTags') ignoredTags?: string | string[],
     @Query('sortBy') sortBy = 'highProfit',
     @Query('order') order = 'desc',
     @Req() req?: Request,
@@ -204,10 +217,30 @@ export class MethodsController {
       enabled,
       likedByMe,
       variants,
+      ignoredTags,
       sortBy,
       order,
       authorization: req?.headers.authorization,
     });
+  }
+
+  @Get('tags')
+  @ApiOperation({
+    summary: 'List available method variant tags',
+    description: 'Returns the catalog of variant tags accepted by ignoredTags.',
+  })
+  @ApiOkResponse({
+    description: 'Variant tags catalog',
+    schema: {
+      example: {
+        data: {
+          tags: METHOD_TAGS_EXAMPLE,
+        },
+      },
+    },
+  })
+  listVariantTags() {
+    return this.svc.listVariantTagsResponse();
   }
 
   @Get('skills/summary')

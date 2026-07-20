@@ -12,6 +12,7 @@ import type { ConfigService } from '@nestjs/config';
 import { User } from '../auth/entities/user.entity';
 import { BadRequestException, ForbiddenException, UnauthorizedException } from '@nestjs/common';
 import { Item } from '../items/entities/item.entity';
+import { VARIANT_TAG_DEFINITIONS } from './variant-tags';
 
 type MethodDetailsWithProfitResult = Awaited<
   ReturnType<MethodsService['findMethodDetailsWithProfit']>
@@ -928,6 +929,26 @@ describe('MethodsService variantCount', () => {
     ).rejects.toBeInstanceOf(UnauthorizedException);
   });
 
+  it('returns the official variant tag catalog with severity', () => {
+    const service = new MethodsService(
+      {} as Repository<Method>,
+      {} as Repository<MethodVariant>,
+      {} as Repository<VariantIoItem>,
+      {} as Repository<VariantHistory>,
+      createMethodLikeRepo(),
+      {} as Repository<User>,
+      {} as VariantSnapshotService,
+      {} as RuneScapeApiService,
+      { get: jest.fn().mockReturnValue('redis://localhost:6379') } as unknown as ConfigService,
+    );
+
+    expect(service.listVariantTagsResponse()).toEqual({
+      data: {
+        tags: VARIANT_TAG_DEFINITIONS,
+      },
+    });
+  });
+
   it('throws when variants query param is invalid', async () => {
     const methodRepo = {
       find: jest.fn().mockResolvedValue([]),
@@ -950,6 +971,68 @@ describe('MethodsService variantCount', () => {
         page: '1',
         perPage: '10',
         variants: 'foo',
+      }),
+    ).rejects.toBeInstanceOf(BadRequestException);
+  });
+
+  it('parses ignoredTags query param from repeated and comma-separated values', async () => {
+    const methodRepo = {
+      find: jest.fn().mockResolvedValue([]),
+    } as unknown as Repository<Method>;
+
+    const service = new MethodsService(
+      methodRepo,
+      {} as Repository<MethodVariant>,
+      {} as Repository<VariantIoItem>,
+      {} as Repository<VariantHistory>,
+      createMethodLikeRepo(),
+      {} as Repository<User>,
+      {} as VariantSnapshotService,
+      {} as RuneScapeApiService,
+      { get: jest.fn().mockReturnValue('redis://localhost:6379') } as unknown as ConfigService,
+    );
+
+    const findAllWithProfitSpy = jest
+      .spyOn(service, 'findAllWithProfit')
+      .mockResolvedValue({ data: [], total: 0 });
+
+    await service.listWithProfitResponse({
+      page: '1',
+      perPage: '10',
+      ignoredTags: ['safe,ge_limits', 'not_viable'],
+    });
+
+    const filtersArg = findAllWithProfitSpy.mock.calls[0][3] as {
+      ignoredTags?: Set<string>;
+      enabled: boolean;
+    };
+
+    expect(filtersArg.enabled).toBe(true);
+    expect(filtersArg.ignoredTags).toEqual(new Set(['safe', 'ge_limits', 'not_viable']));
+  });
+
+  it('throws when ignoredTags query param contains unsupported tags', async () => {
+    const methodRepo = {
+      find: jest.fn().mockResolvedValue([]),
+    } as unknown as Repository<Method>;
+
+    const service = new MethodsService(
+      methodRepo,
+      {} as Repository<MethodVariant>,
+      {} as Repository<VariantIoItem>,
+      {} as Repository<VariantHistory>,
+      createMethodLikeRepo(),
+      {} as Repository<User>,
+      {} as VariantSnapshotService,
+      {} as RuneScapeApiService,
+      { get: jest.fn().mockReturnValue('redis://localhost:6379') } as unknown as ConfigService,
+    );
+
+    await expect(
+      service.listWithProfitResponse({
+        page: '1',
+        perPage: '10',
+        ignoredTags: 'unknown_tag',
       }),
     ).rejects.toBeInstanceOf(BadRequestException);
   });
@@ -1384,6 +1467,64 @@ describe('MethodsService variantCount', () => {
     expect(result.data[0].variants[0].tags[0].description).toContain('Coal requires 1,200/hour');
     expect(result.data[0].variants[0].tags[1].description).toContain('14,400,000 GP');
     expect(result.data[0].variants[0].tags[2].description).toContain('1.4 days');
+  });
+
+  it('filters out variants whose tags match ignoredTags', async () => {
+    const methodEntity = buildMethodFixture();
+    methodEntity.id = 'm1';
+    methodEntity.variants[0].id = 'v1';
+    methodEntity.variants[1].id = 'v2';
+
+    const methodRepo = {
+      find: jest.fn().mockResolvedValue([methodEntity]),
+    } as unknown as Repository<Method>;
+
+    const historyRepo = {
+      query: jest.fn().mockResolvedValue([
+        {
+          variantId: 'v2',
+          minLowProfit: 100,
+          minHighProfit: 200,
+          sampleCount: 3,
+        },
+      ]),
+    } as unknown as Repository<VariantHistory>;
+
+    const service = new MethodsService(
+      methodRepo,
+      {} as Repository<MethodVariant>,
+      {} as Repository<VariantIoItem>,
+      historyRepo,
+      createMethodLikeRepo(),
+      {} as Repository<User>,
+      {} as VariantSnapshotService,
+      {} as RuneScapeApiService,
+      { get: jest.fn().mockReturnValue('redis://localhost:6379') } as unknown as ConfigService,
+    );
+
+    jest.spyOn(service as any, 'getAllMethodsProfits').mockResolvedValue({
+      m1: {
+        v1: { low: 10, high: 20 },
+        v2: { low: 100, high: 200 },
+      },
+    });
+    jest.spyOn(service as any, 'getItemPrices').mockResolvedValue({});
+    jest.spyOn(service as any, 'getItemVolumes24h').mockResolvedValue({});
+
+    const result = (await service.findAllWithProfit(
+      1,
+      10,
+      undefined,
+      { enabled: true, ignoredTags: new Set(['safe']) },
+      { sortBy: 'highProfit', order: 'desc' },
+      {},
+      'all',
+    )) as {
+      data: Array<{ variants: Array<{ id: string }> }>;
+    };
+
+    expect(result.data).toHaveLength(1);
+    expect(result.data[0].variants[0].id).toBe('v1');
   });
 
   it('includes auto-calculated tags on method detail variants', async () => {

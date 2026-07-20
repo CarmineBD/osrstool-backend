@@ -154,6 +154,7 @@ describe('MethodsController list endpoint', () => {
       undefined,
       undefined,
       'all',
+      ['safe', 'ge_limits'],
       'highProfit',
       'desc',
       req,
@@ -175,9 +176,23 @@ describe('MethodsController list endpoint', () => {
       enabled: undefined,
       likedByMe: undefined,
       variants: 'all',
+      ignoredTags: ['safe', 'ge_limits'],
       sortBy: 'highProfit',
       order: 'desc',
       authorization: 'Bearer token',
     });
+  });
+
+  it('returns the variant tags catalog from the service', () => {
+    const svc: { listVariantTagsResponse: jest.Mock } = {
+      listVariantTagsResponse: jest.fn().mockReturnValue({ data: { tags: [{ key: 'safe' }] } }),
+    };
+
+    const controller = new MethodsController(svc as unknown as MethodsService);
+
+    expect(controller.listVariantTags()).toEqual({
+      data: { tags: [{ key: 'safe' }] },
+    });
+    expect(svc.listVariantTagsResponse).toHaveBeenCalledTimes(1);
   });
 });

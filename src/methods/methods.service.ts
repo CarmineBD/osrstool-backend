@@ -41,8 +41,13 @@ import {
 } from './dto/validation.constants';
 import {
   buildVariantTags,
+  getVariantTagQueryValue,
+  type VariantTagDefinition,
   type VariantSafety24hStats,
   type VariantTagItemMetadata,
+  type VariantTagQueryValue,
+  VARIANT_TAG_DEFINITIONS,
+  VARIANT_TAG_QUERY_VALUES,
 } from './variant-tags';
 
 // Definimos tipos para mayor seguridad
@@ -88,6 +93,7 @@ interface ListFilters {
   skill?: string;
   showProfitables?: boolean;
   members?: boolean;
+  ignoredTags?: Set<VariantTagQueryValue>;
   enabled: boolean;
 }
 
@@ -123,6 +129,7 @@ interface ListQuery {
   show_only_free_to_play?: string | boolean;
   enabled?: string | boolean;
   likedByMe?: string | boolean;
+  ignoredTags?: string | string[];
   variants?: string;
   sortBy?: string;
   order?: string;
@@ -393,6 +400,7 @@ export class MethodsService implements OnModuleDestroy {
       skill,
       showProfitables,
       enabled,
+      ignoredTags,
     } = query;
 
     const enabledParsed = this.parseBooleanQueryParam(enabled, 'enabled');
@@ -422,6 +430,7 @@ export class MethodsService implements OnModuleDestroy {
       skill: this.parseOptionalSkillQueryParam(skill),
       showProfitables: showProfitablesFilter,
       members: showOnlyFreeToPlayFilter === true ? false : membersFilter,
+      ignoredTags: this.parseIgnoredTagsQueryParam(ignoredTags),
       enabled: enabledParsed ?? true,
     };
   }
@@ -449,6 +458,30 @@ export class MethodsService implements OnModuleDestroy {
     }
 
     throw new BadRequestException('variants must be one of: best, all');
+  }
+
+  private parseIgnoredTagsQueryParam(
+    value: string | string[] | undefined,
+  ): Set<VariantTagQueryValue> | undefined {
+    if (value == null) return undefined;
+
+    const normalizedValues = (Array.isArray(value) ? value : [value])
+      .flatMap((entry) => entry.split(','))
+      .map((entry) => entry.trim().toLowerCase())
+      .filter((entry) => entry.length > 0);
+
+    if (normalizedValues.length === 0) return undefined;
+
+    const invalidValues = normalizedValues.filter(
+      (entry) => !VARIANT_TAG_QUERY_VALUES.includes(entry as VariantTagQueryValue),
+    );
+    if (invalidValues.length > 0) {
+      throw new BadRequestException(
+        `ignoredTags must contain only: ${VARIANT_TAG_QUERY_VALUES.join(', ')}`,
+      );
+    }
+
+    return new Set(normalizedValues as VariantTagQueryValue[]);
   }
 
   private parseTrendingProfitWindow(value: string | undefined): TrendingProfitWindow {
@@ -511,6 +544,20 @@ export class MethodsService implements OnModuleDestroy {
           : 'minCurrentProfit',
       ),
     };
+  }
+
+  private hasIgnoredVariantTag(
+    tags: Array<{ label: string }> | undefined,
+    ignoredTags: Set<VariantTagQueryValue> | undefined,
+  ): boolean {
+    if (!ignoredTags || ignoredTags.size === 0 || !Array.isArray(tags) || tags.length === 0) {
+      return false;
+    }
+
+    return tags.some((tag) => {
+      const queryValue = getVariantTagQueryValue(tag.label);
+      return queryValue != null && ignoredTags.has(queryValue);
+    });
   }
 
   private getExperienceForSkill(xpHour: XpHour | null | undefined, skill: string): number | null {
@@ -870,6 +917,14 @@ export class MethodsService implements OnModuleDestroy {
       data: { methods: result.data, user: userInfo },
       warnings,
       meta,
+    };
+  }
+
+  listVariantTagsResponse(): { data: { tags: VariantTagDefinition[] } } {
+    return {
+      data: {
+        tags: VARIANT_TAG_DEFINITIONS.map((tag) => ({ ...tag })),
+      },
     };
   }
 
@@ -2703,6 +2758,7 @@ export class MethodsService implements OnModuleDestroy {
           }
           if (filters.showProfitables && v.highProfit <= 0) return false;
           if (filters.members != null && v.members !== filters.members) return false;
+          if (this.hasIgnoredVariantTag(v.tags, filters.ignoredTags)) return false;
           return true;
         });
 
