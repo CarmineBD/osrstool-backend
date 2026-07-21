@@ -2,6 +2,7 @@ import { IsEnum, IsOptional, IsString } from 'class-validator';
 
 export enum HistoryRange {
   RANGE_24H = '24h',
+  RANGE_1W = '1w',
   RANGE_1M = '1m',
   RANGE_1Y = '1y',
   RANGE_ALL = 'all',
