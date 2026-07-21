@@ -48,6 +48,7 @@ Available variables:
 - `HEALTH_CHECK_TIMEOUT_MS`: Timeout (ms) for dependency checks in `/health`.
 - `RATE_LIMIT_TTL_SECONDS`: Rate limit window in seconds (default `60`).
 - `RATE_LIMIT_LIMIT`: Max requests per window (default `60`).
+- `SCHEDULED_JOBS_ENABLED`: Set to `false` to disable startup jobs and cron jobs in this instance while keeping the API available (default `true`).
 - `PRICE_CHANGE_WINDOW_SECONDS`: Price-change window in seconds for incremental refresh in `items:prices` (default `120`).
 - `ITEM_VOLUMES_INIT_ENABLED`: Set to `false` to skip item-volumes init backfill on startup (default `true`).
 - `CORS_ORIGINS`: Comma-separated allowed origins (e.g. `https://example.com,https://app.example.com`).
