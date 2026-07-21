@@ -66,4 +66,32 @@ describe('MethodProfitRefresherService', () => {
     expect(parsed.v1.low).toBe(36);
     expect(parsed.v1.high).toBe(55);
   });
+
+  it('skips scheduled refresh when SCHEDULED_JOBS_ENABLED is false', async () => {
+    const methodsService = {
+      findAll: jest.fn(),
+    };
+    const pricesService = {
+      getMany: jest.fn(),
+    };
+    const configService = {
+      get: jest.fn((key: string) => {
+        if (key === 'REDIS_URL') return 'redis://localhost:6379';
+        if (key === 'SCHEDULED_JOBS_ENABLED') return 'false';
+        return undefined;
+      }),
+    };
+
+    const service = new MethodProfitRefresherService(
+      methodsService as unknown as MethodsService,
+      pricesService as unknown as PricesService,
+      configService as unknown as ConfigService,
+    );
+
+    await service.handleRefreshCron();
+
+    expect(methodsService.findAll).not.toHaveBeenCalled();
+    expect(pricesService.getMany).not.toHaveBeenCalled();
+    expect(redisCall).not.toHaveBeenCalled();
+  });
 });
