@@ -7,6 +7,7 @@ import { ConfigService } from '@nestjs/config';
 import { InjectRepository } from '@nestjs/typeorm';
 import { Repository } from 'typeorm';
 import { ItemPriceRule, ItemPriceRuleType } from './entities/item-price-rule.entity';
+import { parseBooleanEnv } from '../common/utils/parse-boolean-env';
 
 interface Price {
   high?: number;
@@ -36,6 +37,7 @@ export class PricesService implements OnModuleInit {
   private readonly pricesHashKey = 'items:prices';
   private readonly legacyJsonKey = 'itemsPrices';
   private readonly changeWindowSeconds: number;
+  private readonly jobsEnabled: boolean;
   private isFirstFetch = true;
 
   constructor(
@@ -51,14 +53,28 @@ export class PricesService implements OnModuleInit {
     const parsedWindow = rawWindow ? Number.parseInt(rawWindow, 10) : NaN;
     this.changeWindowSeconds =
       Number.isFinite(parsedWindow) && parsedWindow > 0 ? parsedWindow : 120;
+    this.jobsEnabled = parseBooleanEnv(this.config.get<string>('SCHEDULED_JOBS_ENABLED'), true);
   }
 
   async onModuleInit() {
+    if (!this.jobsEnabled) {
+      this.logger.log('Skipping initial prices snapshot (SCHEDULED_JOBS_ENABLED=false).');
+      return;
+    }
+
     this.logger.log('Fetching initial prices snapshot');
     await this.fetchPrices(true);
   }
 
   @Cron('*/1 * * * *')
+  async handleFetchPricesCron(): Promise<void> {
+    if (!this.jobsEnabled) {
+      return;
+    }
+
+    await this.fetchPrices();
+  }
+
   async fetchPrices(forceFull = false) {
     try {
       const { data } = await firstValueFrom(

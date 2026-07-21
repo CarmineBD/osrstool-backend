@@ -9,6 +9,7 @@ import { VariantHistoryDaily } from '../methods/entities/variant-history-daily.e
 import { VariantHistory } from '../methods/entities/variant-history.entity';
 import { VariantSnapshot } from '../methods/entities/variant-snapshot.entity';
 import { MethodVariant } from '../methods/entities/variant.entity';
+import { parseBooleanEnv } from '../common/utils/parse-boolean-env';
 import {
   HistoryAgg,
   HistoryGranularity,
@@ -26,6 +27,7 @@ export class VariantHistoryService {
   private readonly logger = new Logger(VariantHistoryService.name);
   private readonly redis: Redis;
   private readonly methodsProfitsHashKey = 'methods:profits';
+  private readonly jobsEnabled: boolean;
   private readonly pruneEnabled: boolean;
   private readonly rawRetentionHours: number;
   private readonly history15mRetentionDays: number;
@@ -53,7 +55,8 @@ export class VariantHistoryService {
   ) {
     const redisUrl = this.config.get<string>('REDIS_URL') as string;
     this.redis = new Redis(redisUrl);
-    this.pruneEnabled = this.parseBooleanEnv(
+    this.jobsEnabled = parseBooleanEnv(this.config.get<string>('SCHEDULED_JOBS_ENABLED'), true);
+    this.pruneEnabled = parseBooleanEnv(
       this.config.get<string>('VARIANT_HISTORY_PRUNE_ENABLED'),
       false,
     );
@@ -65,15 +68,6 @@ export class VariantHistoryService {
       this.config.get<string>('VARIANT_HISTORY_15M_RETENTION_DAYS'),
       90,
     );
-  }
-
-  private parseBooleanEnv(value: string | undefined, fallback: boolean): boolean {
-    if (!value) return fallback;
-
-    const normalized = value.trim().toLowerCase();
-    if (['true', '1', 'yes', 'on'].includes(normalized)) return true;
-    if (['false', '0', 'no', 'off'].includes(normalized)) return false;
-    return fallback;
   }
 
   private parsePositiveIntEnv(value: string | undefined, fallback: number): number {
@@ -181,6 +175,14 @@ export class VariantHistoryService {
   }
 
   @Cron('*/5 * * * *')
+  async handleCaptureCron(): Promise<void> {
+    if (!this.jobsEnabled) {
+      return;
+    }
+
+    await this.capture();
+  }
+
   async capture(): Promise<void> {
     const startedAt = Date.now();
     const lockValue = await this.acquireLock(this.captureLockKey, this.captureLockTtlSeconds);
@@ -627,6 +629,14 @@ export class VariantHistoryService {
   }
 
   @Cron('17 * * * *')
+  async handlePruneHistoryCron(): Promise<void> {
+    if (!this.jobsEnabled) {
+      return;
+    }
+
+    await this.pruneHistory();
+  }
+
   async pruneHistory(): Promise<void> {
     if (!this.pruneEnabled) {
       return;
