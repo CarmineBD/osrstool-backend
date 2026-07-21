@@ -7,6 +7,7 @@ import Redis from 'ioredis';
 import { InjectRepository } from '@nestjs/typeorm';
 import { Repository } from 'typeorm';
 import { ItemVolumeBucket } from './entities/item-volume-bucket.entity';
+import { parseBooleanEnv } from '../common/utils/parse-boolean-env';
 
 interface WikiHourVolumeEntry {
   highPriceVolume?: number;
@@ -38,6 +39,7 @@ export class ItemVolumesService implements OnModuleInit, OnModuleDestroy {
   private readonly lockKey = 'lock:items:volumes:1h';
   private readonly lockTtlSeconds = 180;
   private readonly initEnabled: boolean;
+  private readonly jobsEnabled: boolean;
   private readonly userAgent =
     'osrstool-backend/1.0 (+https://github.com/CarmineBD/osrstool-backend)';
   private readonly releaseLockScript =
@@ -53,14 +55,16 @@ export class ItemVolumesService implements OnModuleInit, OnModuleDestroy {
   ) {
     const redisUrl = this.config.get<string>('REDIS_URL') as string;
     this.redis = new Redis(redisUrl);
-
-    const initFlag = (this.config.get<string>('ITEM_VOLUMES_INIT_ENABLED') ?? 'true')
-      .trim()
-      .toLowerCase();
-    this.initEnabled = initFlag !== 'false' && initFlag !== '0';
+    this.jobsEnabled = parseBooleanEnv(this.config.get<string>('SCHEDULED_JOBS_ENABLED'), true);
+    this.initEnabled = parseBooleanEnv(this.config.get<string>('ITEM_VOLUMES_INIT_ENABLED'), true);
   }
 
   async onModuleInit(): Promise<void> {
+    if (!this.jobsEnabled) {
+      this.logger.log('Skipping item volume jobs (SCHEDULED_JOBS_ENABLED=false).');
+      return;
+    }
+
     if (!this.initEnabled) {
       this.logger.log('Skipping item volume init pipeline (ITEM_VOLUMES_INIT_ENABLED=false).');
       return;
@@ -74,6 +78,10 @@ export class ItemVolumesService implements OnModuleInit, OnModuleDestroy {
 
   @Cron('15 0 * * * *')
   async handleHourlyJob(): Promise<void> {
+    if (!this.jobsEnabled) {
+      return;
+    }
+
     await this.runVolumePipeline('cron', this.getCurrentHourTs());
   }
 

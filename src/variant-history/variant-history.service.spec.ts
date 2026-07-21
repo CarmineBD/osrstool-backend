@@ -323,6 +323,17 @@ describe('VariantHistoryService', () => {
     expect(historyRepo.save).not.toHaveBeenCalled();
   });
 
+  it('skips scheduled capture when SCHEDULED_JOBS_ENABLED is false', async () => {
+    const { service, historyRepo } = createService({
+      SCHEDULED_JOBS_ENABLED: 'false',
+    });
+
+    await service.handleCaptureCron();
+
+    expect(historyRepo.save).not.toHaveBeenCalled();
+    expect(redisCall).not.toHaveBeenCalled();
+  });
+
   it('does not prune when pruning is disabled', async () => {
     const { service, historyRepo, history15mRepo } = createService();
 

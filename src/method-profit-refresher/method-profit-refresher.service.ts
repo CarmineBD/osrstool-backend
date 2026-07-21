@@ -4,12 +4,14 @@ import Redis from 'ioredis';
 import { MethodsService } from '../methods/methods.service';
 import { PricesService } from '../prices/prices.service';
 import { ConfigService } from '@nestjs/config';
+import { parseBooleanEnv } from '../common/utils/parse-boolean-env';
 
 @Injectable()
 export class MethodProfitRefresherService {
   private readonly logger = new Logger(MethodProfitRefresherService.name);
   private readonly redis: Redis;
   private readonly methodsProfitsHashKey = 'methods:profits';
+  private readonly jobsEnabled: boolean;
 
   constructor(
     private readonly methodsService: MethodsService,
@@ -18,9 +20,18 @@ export class MethodProfitRefresherService {
   ) {
     const redisUrl = this.config.get<string>('REDIS_URL') as string;
     this.redis = new Redis(redisUrl);
+    this.jobsEnabled = parseBooleanEnv(this.config.get<string>('SCHEDULED_JOBS_ENABLED'), true);
   }
 
   @Cron('*/1 * * * *') // cada minuto
+  async handleRefreshCron(): Promise<void> {
+    if (!this.jobsEnabled) {
+      return;
+    }
+
+    await this.refresh();
+  }
+
   async refresh(): Promise<void> {
     const { data: methods } = await this.methodsService.findAll(1, 1000);
     if (methods.length === 0) {
