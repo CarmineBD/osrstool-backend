@@ -10,6 +10,7 @@ import { Item } from '../../src/items/entities/item.entity';
 import { Method } from '../../src/methods/entities/method.entity';
 import { MethodVariant } from '../../src/methods/entities/variant.entity';
 import { VariantIoItem } from '../../src/methods/entities/io-item.entity';
+import { VariantHistory15m } from '../../src/methods/entities/variant-history-15m.entity';
 import { VariantHistory } from '../../src/methods/entities/variant-history.entity';
 import { VariantHistoryDaily } from '../../src/methods/entities/variant-history-daily.entity';
 import { VariantSnapshot } from '../../src/methods/entities/variant-snapshot.entity';
@@ -69,6 +70,7 @@ export const createTestApp = async (): Promise<TestApp> => {
           MethodVariant,
           VariantIoItem,
           VariantHistory,
+          VariantHistory15m,
           VariantHistoryDaily,
           VariantSnapshot,
           VariantIoItemSnapshot,

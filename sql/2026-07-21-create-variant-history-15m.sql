@@ -1,6 +1,6 @@
-CREATE TABLE IF NOT EXISTS variant_history_daily (
+CREATE TABLE IF NOT EXISTS variant_history_15m (
   variant_id uuid NOT NULL REFERENCES method_variants(id) ON DELETE CASCADE,
-  bucket_date date NOT NULL,
+  bucket_start timestamptz NOT NULL,
   low_profit_sum numeric NOT NULL,
   high_profit_sum numeric NOT NULL,
   low_profit_min numeric NOT NULL,
@@ -15,22 +15,29 @@ CREATE TABLE IF NOT EXISTS variant_history_daily (
   close_timestamp timestamptz NOT NULL,
   samples integer NOT NULL CHECK (samples > 0),
   updated_at timestamptz NOT NULL DEFAULT now(),
-  PRIMARY KEY (variant_id, bucket_date)
+  PRIMARY KEY (variant_id, bucket_start)
 );
+
+CREATE INDEX CONCURRENTLY IF NOT EXISTS variant_history_15m_bucket_start_idx
+ON variant_history_15m (bucket_start);
+
+DELETE FROM variant_history_15m
+WHERE bucket_start >= now() - interval '90 days';
 
 WITH filtered AS MATERIALIZED (
   SELECT
     variant_id,
     "timestamp",
-    ("timestamp" AT TIME ZONE 'Europe/London')::date AS bucket_date,
+    to_timestamp(floor(extract(epoch FROM "timestamp") / 900) * 900) AS bucket_start,
     low_profit,
     high_profit
   FROM variant_history
+  WHERE "timestamp" >= now() - interval '90 days'
 ),
 agg AS (
   SELECT
     variant_id,
-    bucket_date,
+    bucket_start,
     SUM(low_profit) AS low_profit_sum,
     SUM(high_profit) AS high_profit_sum,
     MIN(low_profit) AS low_profit_min,
@@ -39,31 +46,31 @@ agg AS (
     MAX(high_profit) AS high_profit_max,
     COUNT(*)::integer AS samples
   FROM filtered
-  GROUP BY variant_id, bucket_date
+  GROUP BY variant_id, bucket_start
 ),
 opens AS (
-  SELECT DISTINCT ON (variant_id, bucket_date)
+  SELECT DISTINCT ON (variant_id, bucket_start)
     variant_id,
-    bucket_date,
+    bucket_start,
     low_profit AS open_low_profit,
     high_profit AS open_high_profit,
     "timestamp" AS open_timestamp
   FROM filtered
-  ORDER BY variant_id, bucket_date, "timestamp" ASC
+  ORDER BY variant_id, bucket_start, "timestamp" ASC
 ),
 closes AS (
-  SELECT DISTINCT ON (variant_id, bucket_date)
+  SELECT DISTINCT ON (variant_id, bucket_start)
     variant_id,
-    bucket_date,
+    bucket_start,
     low_profit AS close_low_profit,
     high_profit AS close_high_profit,
     "timestamp" AS close_timestamp
   FROM filtered
-  ORDER BY variant_id, bucket_date, "timestamp" DESC
+  ORDER BY variant_id, bucket_start, "timestamp" DESC
 )
-INSERT INTO variant_history_daily (
+INSERT INTO variant_history_15m (
   variant_id,
-  bucket_date,
+  bucket_start,
   low_profit_sum,
   high_profit_sum,
   low_profit_min,
@@ -81,7 +88,7 @@ INSERT INTO variant_history_daily (
 )
 SELECT
   agg.variant_id,
-  agg.bucket_date,
+  agg.bucket_start,
   agg.low_profit_sum,
   agg.high_profit_sum,
   agg.low_profit_min,
@@ -97,9 +104,9 @@ SELECT
   agg.samples,
   now()
 FROM agg
-JOIN opens USING (variant_id, bucket_date)
-JOIN closes USING (variant_id, bucket_date)
-ON CONFLICT (variant_id, bucket_date) DO UPDATE SET
+JOIN opens USING (variant_id, bucket_start)
+JOIN closes USING (variant_id, bucket_start)
+ON CONFLICT (variant_id, bucket_start) DO UPDATE SET
   low_profit_sum = EXCLUDED.low_profit_sum,
   high_profit_sum = EXCLUDED.high_profit_sum,
   low_profit_min = EXCLUDED.low_profit_min,
@@ -114,5 +121,3 @@ ON CONFLICT (variant_id, bucket_date) DO UPDATE SET
   close_timestamp = EXCLUDED.close_timestamp,
   samples = EXCLUDED.samples,
   updated_at = now();
-
-DROP INDEX CONCURRENTLY IF EXISTS variant_history_variant_id_timestamp_cover_idx;
