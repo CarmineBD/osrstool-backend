@@ -54,7 +54,7 @@ Available variables:
 - `HEALTH_CHECK_TIMEOUT_MS`: Timeout (ms) for dependency checks in `/health`.
 - `RATE_LIMIT_TTL_SECONDS`: Rate limit window in seconds (default `60`).
 - `RATE_LIMIT_LIMIT`: Max requests per window (default `60`).
-- `SCHEDULED_JOBS_ENABLED`: Set to `false` to disable startup jobs and cron jobs in this instance while keeping the API available (default `true`). Keep this `false` in local if your local instance points to shared remote DB/Redis.
+- `SCHEDULED_JOBS_ENABLED`: Set to `false` to disable startup jobs and cron jobs in this instance while keeping the API available (default `true`). For the shared-remote local safety case, prefer `.env.local.example`.
 - `PRICE_CHANGE_WINDOW_SECONDS`: Price-change window in seconds for incremental refresh in `items:prices` (default `120`).
 - `ITEM_VOLUMES_INIT_ENABLED`: Set to `false` to skip item-volumes init backfill on startup (default `true`).
 - `VARIANT_HISTORY_PRUNE_ENABLED`: Enables hourly pruning of raw and 15m history according to the retention variables.
