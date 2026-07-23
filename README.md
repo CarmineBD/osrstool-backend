@@ -34,6 +34,12 @@ Create a `.env` file based on `.env.example`:
 cp .env.example .env
 ```
 
+Additional templates:
+
+- `.env.local.example`: local backend with cron/jobs disabled by default.
+- `.env.tst.example`: Railway TST backend.
+- `.env.production.example`: Railway PRO backend.
+
 Available variables:
 
 - `NODE_ENV`: `development` or `production`.
@@ -48,9 +54,12 @@ Available variables:
 - `HEALTH_CHECK_TIMEOUT_MS`: Timeout (ms) for dependency checks in `/health`.
 - `RATE_LIMIT_TTL_SECONDS`: Rate limit window in seconds (default `60`).
 - `RATE_LIMIT_LIMIT`: Max requests per window (default `60`).
-- `SCHEDULED_JOBS_ENABLED`: Set to `false` to disable startup jobs and cron jobs in this instance while keeping the API available (default `true`).
+- `SCHEDULED_JOBS_ENABLED`: Set to `false` to disable startup jobs and cron jobs in this instance while keeping the API available (default `true`). Keep this `false` in local if your local instance points to shared remote DB/Redis.
 - `PRICE_CHANGE_WINDOW_SECONDS`: Price-change window in seconds for incremental refresh in `items:prices` (default `120`).
 - `ITEM_VOLUMES_INIT_ENABLED`: Set to `false` to skip item-volumes init backfill on startup (default `true`).
+- `VARIANT_HISTORY_PRUNE_ENABLED`: Enables hourly pruning of raw and 15m history according to the retention variables.
+- `VARIANT_HISTORY_RAW_RETENTION_HOURS`: Retention for `variant_history` raw points (default `72`).
+- `VARIANT_HISTORY_15M_RETENTION_DAYS`: Retention for `variant_history_15m` rollups (default `90`).
 - `CORS_ORIGINS`: Comma-separated allowed origins (e.g. `https://example.com,https://app.example.com`).
 - `SWAGGER_ENABLED`: Set to `true` to enable Swagger in production (disabled by default in prod).
 - `CDN_BASE`: Base URL for item icons (defaults to OSRS Wiki).
@@ -60,6 +69,52 @@ Available variables:
 - `BUILD_DATE`: Build date for `/version` (ISO 8601 recommended).
 - `SUPABASE_PROJECT_URL`: Supabase project URL (e.g. `https://xyzcompany.supabase.co`) used to resolve JWKS and validate issuer.
 - `SUPABASE_JWT_AUD`: Expected JWT audience (optional, defaults to not enforced if empty; common value: `authenticated`).
+
+## Environment recipes
+
+### Local backend
+
+Use `.env.local.example` when you run the backend locally.
+
+Recommended local defaults:
+
+```env
+NODE_ENV=development
+SCHEDULED_JOBS_ENABLED=false
+ITEM_VOLUMES_INIT_ENABLED=false
+VARIANT_HISTORY_PRUNE_ENABLED=false
+CORS_ORIGINS=http://localhost:5173
+```
+
+This prevents duplicate writes when local points to the same remote Postgres/Redis used by Railway.
+
+### Railway TST backend
+
+Use `.env.tst.example` as the base for the TST service.
+
+Recommended TST values:
+
+```env
+NODE_ENV=production
+SCHEDULED_JOBS_ENABLED=true
+ITEM_VOLUMES_INIT_ENABLED=true
+VARIANT_HISTORY_PRUNE_ENABLED=false
+CORS_ORIGINS=https://osrstool-frontend-tst.vercel.app
+```
+
+### Railway PRO backend
+
+Use `.env.production.example` as the base for the PRO service.
+
+Recommended PRO values:
+
+```env
+NODE_ENV=production
+SCHEDULED_JOBS_ENABLED=true
+ITEM_VOLUMES_INIT_ENABLED=true
+VARIANT_HISTORY_PRUNE_ENABLED=true
+CORS_ORIGINS=https://osrstool-frontend-eight.vercel.app
+```
 
 ## System endpoints
 
