@@ -34,6 +34,12 @@ Create a `.env` file based on `.env.example`:
 cp .env.example .env
 ```
 
+Additional templates:
+
+- `.env.local.example`: local backend with cron/jobs disabled by default.
+- `.env.tst.example`: Railway TST backend.
+- `.env.production.example`: Railway PRO backend.
+
 Available variables:
 
 - `NODE_ENV`: `development` or `production`.
