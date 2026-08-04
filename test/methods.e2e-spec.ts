@@ -18,6 +18,7 @@ import { Method } from '../src/methods/entities/method.entity';
 import { MethodVariant } from '../src/methods/entities/variant.entity';
 import { VariantIoItem } from '../src/methods/entities/io-item.entity';
 import { VariantHistory } from '../src/methods/entities/variant-history.entity';
+import { ActionType } from '../src/methods/action-type.enum';
 import { createPgMemAdapter } from './utils/pg-mem';
 
 jest.mock('pg', () => createPgMemAdapter());
@@ -35,6 +36,8 @@ describe('Methods (e2e)', () => {
     variants: Array<{
       label: string;
       icon_id: number;
+      actionsPerHour?: number;
+      actionType?: ActionType;
       description?: string;
       members?: boolean;
       requirements?: Record<string, unknown>;
@@ -62,6 +65,8 @@ describe('Methods (e2e)', () => {
       {
         label: 'Validated variant',
         icon_id: 4152,
+        actionsPerHour: 2,
+        actionType: ActionType.ITEMS,
         description: 'Lista:\n- item 1\n- item 2',
         inputs: [{ id: 100, quantity: 1, type: 'input', reason: 'Reason text' }],
         outputs: [{ id: 200, quantity: 1, type: 'output', reason: 'Reason text' }],
@@ -167,6 +172,7 @@ describe('Methods (e2e)', () => {
       recommendations: variantA.recommendations,
       wilderness: variantA.wilderness,
       actionsPerHour: variantA.actionsPerHour,
+      actionType: ActionType.ITEMS,
       method: savedMethod,
     });
 
@@ -182,6 +188,7 @@ describe('Methods (e2e)', () => {
       recommendations: variantB.recommendations,
       wilderness: variantB.wilderness,
       actionsPerHour: variantB.actionsPerHour,
+      actionType: ActionType.ITEMS,
       method: savedMethod,
     });
 
@@ -265,6 +272,7 @@ describe('Methods (e2e)', () => {
       recommendations: variantA.recommendations,
       wilderness: variantA.wilderness,
       actionsPerHour: variantA.actionsPerHour,
+      actionType: ActionType.ITEMS,
       method: savedMethod,
     });
 
@@ -280,6 +288,7 @@ describe('Methods (e2e)', () => {
       recommendations: variantB.recommendations,
       wilderness: variantB.wilderness,
       actionsPerHour: variantB.actionsPerHour,
+      actionType: ActionType.ITEMS,
       method: savedMethod,
     });
 
@@ -372,6 +381,7 @@ describe('Methods (e2e)', () => {
       wilderness: variantA.wilderness,
       members: false,
       actionsPerHour: variantA.actionsPerHour,
+      actionType: ActionType.ITEMS,
       method: savedMethod,
     });
 
@@ -388,6 +398,7 @@ describe('Methods (e2e)', () => {
       wilderness: variantB.wilderness,
       members: true,
       actionsPerHour: variantB.actionsPerHour,
+      actionType: ActionType.ITEMS,
       method: savedMethod,
     });
 
@@ -440,6 +451,7 @@ describe('Methods (e2e)', () => {
       wilderness: variantA.wilderness,
       members: false,
       actionsPerHour: variantA.actionsPerHour,
+      actionType: ActionType.ITEMS,
       method: savedMethod,
     });
 
@@ -456,6 +468,7 @@ describe('Methods (e2e)', () => {
       wilderness: variantB.wilderness,
       members: true,
       actionsPerHour: variantB.actionsPerHour,
+      actionType: ActionType.ITEMS,
       method: savedMethod,
     });
 
@@ -510,6 +523,7 @@ describe('Methods (e2e)', () => {
       recommendations: variantA.recommendations,
       wilderness: variantA.wilderness,
       actionsPerHour: variantA.actionsPerHour,
+      actionType: ActionType.ITEMS,
       method: savedMethod,
     });
 
@@ -525,6 +539,7 @@ describe('Methods (e2e)', () => {
       recommendations: variantB.recommendations,
       wilderness: variantB.wilderness,
       actionsPerHour: variantB.actionsPerHour,
+      actionType: ActionType.ITEMS,
       method: savedMethod,
     });
 
@@ -587,6 +602,7 @@ describe('Methods (e2e)', () => {
       recommendations: null,
       wilderness: false,
       actionsPerHour: 0,
+      actionType: ActionType.ITEMS,
       method: smallMethod,
     });
     const bigVariant = await variantRepo.save({
@@ -601,6 +617,7 @@ describe('Methods (e2e)', () => {
       recommendations: null,
       wilderness: false,
       actionsPerHour: 0,
+      actionType: ActionType.ITEMS,
       method: bigMethod,
     });
 
@@ -720,6 +737,7 @@ describe('Methods (e2e)', () => {
       recommendations: variantA.recommendations,
       wilderness: variantA.wilderness,
       actionsPerHour: variantA.actionsPerHour,
+      actionType: ActionType.ITEMS,
       method: savedMethod,
     });
 
@@ -735,6 +753,7 @@ describe('Methods (e2e)', () => {
       recommendations: variantB.recommendations,
       wilderness: variantB.wilderness,
       actionsPerHour: variantB.actionsPerHour,
+      actionType: ActionType.ITEMS,
       method: savedMethod,
     });
 
@@ -855,6 +874,24 @@ describe('Methods (e2e)', () => {
     expect(String(body.message)).toContain('999999');
   });
 
+  it('POST /methods requires actionsPerHour for each variant', async () => {
+    await seedItems(100, 200, 4151, 4152);
+
+    const server = app.getHttpServer() as unknown as Server;
+    const payload = buildValidCreateMethodPayload();
+    delete payload.variants[0].actionsPerHour;
+
+    const res = await request(server).post('/methods').send(payload).expect(400);
+    const body = res.body as { message?: unknown };
+    const messages = Array.isArray(body.message)
+      ? body.message.map(String)
+      : [String(body.message)];
+
+    expect(
+      messages.some((message) => message.includes('actionsPerHour must be an integer number')),
+    ).toBe(true);
+  });
+
   it('POST /methods rejects free-to-play variants that include members-only items', async () => {
     await seedItems(
       { id: 100, members: true, name: 'Abyssal whip' },
@@ -871,6 +908,8 @@ describe('Methods (e2e)', () => {
         {
           label: 'F2P Cooking',
           icon_id: 4152,
+          actionsPerHour: 100,
+          actionType: ActionType.ITEMS,
           members: false,
           inputs: [{ id: 100, quantity: 1, type: 'input' }],
           outputs: [{ id: 200, quantity: 1, type: 'output' }],
@@ -878,6 +917,8 @@ describe('Methods (e2e)', () => {
         {
           label: 'F2P Prayer',
           icon_id: 4152,
+          actionsPerHour: 100,
+          actionType: ActionType.ITEMS,
           members: false,
           inputs: [],
           outputs: [{ id: 300, quantity: 1, type: 'output' }],
@@ -944,6 +985,7 @@ describe('Methods (e2e)', () => {
       recommendations: null,
       wilderness: false,
       actionsPerHour: 100,
+      actionType: ActionType.ITEMS,
       method: savedMethod,
     });
 
@@ -957,6 +999,8 @@ describe('Methods (e2e)', () => {
             id: savedVariant.id,
             label: 'Editable variant',
             icon_id: 4152,
+            actionsPerHour: 100,
+            actionType: ActionType.ITEMS,
             inputs: [],
             outputs: [],
           },
@@ -967,6 +1011,64 @@ describe('Methods (e2e)', () => {
     const body = res.body as { message?: unknown };
     expect(String(body.message)).toContain('icon_id must reference an existing item');
     expect(String(body.message)).toContain('999999');
+  });
+
+  it('PUT /methods/:id requires actionsPerHour for edited variants', async () => {
+    await seedItems(4151, 4152);
+
+    const methodRepo = dataSource.getRepository(Method);
+    const variantRepo = dataSource.getRepository(MethodVariant);
+
+    const savedMethod = await methodRepo.save({
+      name: 'Editable method',
+      slug: 'editable-method',
+      iconId: 4151,
+      description: 'Safe markdown',
+      category: 'Skilling',
+      enabled: true,
+    });
+
+    const savedVariant = await variantRepo.save({
+      label: 'Editable variant',
+      slug: 'editable-variant',
+      iconId: 4152,
+      description: null,
+      xpHour: null,
+      clickIntensity: 1,
+      afkiness: 1,
+      riskLevel: '1',
+      requirements: null,
+      recommendations: null,
+      wilderness: false,
+      actionsPerHour: 100,
+      actionType: ActionType.ITEMS,
+      method: savedMethod,
+    });
+
+    const server = app.getHttpServer() as unknown as Server;
+    const res = await request(server)
+      .put(`/methods/${savedMethod.id}`)
+      .send({
+        variants: [
+          {
+            id: savedVariant.id,
+            label: 'Editable variant',
+            icon_id: 4152,
+            inputs: [],
+            outputs: [],
+          },
+        ],
+      })
+      .expect(400);
+
+    const body = res.body as { message?: unknown };
+    const messages = Array.isArray(body.message)
+      ? body.message.map(String)
+      : [String(body.message)];
+
+    expect(
+      messages.some((message) => message.includes('actionsPerHour must be an integer number')),
+    ).toBe(true);
   });
 
   it('PUT /methods/:id rejects free-to-play variants that include members-only items', async () => {
@@ -1003,6 +1105,7 @@ describe('Methods (e2e)', () => {
       wilderness: false,
       members: false,
       actionsPerHour: 100,
+      actionType: ActionType.ITEMS,
       method: savedMethod,
     });
 
@@ -1013,6 +1116,8 @@ describe('Methods (e2e)', () => {
         variants: [
           {
             id: savedVariant.id,
+            actionsPerHour: 100,
+            actionType: ActionType.ITEMS,
             inputs: [{ id: 100, quantity: 1, type: 'input' }],
             outputs: [{ id: 200, quantity: 1, type: 'output' }],
           },
@@ -1071,6 +1176,7 @@ describe('Methods (e2e)', () => {
       recommendations: null,
       wilderness: false,
       actionsPerHour: 100,
+      actionType: ActionType.ITEMS,
       method: savedMethod,
     });
 
@@ -1079,6 +1185,8 @@ describe('Methods (e2e)', () => {
       .put(`/methods/variant/${savedVariant.id}`)
       .send({
         icon_id: 999999,
+        actionsPerHour: 100,
+        actionType: ActionType.ITEMS,
         inputs: [],
         outputs: [],
       })
@@ -1087,6 +1195,57 @@ describe('Methods (e2e)', () => {
     const body = res.body as { message?: unknown };
     expect(String(body.message)).toContain('icon_id must reference an existing item');
     expect(String(body.message)).toContain('999999');
+  });
+
+  it('PUT /methods/variant/:id requires actionsPerHour', async () => {
+    await seedItems(4151, 4152);
+
+    const methodRepo = dataSource.getRepository(Method);
+    const variantRepo = dataSource.getRepository(MethodVariant);
+
+    const savedMethod = await methodRepo.save({
+      name: 'Variant edit method',
+      slug: 'variant-edit-method',
+      iconId: 4151,
+      description: 'Safe markdown',
+      category: 'Skilling',
+      enabled: true,
+    });
+
+    const savedVariant = await variantRepo.save({
+      label: 'Variant edit variant',
+      slug: 'variant-edit-variant',
+      iconId: 4152,
+      description: null,
+      xpHour: null,
+      clickIntensity: 1,
+      afkiness: 1,
+      riskLevel: '1',
+      requirements: null,
+      recommendations: null,
+      wilderness: false,
+      actionsPerHour: 100,
+      actionType: ActionType.ITEMS,
+      method: savedMethod,
+    });
+
+    const server = app.getHttpServer() as unknown as Server;
+    const res = await request(server)
+      .put(`/methods/variant/${savedVariant.id}`)
+      .send({
+        inputs: [],
+        outputs: [],
+      })
+      .expect(400);
+
+    const body = res.body as { message?: unknown };
+    const messages = Array.isArray(body.message)
+      ? body.message.map(String)
+      : [String(body.message)];
+
+    expect(
+      messages.some((message) => message.includes('actionsPerHour must be an integer number')),
+    ).toBe(true);
   });
 
   it('PUT /methods/variant/:id rejects free-to-play variants that include members-only items', async () => {
@@ -1123,6 +1282,7 @@ describe('Methods (e2e)', () => {
       wilderness: false,
       members: false,
       actionsPerHour: 100,
+      actionType: ActionType.ITEMS,
       method: savedMethod,
     });
 
@@ -1130,6 +1290,8 @@ describe('Methods (e2e)', () => {
     const res = await request(server)
       .put(`/methods/variant/${savedVariant.id}`)
       .send({
+        actionsPerHour: 100,
+        actionType: ActionType.ITEMS,
         inputs: [{ id: 100, quantity: 1, type: 'input' }],
         outputs: [{ id: 200, quantity: 1, type: 'output' }],
       })
@@ -1273,6 +1435,7 @@ describe('Methods (e2e)', () => {
       recommendations: null,
       wilderness: false,
       actionsPerHour: 100,
+      actionType: ActionType.ITEMS,
       method: savedMethod,
     });
 
@@ -1280,6 +1443,8 @@ describe('Methods (e2e)', () => {
     const res = await request(server)
       .put(`/methods/variant/${savedVariant.id}?generateSnapshot=true`)
       .send({
+        actionsPerHour: 100,
+        actionType: ActionType.ITEMS,
         snapshotName: 'Snapshot title',
         snapshotDescription: '[x](javascript:alert(1))',
       })

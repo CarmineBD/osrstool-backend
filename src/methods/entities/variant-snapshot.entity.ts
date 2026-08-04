@@ -2,6 +2,7 @@ import { Entity, PrimaryGeneratedColumn, Column, ManyToOne, JoinColumn } from 't
 import { MethodVariant } from './variant.entity';
 import { Method } from './method.entity';
 import { XpHour, VariantRequirements, VariantRecommendations } from '../types';
+import { ActionType } from '../action-type.enum';
 
 @Entity('variant_snapshots')
 export class VariantSnapshot {
@@ -24,6 +25,9 @@ export class VariantSnapshot {
 
   @Column({ name: 'actions_per_hour', type: 'int', nullable: true })
   actionsPerHour?: number;
+
+  @Column({ name: 'action_type', type: 'varchar', length: 32, nullable: true })
+  actionType?: ActionType | null;
 
   @Column({ name: 'xp_hour', type: 'jsonb', nullable: true })
   xpHour?: XpHour | null;

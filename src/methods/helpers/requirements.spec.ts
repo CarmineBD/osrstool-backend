@@ -1,5 +1,6 @@
 import { MethodDto } from '../dto/method.dto';
 import { computeMissingRequirements, filterMethodsByUserStats } from './requirements';
+import { ActionType } from '../action-type.enum';
 
 describe('requirements helpers', () => {
   const userInfo = {
@@ -22,6 +23,7 @@ describe('requirements helpers', () => {
           label: 'Lowercase requirement',
           inputs: [],
           outputs: [],
+          actionType: ActionType.ITEMS,
           requirements: {
             levels: [{ skill: 'magic', level: 77 }],
           },
