@@ -2271,6 +2271,8 @@ describe('MethodsService variantCount', () => {
           {
             label: 'Variant A',
             icon_id: 4152,
+            actionsPerHour: 100,
+            actionType: ActionType.ITEMS,
             members: false,
             inputs: [{ id: 100, quantity: 1, type: 'input' }],
             outputs: [],
@@ -2278,6 +2280,8 @@ describe('MethodsService variantCount', () => {
           {
             label: 'Variant B',
             icon_id: 4152,
+            actionsPerHour: 100,
+            actionType: ActionType.ITEMS,
             members: false,
             inputs: [],
             outputs: [{ id: 101, quantity: 1, type: 'output' }],
@@ -2346,6 +2350,8 @@ describe('MethodsService variantCount', () => {
 
     await expect(
       service.updateVariant('v1', {
+        actionsPerHour: 100,
+        actionType: ActionType.ITEMS,
         inputs: [{ id: 100, quantity: 1, type: 'input' }],
         outputs: [],
       }),

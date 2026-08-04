@@ -71,7 +71,6 @@ export class MethodVariant {
   @Column({
     name: 'actions_per_hour',
     type: 'int',
-    nullable: true,
   })
   actionsPerHour: number;
 
