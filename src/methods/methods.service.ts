@@ -22,7 +22,7 @@ import { MethodDto } from './dto/method.dto';
 import IORedis, { Redis } from 'ioredis';
 import { VariantSnapshotService } from '../variant-snapshots/variant-snapshot.service';
 import { slugify, fallbackSlug } from '../utils/slug';
-import { XpHour, UserInfo } from './types';
+import { VariantRequirements, XpHour, UserInfo } from './types';
 import { RuneScapeApiService } from './RuneScapeApiService';
 import { computeMissingRequirements, filterMethodsByUserStats } from './helpers/requirements';
 import { ConfigService } from '@nestjs/config';
@@ -276,6 +276,89 @@ interface SkillSummaryBySkill {
   bestXp: SkillSummaryMethod | null;
 }
 
+type RoadmapStrategy = 'fastest' | 'profitable' | 'most_afk';
+
+interface RoadmapQuery {
+  username?: string;
+  skill?: string;
+  strategy?: string;
+  target_level?: string;
+  show_only_free_to_play?: string | boolean;
+  enabled?: string | boolean;
+  ignoredTags?: string | string[];
+  authorization?: string;
+  authenticatedUserId?: string | null;
+}
+
+interface RoadmapVariant {
+  id: string;
+  slug: string;
+  icon_id?: number | null;
+  label?: string;
+  description?: string | null;
+  xpPerHour: number;
+  clickIntensity?: number | null;
+  afkiness?: number | null;
+  riskLevel?: string | null;
+  requirements?: VariantRequirements | null;
+  wilderness?: boolean;
+  members?: boolean;
+  lowProfit: number;
+  highProfit: number;
+  tags: Array<{ label: string; description: string; severity: number }>;
+}
+
+interface RoadmapMaterialItem {
+  id: number;
+  quantity: number;
+  reason?: string | null;
+}
+
+interface RoadmapCandidateVariant extends RoadmapVariant {
+  actionsPerHour?: number | null;
+  inputs: RoadmapMaterialItem[];
+  outputs: RoadmapMaterialItem[];
+}
+
+interface RoadmapCandidate {
+  method: {
+    id: string;
+    name: string;
+    slug: string;
+    icon_id?: number | null;
+    category?: string;
+    enabled: boolean;
+  };
+  variant: RoadmapCandidateVariant;
+}
+
+interface RoadmapRange {
+  levelStart: number;
+  levelEnd: number;
+  experienceStart: number;
+  experienceEnd: number;
+  experienceNeeded: number;
+  hours: number;
+  afkPercent: number;
+  profit: {
+    low: number;
+    high: number;
+  };
+  method: RoadmapCandidate['method'];
+  variant: RoadmapVariant;
+}
+
+interface RoadmapTotalsItem {
+  id: number;
+  quantity: number;
+}
+
+interface RoadmapSkillProgress {
+  level: number;
+  experience: number;
+  usesExactExperience: boolean;
+}
+
 interface VariantMembershipValidationDraft {
   variantTitle: string;
   members: boolean;
@@ -303,6 +386,19 @@ const LIST_SORT_VALUES = [
 ] as const;
 
 const SORT_ORDER_VALUES = ['asc', 'desc'] as const;
+const ROADMAP_STRATEGY_VALUES: RoadmapStrategy[] = ['fastest', 'profitable', 'most_afk'];
+const ROADMAP_TARGET_LEVEL = 99;
+const OSRS_XP_BY_LEVEL = (() => {
+  const xpByLevel = Array.from({ length: ROADMAP_TARGET_LEVEL + 1 }, () => 0);
+  let points = 0;
+
+  for (let level = 1; level < ROADMAP_TARGET_LEVEL; level += 1) {
+    points += Math.floor(level + 300 * 2 ** (level / 7));
+    xpByLevel[level + 1] = Math.floor(points / 4);
+  }
+
+  return xpByLevel;
+})();
 
 @Injectable()
 export class MethodsService implements OnModuleDestroy {
@@ -384,6 +480,57 @@ export class MethodsService implements OnModuleDestroy {
         return { userInfo: null, warnings: [{ code: 'USER_NOT_FOUND', message }] };
       }
       return { userInfo: null, warnings: [{ code: 'USER_LOOKUP_FAILED', message }] };
+    }
+  }
+
+  private async fetchRequiredRoadmapUserInfo(username: string): Promise<UserInfo> {
+    const { userInfo, warnings } = await this.fetchUserInfo(username);
+    if (userInfo) {
+      return userInfo;
+    }
+
+    const warningMessage =
+      warnings[0]?.message ?? `No se pudo obtener la informacion del usuario "${username}".`;
+    throw new BadRequestException(warningMessage);
+  }
+
+  private async fetchRoadmapSkillProgress(
+    username: string,
+    skill: string,
+    fallbackLevel: number,
+  ): Promise<RoadmapSkillProgress> {
+    const fallbackExperience = this.getExperienceForLevel(fallbackLevel);
+
+    try {
+      const progress = await this.runescapeApi.fetchSkillProgress(username, skill);
+      if (!progress) {
+        return {
+          level: fallbackLevel,
+          experience: fallbackExperience,
+          usesExactExperience: false,
+        };
+      }
+
+      const effectiveLevel = Math.max(
+        1,
+        Math.min(
+          ROADMAP_TARGET_LEVEL,
+          Math.max(progress.level, this.getLevelForExperience(progress.experience)),
+        ),
+      );
+      const minimumExperience = this.getExperienceForLevel(effectiveLevel);
+
+      return {
+        level: effectiveLevel,
+        experience: Math.max(progress.experience, minimumExperience),
+        usesExactExperience: true,
+      };
+    } catch {
+      return {
+        level: fallbackLevel,
+        experience: fallbackExperience,
+        usesExactExperience: false,
+      };
     }
   }
 
@@ -569,6 +716,76 @@ export class MethodsService implements OnModuleDestroy {
     return experience;
   }
 
+  private normalizeUserLevels(levels: UserInfo['levels']): Record<string, number> {
+    return Object.entries(levels).reduce(
+      (acc, [skill, level]) => {
+        acc[skill.trim().toLowerCase()] = level;
+        return acc;
+      },
+      {} as Record<string, number>,
+    );
+  }
+
+  private canUseRoadmapVariantAtLevel(
+    requirements: VariantRequirements | null | undefined,
+    userInfo: UserInfo,
+    targetSkill: string,
+    targetLevel: number,
+  ): boolean {
+    if (!requirements) return true;
+
+    const normalizedLevels = this.normalizeUserLevels(userInfo.levels);
+    const userQuests = Object.entries(userInfo.quests).reduce(
+      (acc, [name, status]) => {
+        acc[name.toLowerCase()] = status;
+        return acc;
+      },
+      {} as Record<string, number>,
+    );
+
+    for (const levelRequirement of requirements.levels ?? []) {
+      const requiredSkill = levelRequirement.skill.trim().toLowerCase();
+
+      if (requiredSkill === 'combat') {
+        for (const meleeSkill of ['strength', 'defence', 'attack']) {
+          if ((normalizedLevels[meleeSkill] ?? 0) < levelRequirement.level) {
+            return false;
+          }
+        }
+        continue;
+      }
+
+      const currentLevel =
+        requiredSkill === targetSkill ? targetLevel : (normalizedLevels[requiredSkill] ?? 0);
+      if (currentLevel < levelRequirement.level) {
+        return false;
+      }
+    }
+
+    for (const questRequirement of requirements.quests ?? []) {
+      if ((userQuests[questRequirement.name.toLowerCase()] ?? 0) < questRequirement.stage) {
+        return false;
+      }
+    }
+
+    const tierMap = {
+      easy: 'Easy',
+      medium: 'Medium',
+      hard: 'Hard',
+      elite: 'Elite',
+    } as const;
+
+    for (const diaryRequirement of requirements.achievement_diaries ?? []) {
+      const tier = tierMap[diaryRequirement.tier];
+      const info = userInfo.achievement_diaries[diaryRequirement.name];
+      if (!info?.[tier]?.complete) {
+        return false;
+      }
+    }
+
+    return true;
+  }
+
   private async verifySupabaseToken(authorization?: string): Promise<string> {
     if (!authorization) {
       throw new UnauthorizedException('Missing Authorization header');
@@ -696,8 +913,9 @@ export class MethodsService implements OnModuleDestroy {
   private async assertSuperAdmin(
     authorization: string | undefined,
     errorMessage: string,
+    authenticatedUserId?: string | null,
   ): Promise<void> {
-    const userId = await this.verifySupabaseToken(authorization);
+    const userId = authenticatedUserId ?? (await this.verifySupabaseToken(authorization));
     const user = await this.userRepo.findOne({ where: { id: userId } });
 
     if (!user || user.role !== 'super_admin') {
@@ -705,13 +923,27 @@ export class MethodsService implements OnModuleDestroy {
     }
   }
 
-  private async assertSuperAdminForDisabledMethods(authorization?: string): Promise<void> {
+  private async assertSuperAdminForDisabledMethods(
+    authorization?: string,
+    authenticatedUserId?: string | null,
+  ): Promise<void> {
     // Accessing disabled methods is an admin-only capability.
-    await this.assertSuperAdmin(authorization, 'Only super_admin can request enabled=false');
+    await this.assertSuperAdmin(
+      authorization,
+      'Only super_admin can request enabled=false',
+      authenticatedUserId,
+    );
   }
 
-  private async assertSuperAdminForEnabledQueryParam(authorization?: string): Promise<void> {
-    await this.assertSuperAdmin(authorization, 'Only super_admin can use enabled query parameter');
+  private async assertSuperAdminForEnabledQueryParam(
+    authorization?: string,
+    authenticatedUserId?: string | null,
+  ): Promise<void> {
+    await this.assertSuperAdmin(
+      authorization,
+      'Only super_admin can use enabled query parameter',
+      authenticatedUserId,
+    );
   }
 
   private async assertCanAccessMethodDetails(
@@ -834,6 +1066,59 @@ export class MethodsService implements OnModuleDestroy {
     return normalized;
   }
 
+  private parseRequiredSkillQueryParam(value: string | undefined): string {
+    const skill = this.parseOptionalSkillQueryParam(value);
+    if (!skill) {
+      throw new BadRequestException('skill is required');
+    }
+
+    return skill;
+  }
+
+  private parseRoadmapStrategy(value: string | undefined): RoadmapStrategy {
+    const normalized = this.normalizeOptionalQueryString(value, 'strategy', 30)
+      ?.toLowerCase()
+      .replace(/[\s-]+/g, '_');
+
+    if (!normalized) {
+      throw new BadRequestException('strategy is required');
+    }
+
+    const canonical =
+      normalized === 'mostafk'
+        ? 'most_afk'
+        : normalized === 'fastest' || normalized === 'profitable' || normalized === 'most_afk'
+          ? normalized
+          : null;
+
+    if (!canonical) {
+      throw new BadRequestException(
+        `strategy must be one of: ${ROADMAP_STRATEGY_VALUES.join(', ')}`,
+      );
+    }
+
+    return canonical as RoadmapStrategy;
+  }
+
+  private parseRoadmapTargetLevel(value: string | undefined): number {
+    const normalized = this.normalizeOptionalQueryString(value, 'target_level', 20);
+    if (normalized == null) {
+      return ROADMAP_TARGET_LEVEL;
+    }
+
+    const parsed = Number(normalized);
+    if (!Number.isInteger(parsed) || parsed < 1) {
+      throw new BadRequestException('target_level must be a positive integer');
+    }
+    if (parsed > ROADMAP_TARGET_LEVEL) {
+      throw new BadRequestException(
+        `target_level must be less than or equal to ${ROADMAP_TARGET_LEVEL}`,
+      );
+    }
+
+    return parsed;
+  }
+
   private buildSortOptions(query: ListQuery): SortOptions {
     const sortBy = this.normalizeOptionalQueryString(query.sortBy, 'sortBy', 20) ?? 'highProfit';
     const order =
@@ -850,6 +1135,25 @@ export class MethodsService implements OnModuleDestroy {
       sortBy: sortBy as SortOptions['sortBy'],
       order: order as SortOptions['order'],
     };
+  }
+
+  private getExperienceForLevel(level: number): number {
+    const normalizedLevel = Math.max(1, Math.min(ROADMAP_TARGET_LEVEL, Math.floor(level)));
+    return OSRS_XP_BY_LEVEL[normalizedLevel] ?? 0;
+  }
+
+  private getLevelForExperience(experience: number): number {
+    if (!Number.isFinite(experience) || experience <= 0) {
+      return 1;
+    }
+
+    for (let level = ROADMAP_TARGET_LEVEL; level >= 1; level -= 1) {
+      if (experience >= this.getExperienceForLevel(level)) {
+        return level;
+      }
+    }
+
+    return 1;
   }
 
   async listWithProfitResponse(query: ListQuery) {
@@ -1064,6 +1368,88 @@ export class MethodsService implements OnModuleDestroy {
     };
   }
 
+  async skillRoadmapResponse(query: RoadmapQuery) {
+    const username = this.normalizeOptionalQueryString(
+      query.username,
+      'username',
+      USERNAME_MAX_LENGTH,
+    );
+    if (!username) {
+      throw new BadRequestException('username is required');
+    }
+
+    const skill = this.parseRequiredSkillQueryParam(query.skill);
+    const strategy = this.parseRoadmapStrategy(query.strategy);
+    const targetLevel = this.parseRoadmapTargetLevel(query.target_level);
+    const authenticatedUserId =
+      query.authenticatedUserId ?? (await this.resolveAuthenticatedUserId(query.authorization));
+
+    await this.assertRegisteredUserForUsername(username, query.authorization, authenticatedUserId);
+    if (query.enabled != null) {
+      await this.assertSuperAdminForEnabledQueryParam(query.authorization, authenticatedUserId);
+    }
+
+    const enabled = this.parseBooleanQueryParam(query.enabled, 'enabled') ?? true;
+    const showOnlyFreeToPlay =
+      this.parseBooleanQueryParam(query.show_only_free_to_play, 'show_only_free_to_play') ?? false;
+    const ignoredTags = new Set(this.parseIgnoredTagsQueryParam(query.ignoredTags) ?? []);
+    ignoredTags.add('ge_limits');
+    ignoredTags.add('not_viable');
+
+    const userInfo = await this.fetchRequiredRoadmapUserInfo(username);
+    const fallbackLevel = Math.max(
+      1,
+      Math.min(ROADMAP_TARGET_LEVEL, this.normalizeUserLevels(userInfo.levels)[skill] ?? 1),
+    );
+    const skillProgress = await this.fetchRoadmapSkillProgress(username, skill, fallbackLevel);
+    if (targetLevel < skillProgress.level) {
+      throw new BadRequestException(
+        `target_level must be greater than or equal to the player's current ${skill} level (${skillProgress.level})`,
+      );
+    }
+    const roadmapCandidates = await this.findRoadmapCandidates(
+      skill,
+      enabled,
+      ignoredTags,
+      showOnlyFreeToPlay,
+    );
+
+    if (roadmapCandidates.length === 0) {
+      throw new NotFoundException(
+        `No roadmap variants are available for skill ${skill} with the selected filters`,
+      );
+    }
+
+    const roadmap = this.buildSkillRoadmap(
+      roadmapCandidates,
+      userInfo,
+      skill,
+      strategy,
+      skillProgress,
+      targetLevel,
+    );
+
+    return {
+      status: roadmap.warnings.length > 0 ? 'partial' : 'ok',
+      data: {
+        roadmap,
+        user: userInfo,
+      },
+      warnings: roadmap.warnings,
+      meta: {
+        username,
+        skill,
+        strategy,
+        target_level: targetLevel,
+        enabled,
+        show_only_free_to_play: showOnlyFreeToPlay,
+        ignoredTags: [...ignoredTags],
+        computedAt: Math.floor(Date.now() / 1000),
+        usesExactSkillExperience: skillProgress.usesExactExperience,
+      },
+    };
+  }
+
   private toSkillSummaryKey(skillName: unknown): string {
     if (typeof skillName !== 'string') return '';
     const normalized = skillName.trim().toLowerCase();
@@ -1189,6 +1575,357 @@ export class MethodsService implements OnModuleDestroy {
       .filter((method) => method.variants.length > 0) as SkillSummaryMethod[];
 
     return methods;
+  }
+
+  private async findRoadmapCandidates(
+    skill: string,
+    enabled: boolean,
+    ignoredTags: Set<VariantTagQueryValue>,
+    showOnlyFreeToPlay: boolean,
+  ): Promise<RoadmapCandidate[]> {
+    const allEntities = await this.methodRepo.find({
+      where: { enabled },
+      relations: ['variants', 'variants.ioItems'],
+    });
+
+    const methodsToProcess = allEntities.map((method) => this.toDto(method));
+    const itemIds = this.collectItemIdsFromMethods(methodsToProcess);
+    const variantIds = methodsToProcess.flatMap((method) =>
+      method.variants.map((variant) => variant.id),
+    );
+    const [allProfits, pricesByItem, volumes24hByItem, itemMetadataById, safety24hByVariantId] =
+      await Promise.all([
+        this.getAllMethodsProfits(),
+        this.getItemPrices(itemIds),
+        this.getItemVolumes24h(itemIds),
+        this.getItemMetadata(itemIds),
+        this.getVariantSafety24hStats(variantIds, new Date(Date.now() - 24 * 60 * 60 * 1000)),
+      ]);
+
+    return methodsToProcess.flatMap((method) => {
+      const methodProfits = allProfits[method.id] ?? {};
+
+      return method.variants.flatMap((variant) => {
+        const xpPerHour = this.getExperienceForSkill(variant.xpHour, skill);
+        if (xpPerHour == null) {
+          return [];
+        }
+
+        const profit = methodProfits[variant.id] ?? { low: 0, high: 0 };
+        const marketImpact = this.calculateVariantMarketImpact(
+          variant,
+          pricesByItem,
+          volumes24hByItem,
+        );
+        const tags = buildVariantTags({
+          variant,
+          pricesByItem,
+          volumes24hByItem,
+          itemMetadataById,
+          lowProfit: profit.low,
+          highProfit: profit.high,
+          inputMarketImpactInstant: marketImpact.inputMarketImpactInstant,
+          inputMarketImpactSlow: marketImpact.inputMarketImpactSlow,
+          outputMarketImpactInstant: marketImpact.outputMarketImpactInstant,
+          outputMarketImpactSlow: marketImpact.outputMarketImpactSlow,
+          marketImpactInstant: marketImpact.marketImpactInstant,
+          marketImpactSlow: marketImpact.marketImpactSlow,
+          safety24h: safety24hByVariantId[variant.id] ?? null,
+        });
+
+        if (showOnlyFreeToPlay && variant.members === true) {
+          return [];
+        }
+        if (this.hasIgnoredVariantTag(tags, ignoredTags)) {
+          return [];
+        }
+
+        return [
+          {
+            method: {
+              id: method.id,
+              name: method.name,
+              slug: method.slug,
+              icon_id: method.icon_id,
+              category: method.category,
+              enabled: method.enabled,
+            },
+            variant: {
+              id: variant.id,
+              slug: variant.slug,
+              icon_id: variant.icon_id,
+              label: variant.label,
+              description: variant.description,
+              xpPerHour,
+              actionsPerHour: variant.actionsPerHour,
+              clickIntensity: variant.clickIntensity,
+              afkiness: variant.afkiness,
+              riskLevel: variant.riskLevel,
+              requirements: variant.requirements,
+              wilderness: variant.wilderness,
+              members: variant.members ?? false,
+              lowProfit: profit.low,
+              highProfit: profit.high,
+              tags,
+              inputs: variant.inputs,
+              outputs: variant.outputs,
+            },
+          },
+        ];
+      });
+    });
+  }
+
+  private toRoadmapResponseVariant(variant: RoadmapCandidateVariant): RoadmapVariant {
+    return {
+      id: variant.id,
+      slug: variant.slug,
+      icon_id: variant.icon_id,
+      label: variant.label,
+      description: variant.description,
+      xpPerHour: variant.xpPerHour,
+      clickIntensity: variant.clickIntensity,
+      afkiness: variant.afkiness,
+      riskLevel: variant.riskLevel,
+      requirements: variant.requirements,
+      wilderness: variant.wilderness,
+      members: variant.members,
+      lowProfit: variant.lowProfit,
+      highProfit: variant.highProfit,
+      tags: variant.tags,
+    };
+  }
+
+  private accumulateRoadmapMaterialTotals(
+    totals: Map<number, number>,
+    items: RoadmapMaterialItem[],
+    actionsNeeded: number,
+  ): void {
+    for (const item of items) {
+      const nextQuantity = (totals.get(item.id) ?? 0) + actionsNeeded * item.quantity;
+      totals.set(item.id, nextQuantity);
+    }
+  }
+
+  private toRoadmapTotalsItems(totals: Map<number, number>): RoadmapTotalsItem[] {
+    return [...totals.entries()]
+      .map(([id, quantity]) => ({
+        id,
+        quantity: Math.ceil(quantity),
+      }))
+      .sort((left, right) => left.id - right.id);
+  }
+
+  private getRoadmapAfkPercent(afkiness: number | null | undefined): number {
+    if (!Number.isFinite(afkiness)) {
+      return 100;
+    }
+
+    return Math.max(0, Math.min(MAX_AFKINESS, Number(afkiness)));
+  }
+
+  private compareRoadmapCandidates(
+    left: RoadmapCandidate,
+    right: RoadmapCandidate,
+    strategy: RoadmapStrategy,
+  ): number {
+    const leftAfk = this.getRoadmapAfkPercent(left.variant.afkiness);
+    const rightAfk = this.getRoadmapAfkPercent(right.variant.afkiness);
+
+    if (strategy === 'fastest') {
+      if (left.variant.xpPerHour !== right.variant.xpPerHour) {
+        return right.variant.xpPerHour - left.variant.xpPerHour;
+      }
+      if (left.variant.highProfit !== right.variant.highProfit) {
+        return right.variant.highProfit - left.variant.highProfit;
+      }
+      if (leftAfk !== rightAfk) {
+        return rightAfk - leftAfk;
+      }
+      return left.variant.id.localeCompare(right.variant.id);
+    }
+
+    if (strategy === 'profitable') {
+      if (left.variant.highProfit !== right.variant.highProfit) {
+        return right.variant.highProfit - left.variant.highProfit;
+      }
+      if (left.variant.xpPerHour !== right.variant.xpPerHour) {
+        return right.variant.xpPerHour - left.variant.xpPerHour;
+      }
+      if (leftAfk !== rightAfk) {
+        return rightAfk - leftAfk;
+      }
+      return left.variant.id.localeCompare(right.variant.id);
+    }
+
+    if (leftAfk !== rightAfk) {
+      return rightAfk - leftAfk;
+    }
+    if (left.variant.xpPerHour !== right.variant.xpPerHour) {
+      return right.variant.xpPerHour - left.variant.xpPerHour;
+    }
+    if (left.variant.highProfit !== right.variant.highProfit) {
+      return right.variant.highProfit - left.variant.highProfit;
+    }
+    return left.variant.id.localeCompare(right.variant.id);
+  }
+
+  private pickRoadmapCandidateForLevel(
+    candidates: RoadmapCandidate[],
+    userInfo: UserInfo,
+    skill: string,
+    level: number,
+    strategy: RoadmapStrategy,
+  ): RoadmapCandidate | null {
+    const accessible = candidates.filter((candidate) =>
+      this.canUseRoadmapVariantAtLevel(candidate.variant.requirements, userInfo, skill, level),
+    );
+    if (accessible.length === 0) {
+      return null;
+    }
+
+    return [...accessible].sort((left, right) =>
+      this.compareRoadmapCandidates(left, right, strategy),
+    )[0];
+  }
+
+  private buildSkillRoadmap(
+    candidates: RoadmapCandidate[],
+    userInfo: UserInfo,
+    skill: string,
+    strategy: RoadmapStrategy,
+    skillProgress: RoadmapSkillProgress,
+    targetLevel: number,
+  ) {
+    const targetExperience = this.getExperienceForLevel(targetLevel);
+    if (skillProgress.experience >= targetExperience) {
+      return {
+        skill,
+        strategy,
+        currentLevel: Math.min(skillProgress.level, ROADMAP_TARGET_LEVEL),
+        currentExperience: skillProgress.experience,
+        targetLevel,
+        targetExperience,
+        totalHours: 0,
+        averageAfkPercent: 0,
+        totalProfit: { low: 0, high: 0 },
+        totalInputs: [] as RoadmapTotalsItem[],
+        totalOutputs: [] as RoadmapTotalsItem[],
+        ranges: [] as RoadmapRange[],
+        warnings: [] as string[],
+      };
+    }
+
+    const normalizedStartLevel = Math.max(
+      1,
+      Math.min(
+        targetLevel - 1,
+        Math.max(skillProgress.level, this.getLevelForExperience(skillProgress.experience)),
+      ),
+    );
+    const ranges: RoadmapRange[] = [];
+    const totalInputs = new Map<number, number>();
+    const totalOutputs = new Map<number, number>();
+    const warnings: string[] = [];
+
+    let level = normalizedStartLevel;
+    while (level < targetLevel) {
+      const candidate = this.pickRoadmapCandidateForLevel(
+        candidates,
+        userInfo,
+        skill,
+        level,
+        strategy,
+      );
+      if (!candidate) {
+        throw new NotFoundException(
+          `No roadmap can be generated for skill ${skill} from level ${level} with the selected filters and player requirements`,
+        );
+      }
+
+      let levelEnd = level + 1;
+      while (levelEnd < targetLevel) {
+        const nextCandidate = this.pickRoadmapCandidateForLevel(
+          candidates,
+          userInfo,
+          skill,
+          levelEnd,
+          strategy,
+        );
+        if (!nextCandidate || nextCandidate.variant.id !== candidate.variant.id) {
+          break;
+        }
+        levelEnd += 1;
+      }
+
+      const experienceStart =
+        ranges.length === 0 ? skillProgress.experience : this.getExperienceForLevel(level);
+      const experienceEnd = this.getExperienceForLevel(levelEnd);
+      const experienceNeeded = Math.max(0, experienceEnd - experienceStart);
+      const hours = experienceNeeded / candidate.variant.xpPerHour;
+      const afkPercent = this.getRoadmapAfkPercent(candidate.variant.afkiness);
+      const actionsPerHour = Number(candidate.variant.actionsPerHour);
+      const canComputeMaterials = Number.isFinite(actionsPerHour) && actionsPerHour > 0;
+
+      if (canComputeMaterials) {
+        const actionsNeeded = (experienceNeeded * actionsPerHour) / candidate.variant.xpPerHour;
+        this.accumulateRoadmapMaterialTotals(totalInputs, candidate.variant.inputs, actionsNeeded);
+        this.accumulateRoadmapMaterialTotals(
+          totalOutputs,
+          candidate.variant.outputs,
+          actionsNeeded,
+        );
+      } else {
+        const variantTitle = candidate.variant.label?.trim() || candidate.method.name;
+        warnings.push(
+          `Roadmap material totals are unavailable because actionsPerHour is missing for ${variantTitle} (levels ${level}-${levelEnd}).`,
+        );
+      }
+
+      ranges.push({
+        levelStart: level,
+        levelEnd,
+        experienceStart,
+        experienceEnd,
+        experienceNeeded,
+        hours,
+        afkPercent,
+        profit: {
+          low: hours * candidate.variant.lowProfit,
+          high: hours * candidate.variant.highProfit,
+        },
+        method: candidate.method,
+        variant: this.toRoadmapResponseVariant(candidate.variant),
+      });
+
+      level = levelEnd;
+    }
+
+    const totalHours = ranges.reduce((sum, range) => sum + range.hours, 0);
+    const weightedAfkSum = ranges.reduce((sum, range) => sum + range.hours * range.afkPercent, 0);
+    const totalProfit = ranges.reduce(
+      (sum, range) => ({
+        low: sum.low + range.profit.low,
+        high: sum.high + range.profit.high,
+      }),
+      { low: 0, high: 0 },
+    );
+
+    return {
+      skill,
+      strategy,
+      currentLevel: normalizedStartLevel,
+      currentExperience: skillProgress.experience,
+      targetLevel,
+      targetExperience,
+      totalHours,
+      averageAfkPercent: totalHours > 0 ? weightedAfkSum / totalHours : 0,
+      totalProfit,
+      totalInputs: warnings.length > 0 ? null : this.toRoadmapTotalsItems(totalInputs),
+      totalOutputs: warnings.length > 0 ? null : this.toRoadmapTotalsItems(totalOutputs),
+      ranges,
+      warnings,
+    };
   }
 
   async methodDetailsWithProfitResponse(id: string, username?: string, authorization?: string) {
