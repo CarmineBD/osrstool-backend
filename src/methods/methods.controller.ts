@@ -152,7 +152,7 @@ const ROADMAP_EXAMPLE = {
     target_level: 99,
     enabled: true,
     show_only_free_to_play: true,
-    ignoredTags: ['ge_limits', 'not_viable'],
+    ignoredTags: [],
     computedAt: 1771459200,
     usesExactSkillExperience: true,
   },
@@ -402,8 +402,7 @@ export class MethodsController {
   @ApiQuery({
     name: 'ignoredTags',
     required: false,
-    description:
-      'Comma-separated or repeated variant tag keys to ignore. ge_limits and not_viable are always ignored automatically.',
+    description: 'Comma-separated or repeated variant tag keys to ignore.',
   })
   @ApiQuery({
     name: 'enabled',

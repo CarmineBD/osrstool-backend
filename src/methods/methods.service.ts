@@ -1393,8 +1393,6 @@ export class MethodsService implements OnModuleDestroy {
     const showOnlyFreeToPlay =
       this.parseBooleanQueryParam(query.show_only_free_to_play, 'show_only_free_to_play') ?? false;
     const ignoredTags = new Set(this.parseIgnoredTagsQueryParam(query.ignoredTags) ?? []);
-    ignoredTags.add('ge_limits');
-    ignoredTags.add('not_viable');
 
     const userInfo = await this.fetchRequiredRoadmapUserInfo(username);
     const fallbackLevel = Math.max(
