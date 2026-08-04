@@ -885,6 +885,567 @@ describe('MethodsService variantCount', () => {
     expect(findMock).not.toHaveBeenCalled();
   });
 
+  it('requires username for skill roadmap requests', async () => {
+    const service = new MethodsService(
+      {} as Repository<Method>,
+      {} as Repository<MethodVariant>,
+      {} as Repository<VariantIoItem>,
+      {} as Repository<VariantHistory>,
+      createMethodLikeRepo(),
+      {} as Repository<User>,
+      {} as VariantSnapshotService,
+      {} as RuneScapeApiService,
+      { get: jest.fn().mockReturnValue('redis://localhost:6379') } as unknown as ConfigService,
+    );
+
+    await expect(
+      service.skillRoadmapResponse({
+        skill: 'cooking',
+        strategy: 'fastest',
+        authenticatedUserId: 'user-1',
+      }),
+    ).rejects.toBeInstanceOf(BadRequestException);
+  });
+
+  it('throws when enabled query param is sent by a non-super admin on skill roadmap', async () => {
+    const userRepo = {
+      findOne: jest.fn().mockResolvedValue({ id: 'user-1', role: 'user' }),
+    } as unknown as Repository<User>;
+
+    const service = new MethodsService(
+      {} as Repository<Method>,
+      {} as Repository<MethodVariant>,
+      {} as Repository<VariantIoItem>,
+      {} as Repository<VariantHistory>,
+      createMethodLikeRepo(),
+      userRepo,
+      {} as VariantSnapshotService,
+      {} as RuneScapeApiService,
+      { get: jest.fn().mockReturnValue('redis://localhost:6379') } as unknown as ConfigService,
+    );
+
+    await expect(
+      service.skillRoadmapResponse({
+        username: 'zezima',
+        skill: 'cooking',
+        strategy: 'fastest',
+        enabled: 'false',
+        authenticatedUserId: 'user-1',
+      }),
+    ).rejects.toBeInstanceOf(ForbiddenException);
+  });
+
+  it('throws when target_level is lower than the player current skill level', async () => {
+    const userRepo = {
+      findOne: jest.fn().mockResolvedValue({ id: 'user-1', role: 'user' }),
+    } as unknown as Repository<User>;
+
+    const service = new MethodsService(
+      {} as Repository<Method>,
+      {} as Repository<MethodVariant>,
+      {} as Repository<VariantIoItem>,
+      {} as Repository<VariantHistory>,
+      createMethodLikeRepo(),
+      userRepo,
+      {} as VariantSnapshotService,
+      {} as RuneScapeApiService,
+      { get: jest.fn().mockReturnValue('redis://localhost:6379') } as unknown as ConfigService,
+    );
+
+    jest.spyOn(service as any, 'fetchRequiredRoadmapUserInfo').mockResolvedValue({
+      levels: { Cooking: 70 },
+      quests: {},
+      achievement_diaries: {},
+    });
+    jest.spyOn(service as any, 'fetchRoadmapSkillProgress').mockResolvedValue({
+      level: 70,
+      experience: 737627,
+      usesExactExperience: true,
+    });
+
+    await expect(
+      service.skillRoadmapResponse({
+        username: 'zezima',
+        skill: 'cooking',
+        strategy: 'fastest',
+        target_level: '69',
+        authenticatedUserId: 'user-1',
+      }),
+    ).rejects.toThrow(
+      "target_level must be greater than or equal to the player's current cooking level (70)",
+    );
+  });
+
+  it('builds a fastest roadmap with dynamic skill unlocks and auto-ignored ge_limits and not_viable tags', async () => {
+    const userRepo = {
+      findOne: jest.fn().mockResolvedValue({ id: 'user-1', role: 'user' }),
+    } as unknown as Repository<User>;
+
+    const service = new MethodsService(
+      {} as Repository<Method>,
+      {} as Repository<MethodVariant>,
+      {} as Repository<VariantIoItem>,
+      {} as Repository<VariantHistory>,
+      createMethodLikeRepo(),
+      userRepo,
+      {} as VariantSnapshotService,
+      {} as RuneScapeApiService,
+      { get: jest.fn().mockReturnValue('redis://localhost:6379') } as unknown as ConfigService,
+    );
+
+    jest.spyOn(service as any, 'fetchRequiredRoadmapUserInfo').mockResolvedValue({
+      levels: { Cooking: 1, Magic: 80 },
+      quests: {},
+      achievement_diaries: {},
+    });
+    jest.spyOn(service as any, 'fetchRoadmapSkillProgress').mockResolvedValue({
+      level: 1,
+      experience: 0,
+      usesExactExperience: false,
+    });
+
+    const roadmapCandidates = [
+      {
+        method: {
+          id: 'm1',
+          name: 'Shrimp',
+          slug: 'shrimp',
+          icon_id: 1,
+          category: 'Cooking',
+          enabled: true,
+        },
+        variant: {
+          id: 'v1',
+          slug: 'v1',
+          icon_id: 1,
+          label: 'Shrimp basic',
+          description: null,
+          xpPerHour: 10000,
+          actionsPerHour: 1000,
+          afkiness: null,
+          clickIntensity: 1,
+          riskLevel: '1',
+          requirements: null,
+          wilderness: false,
+          members: false,
+          lowProfit: -100,
+          highProfit: 50,
+          tags: [],
+          inputs: [{ id: 317, quantity: 1 }],
+          outputs: [{ id: 315, quantity: 1 }],
+        },
+      },
+      {
+        method: {
+          id: 'm2',
+          name: 'Trout',
+          slug: 'trout',
+          icon_id: 2,
+          category: 'Cooking',
+          enabled: true,
+        },
+        variant: {
+          id: 'v2',
+          slug: 'v2',
+          icon_id: 2,
+          label: 'Trout basic',
+          description: null,
+          xpPerHour: 20000,
+          actionsPerHour: 2000,
+          afkiness: 20,
+          clickIntensity: 1,
+          riskLevel: '1',
+          requirements: {
+            levels: [{ skill: 'Cooking', level: 20 }],
+          },
+          wilderness: false,
+          members: false,
+          lowProfit: 0,
+          highProfit: 150,
+          tags: [],
+          inputs: [{ id: 335, quantity: 1 }],
+          outputs: [{ id: 333, quantity: 1 }],
+        },
+      },
+      {
+        method: {
+          id: 'm3',
+          name: 'Swordfish',
+          slug: 'swordfish',
+          icon_id: 3,
+          category: 'Cooking',
+          enabled: true,
+        },
+        variant: {
+          id: 'v3',
+          slug: 'v3',
+          icon_id: 3,
+          label: 'Swordfish basic',
+          description: null,
+          xpPerHour: 30000,
+          actionsPerHour: 3000,
+          afkiness: 80,
+          clickIntensity: 1,
+          riskLevel: '1',
+          requirements: {
+            levels: [{ skill: 'Cooking', level: 40 }],
+          },
+          wilderness: false,
+          members: false,
+          lowProfit: -50,
+          highProfit: 200,
+          tags: [],
+          inputs: [{ id: 371, quantity: 1 }],
+          outputs: [{ id: 373, quantity: 1 }],
+        },
+      },
+    ];
+
+    const findRoadmapCandidatesSpy = jest
+      .spyOn(service as any, 'findRoadmapCandidates')
+      .mockResolvedValue(roadmapCandidates);
+
+    const result = (await service.skillRoadmapResponse({
+      username: 'zezima',
+      skill: 'cooking',
+      strategy: 'fastest',
+      show_only_free_to_play: 'true',
+      ignoredTags: 'safe',
+      authenticatedUserId: 'user-1',
+    })) as {
+      data: {
+        roadmap: {
+          targetLevel: number;
+          totalInputs: Array<{ id: number; quantity: number }> | null;
+          totalOutputs: Array<{ id: number; quantity: number }> | null;
+          warnings: string[];
+          ranges: Array<{
+            levelStart: number;
+            levelEnd: number;
+            afkPercent: number;
+            variant: { id: string };
+          }>;
+          totalHours: number;
+          averageAfkPercent: number;
+        };
+      };
+      warnings: string[];
+      meta: { ignoredTags: string[] };
+    };
+
+    expect(findRoadmapCandidatesSpy).toHaveBeenCalledWith(
+      'cooking',
+      true,
+      new Set(['safe', 'ge_limits', 'not_viable']),
+      true,
+    );
+    expect(result.data.roadmap.targetLevel).toBe(99);
+    expect(result.data.roadmap.ranges.map((range) => range.variant.id)).toEqual(['v1', 'v2', 'v3']);
+    expect(result.data.roadmap.ranges.map((range) => [range.levelStart, range.levelEnd])).toEqual([
+      [1, 20],
+      [20, 40],
+      [40, 99],
+    ]);
+    expect(result.data.roadmap.ranges[0].afkPercent).toBe(100);
+    expect(result.data.roadmap.totalHours).toBeGreaterThan(0);
+    expect(result.data.roadmap.averageAfkPercent).toBeGreaterThan(20);
+    expect(result.data.roadmap.totalInputs).toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({ id: 317 }),
+        expect.objectContaining({ id: 335 }),
+        expect.objectContaining({ id: 371 }),
+      ]),
+    );
+    expect(result.data.roadmap.totalOutputs).toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({ id: 315 }),
+        expect.objectContaining({ id: 333 }),
+        expect.objectContaining({ id: 373 }),
+      ]),
+    );
+    expect(result.data.roadmap.warnings).toEqual([]);
+    expect(result.warnings).toEqual([]);
+    expect(result.meta.ignoredTags).toEqual(
+      expect.arrayContaining(['safe', 'ge_limits', 'not_viable']),
+    );
+  });
+
+  it('uses the provided target_level instead of defaulting to 99', async () => {
+    const userRepo = {
+      findOne: jest.fn().mockResolvedValue({ id: 'user-1', role: 'user' }),
+    } as unknown as Repository<User>;
+
+    const service = new MethodsService(
+      {} as Repository<Method>,
+      {} as Repository<MethodVariant>,
+      {} as Repository<VariantIoItem>,
+      {} as Repository<VariantHistory>,
+      createMethodLikeRepo(),
+      userRepo,
+      {} as VariantSnapshotService,
+      {} as RuneScapeApiService,
+      { get: jest.fn().mockReturnValue('redis://localhost:6379') } as unknown as ConfigService,
+    );
+
+    jest.spyOn(service as any, 'fetchRequiredRoadmapUserInfo').mockResolvedValue({
+      levels: { Cooking: 1 },
+      quests: {},
+      achievement_diaries: {},
+    });
+    jest.spyOn(service as any, 'fetchRoadmapSkillProgress').mockResolvedValue({
+      level: 1,
+      experience: 0,
+      usesExactExperience: false,
+    });
+    jest.spyOn(service as any, 'findRoadmapCandidates').mockResolvedValue([
+      {
+        method: {
+          id: 'm1',
+          name: 'Shrimp',
+          slug: 'shrimp',
+          icon_id: 1,
+          category: 'Cooking',
+          enabled: true,
+        },
+        variant: {
+          id: 'v1',
+          slug: 'v1',
+          icon_id: 1,
+          label: 'Shrimp basic',
+          description: null,
+          xpPerHour: 10000,
+          actionsPerHour: 1000,
+          afkiness: null,
+          clickIntensity: 1,
+          riskLevel: '1',
+          requirements: null,
+          wilderness: false,
+          members: false,
+          lowProfit: -100,
+          highProfit: 50,
+          tags: [],
+          inputs: [{ id: 317, quantity: 1 }],
+          outputs: [{ id: 315, quantity: 1 }],
+        },
+      },
+    ]);
+
+    const result = (await service.skillRoadmapResponse({
+      username: 'zezima',
+      skill: 'cooking',
+      strategy: 'fastest',
+      target_level: '50',
+      authenticatedUserId: 'user-1',
+    })) as {
+      data: {
+        roadmap: {
+          targetLevel: number;
+          totalInputs: Array<{ id: number; quantity: number }> | null;
+          totalOutputs: Array<{ id: number; quantity: number }> | null;
+          ranges: Array<{ levelStart: number; levelEnd: number }>;
+        };
+      };
+      warnings: string[];
+      meta: { target_level: number };
+    };
+
+    expect(result.data.roadmap.targetLevel).toBe(50);
+    expect(result.data.roadmap.ranges.map((range) => [range.levelStart, range.levelEnd])).toEqual([
+      [1, 50],
+    ]);
+    expect(result.data.roadmap.totalInputs).toEqual([{ id: 317, quantity: 10134 }]);
+    expect(result.data.roadmap.totalOutputs).toEqual([{ id: 315, quantity: 10134 }]);
+    expect(result.warnings).toEqual([]);
+    expect(result.meta.target_level).toBe(50);
+  });
+
+  it('returns a strict materials warning and null totals when one roadmap range lacks actionsPerHour', async () => {
+    const userRepo = {
+      findOne: jest.fn().mockResolvedValue({ id: 'user-1', role: 'user' }),
+    } as unknown as Repository<User>;
+
+    const service = new MethodsService(
+      {} as Repository<Method>,
+      {} as Repository<MethodVariant>,
+      {} as Repository<VariantIoItem>,
+      {} as Repository<VariantHistory>,
+      createMethodLikeRepo(),
+      userRepo,
+      {} as VariantSnapshotService,
+      {} as RuneScapeApiService,
+      { get: jest.fn().mockReturnValue('redis://localhost:6379') } as unknown as ConfigService,
+    );
+
+    jest.spyOn(service as any, 'fetchRequiredRoadmapUserInfo').mockResolvedValue({
+      levels: { Cooking: 1 },
+      quests: {},
+      achievement_diaries: {},
+    });
+    jest.spyOn(service as any, 'fetchRoadmapSkillProgress').mockResolvedValue({
+      level: 1,
+      experience: 0,
+      usesExactExperience: false,
+    });
+    jest.spyOn(service as any, 'findRoadmapCandidates').mockResolvedValue([
+      {
+        method: {
+          id: 'm1',
+          name: 'Shrimp',
+          slug: 'shrimp',
+          icon_id: 1,
+          category: 'Cooking',
+          enabled: true,
+        },
+        variant: {
+          id: 'v1',
+          slug: 'v1',
+          icon_id: 1,
+          label: 'Shrimp basic',
+          description: null,
+          xpPerHour: 10000,
+          actionsPerHour: null,
+          afkiness: null,
+          clickIntensity: 1,
+          riskLevel: '1',
+          requirements: null,
+          wilderness: false,
+          members: false,
+          lowProfit: -100,
+          highProfit: 50,
+          tags: [],
+          inputs: [{ id: 317, quantity: 1 }],
+          outputs: [{ id: 315, quantity: 1 }],
+        },
+      },
+    ]);
+
+    const result = (await service.skillRoadmapResponse({
+      username: 'zezima',
+      skill: 'cooking',
+      strategy: 'fastest',
+      target_level: '50',
+      authenticatedUserId: 'user-1',
+    })) as {
+      status: string;
+      data: {
+        roadmap: {
+          totalInputs: Array<{ id: number; quantity: number }> | null;
+          totalOutputs: Array<{ id: number; quantity: number }> | null;
+          warnings: string[];
+        };
+      };
+      warnings: string[];
+    };
+
+    expect(result.status).toBe('partial');
+    expect(result.data.roadmap.totalInputs).toBeNull();
+    expect(result.data.roadmap.totalOutputs).toBeNull();
+    expect(result.data.roadmap.warnings[0]).toContain('actionsPerHour is missing');
+    expect(result.warnings[0]).toContain('actionsPerHour is missing');
+  });
+
+  it('treats null afkiness as 100 for most_afk roadmaps', async () => {
+    const userRepo = {
+      findOne: jest.fn().mockResolvedValue({ id: 'user-1', role: 'user' }),
+    } as unknown as Repository<User>;
+
+    const service = new MethodsService(
+      {} as Repository<Method>,
+      {} as Repository<MethodVariant>,
+      {} as Repository<VariantIoItem>,
+      {} as Repository<VariantHistory>,
+      createMethodLikeRepo(),
+      userRepo,
+      {} as VariantSnapshotService,
+      {} as RuneScapeApiService,
+      { get: jest.fn().mockReturnValue('redis://localhost:6379') } as unknown as ConfigService,
+    );
+
+    jest.spyOn(service as any, 'fetchRequiredRoadmapUserInfo').mockResolvedValue({
+      levels: { Cooking: 1 },
+      quests: {},
+      achievement_diaries: {},
+    });
+    jest.spyOn(service as any, 'fetchRoadmapSkillProgress').mockResolvedValue({
+      level: 1,
+      experience: 0,
+      usesExactExperience: false,
+    });
+    jest.spyOn(service as any, 'findRoadmapCandidates').mockResolvedValue([
+      {
+        method: {
+          id: 'm1',
+          name: 'Null afk',
+          slug: 'null-afk',
+          icon_id: 1,
+          category: 'Cooking',
+          enabled: true,
+        },
+        variant: {
+          id: 'v1',
+          slug: 'v1',
+          icon_id: 1,
+          label: 'Null afk',
+          description: null,
+          xpPerHour: 10000,
+          afkiness: null,
+          clickIntensity: 1,
+          riskLevel: '1',
+          requirements: null,
+          wilderness: false,
+          members: false,
+          lowProfit: 0,
+          highProfit: 1,
+          tags: [],
+        },
+      },
+      {
+        method: {
+          id: 'm2',
+          name: 'Eighty afk',
+          slug: 'eighty-afk',
+          icon_id: 2,
+          category: 'Cooking',
+          enabled: true,
+        },
+        variant: {
+          id: 'v2',
+          slug: 'v2',
+          icon_id: 2,
+          label: 'Eighty afk',
+          description: null,
+          xpPerHour: 50000,
+          afkiness: 80,
+          clickIntensity: 1,
+          riskLevel: '1',
+          requirements: null,
+          wilderness: false,
+          members: false,
+          lowProfit: 0,
+          highProfit: 1000,
+          tags: [],
+        },
+      },
+    ]);
+
+    const result = (await service.skillRoadmapResponse({
+      username: 'zezima',
+      skill: 'cooking',
+      strategy: 'most_afk',
+      authenticatedUserId: 'user-1',
+    })) as {
+      data: {
+        roadmap: {
+          ranges: Array<{ variant: { id: string }; afkPercent: number }>;
+        };
+      };
+    };
+
+    expect(result.data.roadmap.ranges).toHaveLength(1);
+    expect(result.data.roadmap.ranges[0].variant.id).toBe('v1');
+    expect(result.data.roadmap.ranges[0].afkPercent).toBe(100);
+  });
+
   it('throws when likedByMe=true is sent without auth', async () => {
     const methodRepo = {
       find: jest.fn().mockResolvedValue([]),
