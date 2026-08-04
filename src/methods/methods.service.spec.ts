@@ -985,7 +985,7 @@ describe('MethodsService variantCount', () => {
     );
   });
 
-  it('builds a fastest roadmap with dynamic skill unlocks and auto-ignored ge_limits and not_viable tags', async () => {
+  it('builds a fastest roadmap with dynamic skill unlocks and forwards only the requested ignored tags', async () => {
     const userRepo = {
       findOne: jest.fn().mockResolvedValue({ id: 'user-1', role: 'user' }),
     } as unknown as Repository<User>;
@@ -1142,12 +1142,7 @@ describe('MethodsService variantCount', () => {
       meta: { ignoredTags: string[] };
     };
 
-    expect(findRoadmapCandidatesSpy).toHaveBeenCalledWith(
-      'cooking',
-      true,
-      new Set(['safe', 'ge_limits', 'not_viable']),
-      true,
-    );
+    expect(findRoadmapCandidatesSpy).toHaveBeenCalledWith('cooking', true, new Set(['safe']), true);
     expect(result.data.roadmap.targetLevel).toBe(99);
     expect(result.data.roadmap.ranges.map((range) => range.variant.id)).toEqual(['v1', 'v2', 'v3']);
     expect(result.data.roadmap.ranges.map((range) => [range.levelStart, range.levelEnd])).toEqual([
@@ -1174,9 +1169,7 @@ describe('MethodsService variantCount', () => {
     );
     expect(result.data.roadmap.warnings).toEqual([]);
     expect(result.warnings).toEqual([]);
-    expect(result.meta.ignoredTags).toEqual(
-      expect.arrayContaining(['safe', 'ge_limits', 'not_viable']),
-    );
+    expect(result.meta.ignoredTags).toEqual(['safe']);
   });
 
   it('uses the provided target_level instead of defaulting to 99', async () => {
