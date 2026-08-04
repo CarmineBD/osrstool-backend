@@ -2,6 +2,7 @@ import { Item } from '../items/entities/item.entity';
 import { Method } from '../methods/entities/method.entity';
 import { MethodVariant } from '../methods/entities/variant.entity';
 import { VariantIoItem } from '../methods/entities/io-item.entity';
+import { ActionType } from '../methods/action-type.enum';
 
 export const buildItemFixture = (overrides: Partial<Item> = {}): Item => {
   const base: Item = {
@@ -46,6 +47,7 @@ export const buildMethodFixture = (): Method => {
   variantA.wilderness = false;
   variantA.members = false;
   variantA.actionsPerHour = 600;
+  variantA.actionType = ActionType.ITEMS;
   variantA.ioItems = [
     Object.assign(new VariantIoItem(), {
       itemId: 100,
@@ -74,6 +76,7 @@ export const buildMethodFixture = (): Method => {
   variantB.wilderness = false;
   variantB.members = false;
   variantB.actionsPerHour = 800;
+  variantB.actionType = ActionType.ITEMS;
   variantB.ioItems = [
     Object.assign(new VariantIoItem(), {
       itemId: 100,

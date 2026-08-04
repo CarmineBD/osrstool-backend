@@ -12,6 +12,7 @@ import { User } from '../auth/entities/user.entity';
 import { BadRequestException, ForbiddenException, UnauthorizedException } from '@nestjs/common';
 import { Item } from '../items/entities/item.entity';
 import { VARIANT_TAG_DEFINITIONS } from './variant-tags';
+import { ActionType } from './action-type.enum';
 
 type MethodDetailsWithProfitResult = Awaited<
   ReturnType<MethodsService['findMethodDetailsWithProfit']>
@@ -56,6 +57,7 @@ describe('MethodsService variantCount', () => {
           recommendations: null,
           wilderness: false,
           actionsPerHour: 0,
+          actionType: ActionType.ITEMS,
           createdAt: new Date(),
           ioItems: [],
           method: {} as Method,
@@ -73,6 +75,7 @@ describe('MethodsService variantCount', () => {
           recommendations: null,
           wilderness: false,
           actionsPerHour: 0,
+          actionType: ActionType.ITEMS,
           createdAt: new Date(),
           ioItems: [],
           method: {} as Method,
@@ -148,6 +151,7 @@ describe('MethodsService variantCount', () => {
           recommendations: null,
           wilderness: false,
           actionsPerHour: 0,
+          actionType: ActionType.ITEMS,
           createdAt: new Date(),
           ioItems: [],
           method: {} as Method,
@@ -165,6 +169,7 @@ describe('MethodsService variantCount', () => {
           recommendations: null,
           wilderness: false,
           actionsPerHour: 0,
+          actionType: ActionType.ITEMS,
           createdAt: new Date(),
           ioItems: [],
           method: {} as Method,
@@ -253,6 +258,7 @@ describe('MethodsService variantCount', () => {
           recommendations: null,
           wilderness: false,
           actionsPerHour: 0,
+          actionType: ActionType.ITEMS,
           createdAt: new Date(),
           ioItems: [
             {
@@ -622,6 +628,7 @@ describe('MethodsService variantCount', () => {
           recommendations: null,
           wilderness: false,
           actionsPerHour: 800,
+          actionType: ActionType.ITEMS,
           createdAt: new Date(),
           ioItems: [],
           method: {} as Method,
@@ -639,6 +646,7 @@ describe('MethodsService variantCount', () => {
           recommendations: null,
           wilderness: false,
           actionsPerHour: 600,
+          actionType: ActionType.ITEMS,
           createdAt: new Date(),
           ioItems: [],
           method: {} as Method,
@@ -668,6 +676,7 @@ describe('MethodsService variantCount', () => {
           recommendations: null,
           wilderness: false,
           actionsPerHour: 500,
+          actionType: ActionType.ITEMS,
           createdAt: new Date(),
           ioItems: [],
           method: {} as Method,
@@ -2387,6 +2396,7 @@ describe('MethodsService trending profit', () => {
       wilderness: false,
       members: false,
       actionsPerHour: 0,
+      actionType: ActionType.ITEMS,
       createdAt: new Date(),
       ioItems: [],
       method: {} as Method,

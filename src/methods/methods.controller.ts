@@ -53,6 +53,7 @@ const METHOD_EXAMPLE = {
       inputs: [{ id: 3144, quantity: 1, reason: null }],
       outputs: [{ id: 3145, quantity: 1, reason: null }],
       actionsPerHour: 1200,
+      actionType: 'items',
       clickIntensity: 2,
       afkiness: 2,
       riskLevel: 'low',

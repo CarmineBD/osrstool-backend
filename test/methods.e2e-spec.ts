@@ -18,6 +18,7 @@ import { Method } from '../src/methods/entities/method.entity';
 import { MethodVariant } from '../src/methods/entities/variant.entity';
 import { VariantIoItem } from '../src/methods/entities/io-item.entity';
 import { VariantHistory } from '../src/methods/entities/variant-history.entity';
+import { ActionType } from '../src/methods/action-type.enum';
 import { createPgMemAdapter } from './utils/pg-mem';
 
 jest.mock('pg', () => createPgMemAdapter());
@@ -167,6 +168,7 @@ describe('Methods (e2e)', () => {
       recommendations: variantA.recommendations,
       wilderness: variantA.wilderness,
       actionsPerHour: variantA.actionsPerHour,
+      actionType: ActionType.ITEMS,
       method: savedMethod,
     });
 
@@ -182,6 +184,7 @@ describe('Methods (e2e)', () => {
       recommendations: variantB.recommendations,
       wilderness: variantB.wilderness,
       actionsPerHour: variantB.actionsPerHour,
+      actionType: ActionType.ITEMS,
       method: savedMethod,
     });
 
@@ -265,6 +268,7 @@ describe('Methods (e2e)', () => {
       recommendations: variantA.recommendations,
       wilderness: variantA.wilderness,
       actionsPerHour: variantA.actionsPerHour,
+      actionType: ActionType.ITEMS,
       method: savedMethod,
     });
 
@@ -280,6 +284,7 @@ describe('Methods (e2e)', () => {
       recommendations: variantB.recommendations,
       wilderness: variantB.wilderness,
       actionsPerHour: variantB.actionsPerHour,
+      actionType: ActionType.ITEMS,
       method: savedMethod,
     });
 
@@ -372,6 +377,7 @@ describe('Methods (e2e)', () => {
       wilderness: variantA.wilderness,
       members: false,
       actionsPerHour: variantA.actionsPerHour,
+      actionType: ActionType.ITEMS,
       method: savedMethod,
     });
 
@@ -388,6 +394,7 @@ describe('Methods (e2e)', () => {
       wilderness: variantB.wilderness,
       members: true,
       actionsPerHour: variantB.actionsPerHour,
+      actionType: ActionType.ITEMS,
       method: savedMethod,
     });
 
@@ -440,6 +447,7 @@ describe('Methods (e2e)', () => {
       wilderness: variantA.wilderness,
       members: false,
       actionsPerHour: variantA.actionsPerHour,
+      actionType: ActionType.ITEMS,
       method: savedMethod,
     });
 
@@ -456,6 +464,7 @@ describe('Methods (e2e)', () => {
       wilderness: variantB.wilderness,
       members: true,
       actionsPerHour: variantB.actionsPerHour,
+      actionType: ActionType.ITEMS,
       method: savedMethod,
     });
 
@@ -510,6 +519,7 @@ describe('Methods (e2e)', () => {
       recommendations: variantA.recommendations,
       wilderness: variantA.wilderness,
       actionsPerHour: variantA.actionsPerHour,
+      actionType: ActionType.ITEMS,
       method: savedMethod,
     });
 
@@ -525,6 +535,7 @@ describe('Methods (e2e)', () => {
       recommendations: variantB.recommendations,
       wilderness: variantB.wilderness,
       actionsPerHour: variantB.actionsPerHour,
+      actionType: ActionType.ITEMS,
       method: savedMethod,
     });
 
@@ -587,6 +598,7 @@ describe('Methods (e2e)', () => {
       recommendations: null,
       wilderness: false,
       actionsPerHour: 0,
+      actionType: ActionType.ITEMS,
       method: smallMethod,
     });
     const bigVariant = await variantRepo.save({
@@ -601,6 +613,7 @@ describe('Methods (e2e)', () => {
       recommendations: null,
       wilderness: false,
       actionsPerHour: 0,
+      actionType: ActionType.ITEMS,
       method: bigMethod,
     });
 
@@ -720,6 +733,7 @@ describe('Methods (e2e)', () => {
       recommendations: variantA.recommendations,
       wilderness: variantA.wilderness,
       actionsPerHour: variantA.actionsPerHour,
+      actionType: ActionType.ITEMS,
       method: savedMethod,
     });
 
@@ -735,6 +749,7 @@ describe('Methods (e2e)', () => {
       recommendations: variantB.recommendations,
       wilderness: variantB.wilderness,
       actionsPerHour: variantB.actionsPerHour,
+      actionType: ActionType.ITEMS,
       method: savedMethod,
     });
 
@@ -944,6 +959,7 @@ describe('Methods (e2e)', () => {
       recommendations: null,
       wilderness: false,
       actionsPerHour: 100,
+      actionType: ActionType.ITEMS,
       method: savedMethod,
     });
 
@@ -1003,6 +1019,7 @@ describe('Methods (e2e)', () => {
       wilderness: false,
       members: false,
       actionsPerHour: 100,
+      actionType: ActionType.ITEMS,
       method: savedMethod,
     });
 
@@ -1071,6 +1088,7 @@ describe('Methods (e2e)', () => {
       recommendations: null,
       wilderness: false,
       actionsPerHour: 100,
+      actionType: ActionType.ITEMS,
       method: savedMethod,
     });
 
@@ -1123,6 +1141,7 @@ describe('Methods (e2e)', () => {
       wilderness: false,
       members: false,
       actionsPerHour: 100,
+      actionType: ActionType.ITEMS,
       method: savedMethod,
     });
 
@@ -1273,6 +1292,7 @@ describe('Methods (e2e)', () => {
       recommendations: null,
       wilderness: false,
       actionsPerHour: 100,
+      actionType: ActionType.ITEMS,
       method: savedMethod,
     });
 

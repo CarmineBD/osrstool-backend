@@ -2271,6 +2271,7 @@ export class MethodsService implements OnModuleDestroy {
         method,
         label: v.label,
         actionsPerHour: v.actionsPerHour,
+        actionType: v.actionType,
         xpHour: v.xpHour,
         clickIntensity: v.clickIntensity,
         afkiness: v.afkiness,

@@ -13,6 +13,7 @@ import {
 import { Method } from './method.entity';
 import { VariantIoItem } from './io-item.entity';
 import { XpHour, VariantRequirements, VariantRecommendations } from '../types';
+import { ActionType } from '../action-type.enum';
 
 @Entity('method_variants')
 @Unique('UQ_variant_method_slug', ['method', 'slug'])
@@ -73,6 +74,13 @@ export class MethodVariant {
     nullable: true,
   })
   actionsPerHour: number;
+
+  @Column({
+    name: 'action_type',
+    type: 'varchar',
+    length: 32,
+  })
+  actionType: ActionType;
 
   @Column({ name: 'likes_count', type: 'int', default: 0 })
   likesCount?: number;
