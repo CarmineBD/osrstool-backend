@@ -2,6 +2,7 @@ import { Module } from '@nestjs/common';
 import { TypeOrmModule } from '@nestjs/typeorm';
 import { AuthController } from './auth.controller';
 import { AuthService } from './auth.service';
+import { CompleteProfileGuard } from './complete-profile.guard';
 import { OptionalSupabaseAuthGuard } from './optional-supabase-auth.guard';
 import { SupabaseAuthGuard } from './supabase-auth.guard';
 import { SuperAdminGuard } from './super-admin.guard';
@@ -11,7 +12,19 @@ import { MethodVariant } from '../methods/entities/variant.entity';
 @Module({
   imports: [TypeOrmModule.forFeature([User, MethodVariant])],
   controllers: [AuthController],
-  providers: [SupabaseAuthGuard, OptionalSupabaseAuthGuard, SuperAdminGuard, AuthService],
-  exports: [SupabaseAuthGuard, OptionalSupabaseAuthGuard, SuperAdminGuard, AuthService],
+  providers: [
+    SupabaseAuthGuard,
+    OptionalSupabaseAuthGuard,
+    CompleteProfileGuard,
+    SuperAdminGuard,
+    AuthService,
+  ],
+  exports: [
+    SupabaseAuthGuard,
+    OptionalSupabaseAuthGuard,
+    CompleteProfileGuard,
+    SuperAdminGuard,
+    AuthService,
+  ],
 })
 export class AuthModule {}
