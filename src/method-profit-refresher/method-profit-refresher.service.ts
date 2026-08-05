@@ -1,10 +1,11 @@
-import { Injectable, Logger } from '@nestjs/common';
+import { Injectable, Logger, Optional } from '@nestjs/common';
 import { Cron } from '@nestjs/schedule';
-import Redis from 'ioredis';
+import IORedis, { Redis } from 'ioredis';
 import { MethodsService } from '../methods/methods.service';
 import { PricesService } from '../prices/prices.service';
 import { ConfigService } from '@nestjs/config';
 import { parseBooleanEnv } from '../common/utils/parse-boolean-env';
+import { RedisService } from '../redis/redis.service';
 
 @Injectable()
 export class MethodProfitRefresherService {
@@ -17,9 +18,11 @@ export class MethodProfitRefresherService {
     private readonly methodsService: MethodsService,
     private readonly pricesService: PricesService,
     private readonly config: ConfigService,
+    @Optional() redisService?: RedisService,
   ) {
-    const redisUrl = this.config.get<string>('REDIS_URL') as string;
-    this.redis = new Redis(redisUrl);
+    this.redis =
+      redisService?.getClient() ??
+      new IORedis((this.config.get<string>('REDIS_URL') as string) ?? '');
     this.jobsEnabled = parseBooleanEnv(this.config.get<string>('SCHEDULED_JOBS_ENABLED'), true);
   }
 

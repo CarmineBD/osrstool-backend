@@ -1,8 +1,8 @@
-import { Injectable, Logger } from '@nestjs/common';
+import { Injectable, Logger, Optional } from '@nestjs/common';
 import { Cron } from '@nestjs/schedule';
 import { ConfigService } from '@nestjs/config';
 import { InjectRepository } from '@nestjs/typeorm';
-import Redis from 'ioredis';
+import IORedis, { Redis } from 'ioredis';
 import { Repository } from 'typeorm';
 import { VariantHistory15m } from '../methods/entities/variant-history-15m.entity';
 import { VariantHistoryDaily } from '../methods/entities/variant-history-daily.entity';
@@ -10,6 +10,7 @@ import { VariantHistory } from '../methods/entities/variant-history.entity';
 import { VariantSnapshot } from '../methods/entities/variant-snapshot.entity';
 import { MethodVariant } from '../methods/entities/variant.entity';
 import { parseBooleanEnv } from '../common/utils/parse-boolean-env';
+import { RedisService } from '../redis/redis.service';
 import {
   HistoryAgg,
   HistoryGranularity,
@@ -52,9 +53,11 @@ export class VariantHistoryService {
     @InjectRepository(VariantSnapshot)
     private readonly snapshotRepo: Repository<VariantSnapshot>,
     private readonly config: ConfigService,
+    @Optional() redisService?: RedisService,
   ) {
-    const redisUrl = this.config.get<string>('REDIS_URL') as string;
-    this.redis = new Redis(redisUrl);
+    this.redis =
+      redisService?.getClient() ??
+      new IORedis((this.config.get<string>('REDIS_URL') as string) ?? '');
     this.jobsEnabled = parseBooleanEnv(this.config.get<string>('SCHEDULED_JOBS_ENABLED'), true);
     this.pruneEnabled = parseBooleanEnv(
       this.config.get<string>('VARIANT_HISTORY_PRUNE_ENABLED'),
