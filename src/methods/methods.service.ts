@@ -2,6 +2,7 @@ import {
   Injectable,
   Logger,
   NotFoundException,
+  Optional,
   OnModuleDestroy,
   BadRequestException,
   UnauthorizedException,
@@ -29,6 +30,7 @@ import { ConfigService } from '@nestjs/config';
 import { User } from '../auth/entities/user.entity';
 import { calculateMarketImpact, type MarketImpactResult } from './market-impact-calculator';
 import { Item } from '../items/entities/item.entity';
+import { RedisService } from '../redis/redis.service';
 import { METHOD_CATEGORY_VALUES } from './dto/method-category.constants';
 import { SKILL_KEY_VALUES } from './dto/skill.constants';
 import {
@@ -404,6 +406,7 @@ const OSRS_XP_BY_LEVEL = (() => {
 export class MethodsService implements OnModuleDestroy {
   private readonly logger = new Logger(MethodsService.name);
   private readonly redis: Redis;
+  private readonly ownsRedisClient: boolean;
   private readonly methodsProfitsHashKey = 'methods:profits';
   private readonly itemPricesHashKey = 'items:prices';
   private readonly itemVolumes24hHashKey = 'items:vol24h';
@@ -433,13 +436,17 @@ export class MethodsService implements OnModuleDestroy {
     private readonly config: ConfigService,
     @InjectRepository(Item)
     private readonly itemRepo?: Repository<Item>,
+    @Optional() redisService?: RedisService,
   ) {
-    const redisUrl = this.config.get<string>('REDIS_URL') as string;
-    this.redis = new IORedis(redisUrl);
+    const sharedRedis = redisService?.getClient();
+    this.redis = sharedRedis ?? new IORedis((this.config.get<string>('REDIS_URL') as string) ?? '');
+    this.ownsRedisClient = !sharedRedis;
   }
 
   onModuleDestroy() {
-    void this.redis.quit();
+    if (this.ownsRedisClient) {
+      void this.redis.quit();
+    }
   }
 
   private isMethodDetailsPerfLogEnabled(): boolean {

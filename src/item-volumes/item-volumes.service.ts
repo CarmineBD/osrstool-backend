@@ -1,13 +1,14 @@
-import { Injectable, Logger, OnModuleDestroy, OnModuleInit } from '@nestjs/common';
+import { Injectable, Logger, OnModuleDestroy, OnModuleInit, Optional } from '@nestjs/common';
 import { Cron } from '@nestjs/schedule';
 import { HttpService } from '@nestjs/axios';
 import { firstValueFrom } from 'rxjs';
 import { ConfigService } from '@nestjs/config';
-import Redis from 'ioredis';
+import IORedis, { Redis } from 'ioredis';
 import { InjectRepository } from '@nestjs/typeorm';
 import { Repository } from 'typeorm';
 import { ItemVolumeBucket } from './entities/item-volume-bucket.entity';
 import { parseBooleanEnv } from '../common/utils/parse-boolean-env';
+import { RedisService } from '../redis/redis.service';
 
 interface WikiHourVolumeEntry {
   highPriceVolume?: number;
@@ -34,6 +35,7 @@ interface ItemVol24h {
 export class ItemVolumesService implements OnModuleInit, OnModuleDestroy {
   private readonly logger = new Logger(ItemVolumesService.name);
   private readonly redis: Redis;
+  private readonly ownsRedisClient: boolean;
   private readonly volumesApi = 'https://prices.runescape.wiki/api/v1/osrs/1h';
   private readonly vol24hHashKey = 'items:vol24h';
   private readonly lockKey = 'lock:items:volumes:1h';
@@ -52,9 +54,11 @@ export class ItemVolumesService implements OnModuleInit, OnModuleDestroy {
     private readonly config: ConfigService,
     @InjectRepository(ItemVolumeBucket)
     private readonly volumeBucketRepo: Repository<ItemVolumeBucket>,
+    @Optional() redisService?: RedisService,
   ) {
-    const redisUrl = this.config.get<string>('REDIS_URL') as string;
-    this.redis = new Redis(redisUrl);
+    const sharedRedis = redisService?.getClient();
+    this.redis = sharedRedis ?? new IORedis((this.config.get<string>('REDIS_URL') as string) ?? '');
+    this.ownsRedisClient = !sharedRedis;
     this.jobsEnabled = parseBooleanEnv(this.config.get<string>('SCHEDULED_JOBS_ENABLED'), true);
     this.initEnabled = parseBooleanEnv(this.config.get<string>('ITEM_VOLUMES_INIT_ENABLED'), true);
   }
@@ -73,7 +77,9 @@ export class ItemVolumesService implements OnModuleInit, OnModuleDestroy {
   }
 
   onModuleDestroy(): void {
-    void this.redis.quit();
+    if (this.ownsRedisClient) {
+      void this.redis.quit();
+    }
   }
 
   @Cron('15 0 * * * *')
