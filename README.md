@@ -60,6 +60,10 @@ Available variables:
 - `VARIANT_HISTORY_PRUNE_ENABLED`: Enables hourly pruning of raw and 15m history according to the retention variables.
 - `VARIANT_HISTORY_RAW_RETENTION_HOURS`: Retention for `variant_history` raw points (default `72`).
 - `VARIANT_HISTORY_15M_RETENTION_DAYS`: Retention for `variant_history_15m` rollups (default `90`).
+- `PRESENCE_TTL_SECONDS`: Active heartbeat window in seconds for live presence (default `90`).
+- `PRESENCE_REDIS_KEY`: Redis sorted-set key used for live presence (default `presence:online`).
+- `PRESENCE_HOUR_PEAK_REDIS_PREFIX`: Prefix for hourly peak accumulators in Redis (default `presence:peak:hour:`).
+- `PRESENCE_HOUR_PEAK_TTL_HOURS`: Safety TTL for hourly peak accumulators before persistence (default `96`).
 - `CORS_ORIGINS`: Comma-separated allowed origins (e.g. `https://example.com,https://app.example.com`).
 - `SWAGGER_ENABLED`: Set to `true` to enable Swagger in production (disabled by default in prod).
 - `CDN_BASE`: Base URL for item icons (defaults to OSRS Wiki).
@@ -177,6 +181,26 @@ npm run sync:items:mapping -- --chunkSize=1000
 ## SQL setup for `public.users`
 
 This repository does not include TypeORM migrations yet, so create the table manually in Railway/Postgres:
+
+## Manual SQL setup for `presence_history`
+
+This repository still does not ship automated database migrations between TST and PRO.
+
+Before deploying the presence-history backend changes, execute the versioned SQL file below once in each database:
+
+```txt
+database/sql/create_presence_history.sql
+```
+
+Presence history jobs:
+
+- Hour finalizer: minute `1` every hour in `UTC`
+- Daily rollup: `00:05 UTC`
+- Daily cleanup: immediately after a successful daily rollup
+
+Admin history endpoint:
+
+- `GET /admin/presence/history?range=72h|30d|1y`
 
 ```sql
 CREATE TABLE IF NOT EXISTS public.users (
