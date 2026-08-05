@@ -6,6 +6,7 @@ jest.mock('jose', () => ({
 import { GUARDS_METADATA } from '@nestjs/common/constants';
 import { BadRequestException } from '@nestjs/common';
 import type { Request } from 'express';
+import { CompleteProfileGuard } from '../auth/complete-profile.guard';
 import { SupabaseAuthGuard } from '../auth/supabase-auth.guard';
 import { SuperAdminGuard } from '../auth/super-admin.guard';
 import { MethodsController } from './methods.controller';
@@ -69,7 +70,7 @@ describe('MethodsController skills summary endpoint', () => {
 });
 
 describe('MethodsController skill roadmap endpoint', () => {
-  it('requires SupabaseAuthGuard for the roadmap endpoint', () => {
+  it('requires SupabaseAuthGuard and CompleteProfileGuard for the roadmap endpoint', () => {
     const descriptor = Object.getOwnPropertyDescriptor(
       MethodsController.prototype,
       'findSkillRoadmap',
@@ -80,7 +81,7 @@ describe('MethodsController skill roadmap endpoint', () => {
     const handler = descriptor?.value as object;
     const guards = Reflect.getMetadata(GUARDS_METADATA, handler) as unknown[];
 
-    expect(guards).toEqual([SupabaseAuthGuard]);
+    expect(guards).toEqual([SupabaseAuthGuard, CompleteProfileGuard]);
   });
 
   it('rejects query params outside the roadmap contract', async () => {

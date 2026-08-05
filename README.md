@@ -170,13 +170,21 @@ npm run sync:items:mapping -- --chunkSize=1000
 ## Supabase Auth test endpoint
 
 - `GET /me` is protected and expects `Authorization: Bearer <access_token>`.
-- Only `/me` is protected; existing endpoints are unchanged.
+- `POST /me/account-username` is protected and sets the authenticated account username once.
+- Both endpoints are also available under `/users/me` for compatibility.
 - Token validation is done with Supabase JWKS: `${SUPABASE_PROJECT_URL}/auth/v1/.well-known/jwks.json`.
 - Issuer is validated as `${SUPABASE_PROJECT_URL}/auth/v1`.
 - `GET /me` auto-upserts the authenticated user in `public.users`:
   - Creates user if missing with `plan='free'` and `role='user'`.
-  - Returns `{ data: { id, email, plan, role } }`.
+  - Leaves `account_username` as `NULL` until onboarding is completed.
+  - Returns `{ data: { id, email, username, plan, role } }`.
   - If user exists and email changed, updates email and `updated_at`.
+- `POST /me/account-username`:
+  - Accepts `{ "username": string }`.
+  - Trims and normalizes to lowercase before validation and storage.
+  - Allows only `a-z`, `0-9`, `_`, must start with a letter or number, and must be 3-20 characters long.
+  - Rejects reserved values such as `admin`, `moderator`, `support`, `root`, `system`, `osrstool`, and `rsmethods`.
+  - Returns `409 Conflict` when the username is already taken or the current user already set one.
 
 ## SQL setup for `public.users`
 
@@ -206,11 +214,16 @@ Admin history endpoint:
 CREATE TABLE IF NOT EXISTS public.users (
   id uuid PRIMARY KEY,
   email text NOT NULL,
+  account_username text NULL,
   plan text NOT NULL DEFAULT 'free',
   role text NOT NULL DEFAULT 'user',
   created_at timestamptz NOT NULL DEFAULT now(),
   updated_at timestamptz NOT NULL DEFAULT now()
 );
+
+CREATE UNIQUE INDEX IF NOT EXISTS idx_users_account_username_unique_ci
+ON public.users (LOWER(account_username))
+WHERE account_username IS NOT NULL;
 ```
 
 Optional trigger to auto-update `updated_at` on DB-side updates:
@@ -244,6 +257,14 @@ const me = await fetch('http://localhost:3000/me', {
 
 ```bash
 curl -H "Authorization: Bearer <access_token>" http://localhost:3000/me
+```
+
+```bash
+curl -X POST \
+  -H "Authorization: Bearer <access_token>" \
+  -H "Content-Type: application/json" \
+  -d '{"username":"account_user"}' \
+  http://localhost:3000/me/account-username
 ```
   
 ## Production tips

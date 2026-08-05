@@ -87,9 +87,7 @@ describe('PresenceService', () => {
     const { redis } = createRedisMock();
     redis.eval.mockResolvedValue(127);
     const { service } = createService({}, redis);
-    const nowSpy = jest
-      .spyOn(Date, 'now')
-      .mockReturnValue(new Date('2026-08-05T14:33:10.000Z').getTime());
+    jest.useFakeTimers().setSystemTime(new Date('2026-08-05T14:33:10.000Z'));
 
     const online = await service.recordHeartbeat({ visitorId: 'visitor-123' });
 
@@ -105,7 +103,7 @@ describe('PresenceService', () => {
       String(96 * 60 * 60 * 1000),
     );
     expect(online).toBe(127);
-    nowSpy.mockRestore();
+    jest.useRealTimers();
   });
 
   it('counts online users while excluding expired entries', async () => {

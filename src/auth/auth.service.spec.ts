@@ -1,3 +1,4 @@
+import { BadRequestException, ConflictException } from '@nestjs/common';
 import { Repository } from 'typeorm';
 import { AuthService } from './auth.service';
 import { User } from './entities/user.entity';
@@ -36,6 +37,7 @@ describe('AuthService', () => {
     repo.create.mockReturnValue({
       id: 'a42cf41b-2e77-4478-aedf-6cb1f8bce205',
       email: 'user@example.com',
+      accountUsername: null,
       plan: 'free',
       role: 'user',
     } as User);
@@ -49,6 +51,7 @@ describe('AuthService', () => {
     expect(repo.create).toHaveBeenCalledWith({
       id: 'a42cf41b-2e77-4478-aedf-6cb1f8bce205',
       email: 'user@example.com',
+      accountUsername: null,
       plan: 'free',
       role: 'user',
     });
@@ -60,6 +63,7 @@ describe('AuthService', () => {
     const existing = {
       id: 'a42cf41b-2e77-4478-aedf-6cb1f8bce205',
       email: 'user@example.com',
+      accountUsername: null,
       plan: 'free',
       role: 'user',
     } as User;
@@ -78,6 +82,7 @@ describe('AuthService', () => {
     const existing = {
       id: 'a42cf41b-2e77-4478-aedf-6cb1f8bce205',
       email: 'old@example.com',
+      accountUsername: null,
       plan: 'free',
       role: 'user',
     } as User;
@@ -104,5 +109,124 @@ describe('AuthService', () => {
       { userId: 'a42cf41b-2e77-4478-aedf-6cb1f8bce205' },
     );
     expect(likes).toBe(7);
+  });
+
+  it('normalizes and saves account username once', async () => {
+    const existing = {
+      id: 'user-1',
+      email: 'user@example.com',
+      accountUsername: null,
+      plan: 'free',
+      role: 'user',
+    } as User;
+    repo.findOne.mockResolvedValue(existing);
+    repo.save.mockImplementation((value) => Promise.resolve(value as User));
+
+    const result = await service.setAccountUsername(
+      {
+        id: 'user-1',
+        email: 'user@example.com',
+      },
+      '  Account_User  ',
+    );
+
+    expect(repo.save).toHaveBeenCalledWith(
+      expect.objectContaining({ accountUsername: 'account_user' }),
+    );
+    expect(result.accountUsername).toBe('account_user');
+  });
+
+  it('rejects invalid account username format', async () => {
+    repo.findOne.mockResolvedValue({
+      id: 'user-1',
+      email: 'user@example.com',
+      accountUsername: null,
+    } as User);
+
+    await expect(
+      service.setAccountUsername(
+        {
+          id: 'user-1',
+          email: 'user@example.com',
+        },
+        '_bad',
+      ),
+    ).rejects.toBeInstanceOf(BadRequestException);
+  });
+
+  it('rejects missing account username', async () => {
+    repo.findOne.mockResolvedValue({
+      id: 'user-1',
+      email: 'user@example.com',
+      accountUsername: null,
+    } as User);
+
+    await expect(
+      service.setAccountUsername(
+        {
+          id: 'user-1',
+          email: 'user@example.com',
+        },
+        undefined as unknown as string,
+      ),
+    ).rejects.toBeInstanceOf(BadRequestException);
+  });
+
+  it('rejects reserved account usernames', async () => {
+    repo.findOne.mockResolvedValue({
+      id: 'user-1',
+      email: 'user@example.com',
+      accountUsername: null,
+    } as User);
+
+    await expect(
+      service.setAccountUsername(
+        {
+          id: 'user-1',
+          email: 'user@example.com',
+        },
+        'Admin',
+      ),
+    ).rejects.toBeInstanceOf(BadRequestException);
+  });
+
+  it('rejects when account username is already set for the current user', async () => {
+    repo.findOne.mockResolvedValue({
+      id: 'user-1',
+      email: 'user@example.com',
+      accountUsername: 'existing_user',
+    } as User);
+
+    await expect(
+      service.setAccountUsername(
+        {
+          id: 'user-1',
+          email: 'user@example.com',
+        },
+        'new_user',
+      ),
+    ).rejects.toBeInstanceOf(ConflictException);
+  });
+
+  it('maps unique violations to conflict for race-safe duplicate handling', async () => {
+    repo.findOne.mockResolvedValue({
+      id: 'user-1',
+      email: 'user@example.com',
+      accountUsername: null,
+    } as User);
+    repo.save.mockRejectedValue({
+      code: '23505',
+      constraint: 'idx_users_account_username_unique_ci',
+    });
+
+    await expect(
+      service.setAccountUsername(
+        {
+          id: 'user-1',
+          email: 'user@example.com',
+        },
+        'account_user',
+      ),
+    ).rejects.toBeInstanceOf(ConflictException);
   });
 });

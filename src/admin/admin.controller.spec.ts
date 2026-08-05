@@ -1,6 +1,7 @@
 import { NotImplementedException } from '@nestjs/common';
 import { GUARDS_METADATA } from '@nestjs/common/constants';
 import type { Request } from 'express';
+import { CompleteProfileGuard } from '../auth/complete-profile.guard';
 import { SupabaseAuthGuard } from '../auth/supabase-auth.guard';
 import { SuperAdminGuard } from '../auth/super-admin.guard';
 import { PresenceHistoryRange } from '../presence/dto/presence-history-query.dto';
@@ -8,10 +9,10 @@ import { AdminController } from './admin.controller';
 import type { AdminService } from './admin.service';
 
 describe('AdminController guard metadata', () => {
-  it('requires SupabaseAuthGuard and SuperAdminGuard for all admin routes', () => {
+  it('requires SupabaseAuthGuard, CompleteProfileGuard and SuperAdminGuard for all admin routes', () => {
     const guards = Reflect.getMetadata(GUARDS_METADATA, AdminController) as unknown[];
 
-    expect(guards).toEqual([SupabaseAuthGuard, SuperAdminGuard]);
+    expect(guards).toEqual([SupabaseAuthGuard, CompleteProfileGuard, SuperAdminGuard]);
   });
 });
 
