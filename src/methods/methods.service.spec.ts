@@ -13,6 +13,7 @@ import { BadRequestException, ForbiddenException, UnauthorizedException } from '
 import { Item } from '../items/entities/item.entity';
 import { VARIANT_TAG_DEFINITIONS } from './variant-tags';
 import { ActionType } from './action-type.enum';
+import { ACCOUNT_USERNAME_REQUIRED_ERROR_CODE } from '../auth/account-username-required.exception';
 
 type MethodDetailsWithProfitResult = Awaited<
   ReturnType<MethodsService['findMethodDetailsWithProfit']>
@@ -736,13 +737,13 @@ describe('MethodsService variantCount', () => {
     expect(Number.isInteger(result.meta.computedAt)).toBe(true);
   });
 
-  it('throws when username is sent by a non-registered user', async () => {
+  it('throws when username is sent by a user without a completed account username', async () => {
     const methodRepo = {
       find: jest.fn().mockResolvedValue([]),
     } as unknown as Repository<Method>;
 
     const userRepo = {
-      findOne: jest.fn().mockResolvedValue(null),
+      findOne: jest.fn().mockResolvedValue({ id: 'user-1', role: 'user', accountUsername: null }),
     } as unknown as Repository<User>;
 
     const service = new MethodsService(
@@ -766,7 +767,11 @@ describe('MethodsService variantCount', () => {
         username: 'zezima',
         authorization: 'Bearer token',
       }),
-    ).rejects.toBeInstanceOf(ForbiddenException);
+    ).rejects.toMatchObject({
+      response: {
+        code: ACCOUNT_USERNAME_REQUIRED_ERROR_CODE,
+      },
+    });
   });
 
   it('does not require auth when username is not sent', async () => {
@@ -804,13 +809,13 @@ describe('MethodsService variantCount', () => {
     expect(result.status).toBe('ok');
   });
 
-  it('throws on skill summaries when username is sent by a non-registered user', async () => {
+  it('throws on skill summaries when username is sent by a user without a completed account username', async () => {
     const methodRepo = {
       find: jest.fn().mockResolvedValue([]),
     } as unknown as Repository<Method>;
 
     const userRepo = {
-      findOne: jest.fn().mockResolvedValue(null),
+      findOne: jest.fn().mockResolvedValue({ id: 'user-1', role: 'user', accountUsername: null }),
     } as unknown as Repository<User>;
 
     const service = new MethodsService(
@@ -829,7 +834,11 @@ describe('MethodsService variantCount', () => {
 
     await expect(
       service.skillsSummaryWithProfitResponse('zezima', 'Bearer token'),
-    ).rejects.toBeInstanceOf(ForbiddenException);
+    ).rejects.toMatchObject({
+      response: {
+        code: ACCOUNT_USERNAME_REQUIRED_ERROR_CODE,
+      },
+    });
   });
 
   it('supports enabled=false on skill summaries for super admins', async () => {
@@ -839,7 +848,9 @@ describe('MethodsService variantCount', () => {
     } as unknown as Repository<Method>;
 
     const userRepo = {
-      findOne: jest.fn().mockResolvedValue({ id: 'user-1', role: 'super_admin' }),
+      findOne: jest
+        .fn()
+        .mockResolvedValue({ id: 'user-1', role: 'super_admin', accountUsername: 'admin_user' }),
     } as unknown as Repository<User>;
 
     const service = new MethodsService(
@@ -871,7 +882,9 @@ describe('MethodsService variantCount', () => {
     } as unknown as Repository<Method>;
 
     const userRepo = {
-      findOne: jest.fn().mockResolvedValue({ id: 'user-1', role: 'user' }),
+      findOne: jest
+        .fn()
+        .mockResolvedValue({ id: 'user-1', role: 'user', accountUsername: 'user_1' }),
     } as unknown as Repository<User>;
 
     const service = new MethodsService(
@@ -918,7 +931,9 @@ describe('MethodsService variantCount', () => {
 
   it('throws when enabled query param is sent by a non-super admin on skill roadmap', async () => {
     const userRepo = {
-      findOne: jest.fn().mockResolvedValue({ id: 'user-1', role: 'user' }),
+      findOne: jest
+        .fn()
+        .mockResolvedValue({ id: 'user-1', role: 'user', accountUsername: 'user_1' }),
     } as unknown as Repository<User>;
 
     const service = new MethodsService(
@@ -946,7 +961,9 @@ describe('MethodsService variantCount', () => {
 
   it('throws when target_level is lower than the player current skill level', async () => {
     const userRepo = {
-      findOne: jest.fn().mockResolvedValue({ id: 'user-1', role: 'user' }),
+      findOne: jest
+        .fn()
+        .mockResolvedValue({ id: 'user-1', role: 'user', accountUsername: 'user_1' }),
     } as unknown as Repository<User>;
 
     const service = new MethodsService(
@@ -987,7 +1004,9 @@ describe('MethodsService variantCount', () => {
 
   it('builds a fastest roadmap with dynamic skill unlocks and forwards only the requested ignored tags', async () => {
     const userRepo = {
-      findOne: jest.fn().mockResolvedValue({ id: 'user-1', role: 'user' }),
+      findOne: jest
+        .fn()
+        .mockResolvedValue({ id: 'user-1', role: 'user', accountUsername: 'user_1' }),
     } as unknown as Repository<User>;
 
     const service = new MethodsService(
@@ -1174,7 +1193,9 @@ describe('MethodsService variantCount', () => {
 
   it('uses the provided target_level instead of defaulting to 99', async () => {
     const userRepo = {
-      findOne: jest.fn().mockResolvedValue({ id: 'user-1', role: 'user' }),
+      findOne: jest
+        .fn()
+        .mockResolvedValue({ id: 'user-1', role: 'user', accountUsername: 'user_1' }),
     } as unknown as Repository<User>;
 
     const service = new MethodsService(
@@ -1263,7 +1284,9 @@ describe('MethodsService variantCount', () => {
 
   it('returns a strict materials warning and null totals when one roadmap range lacks actionsPerHour', async () => {
     const userRepo = {
-      findOne: jest.fn().mockResolvedValue({ id: 'user-1', role: 'user' }),
+      findOne: jest
+        .fn()
+        .mockResolvedValue({ id: 'user-1', role: 'user', accountUsername: 'user_1' }),
     } as unknown as Repository<User>;
 
     const service = new MethodsService(
@@ -1348,7 +1371,9 @@ describe('MethodsService variantCount', () => {
 
   it('treats null afkiness as 100 for most_afk roadmaps', async () => {
     const userRepo = {
-      findOne: jest.fn().mockResolvedValue({ id: 'user-1', role: 'user' }),
+      findOne: jest
+        .fn()
+        .mockResolvedValue({ id: 'user-1', role: 'user', accountUsername: 'user_1' }),
     } as unknown as Repository<User>;
 
     const service = new MethodsService(
@@ -1472,6 +1497,43 @@ describe('MethodsService variantCount', () => {
         likedByMe: 'true',
       }),
     ).rejects.toBeInstanceOf(UnauthorizedException);
+  });
+
+  it('throws when likedByMe=true is sent by a user without a completed account username', async () => {
+    const methodRepo = {
+      find: jest.fn().mockResolvedValue([]),
+    } as unknown as Repository<Method>;
+
+    const userRepo = {
+      findOne: jest.fn().mockResolvedValue({ id: 'user-1', role: 'user', accountUsername: null }),
+    } as unknown as Repository<User>;
+
+    const service = new MethodsService(
+      methodRepo,
+      {} as Repository<MethodVariant>,
+      {} as Repository<VariantIoItem>,
+      {} as Repository<VariantHistory>,
+      createMethodLikeRepo(),
+      userRepo,
+      {} as VariantSnapshotService,
+      {} as RuneScapeApiService,
+      { get: jest.fn().mockReturnValue('redis://localhost:6379') } as unknown as ConfigService,
+    );
+
+    jest.spyOn(service as any, 'verifySupabaseToken').mockResolvedValue('user-1');
+
+    await expect(
+      service.listWithProfitResponse({
+        page: '1',
+        perPage: '10',
+        likedByMe: 'true',
+        authorization: 'Bearer token',
+      }),
+    ).rejects.toMatchObject({
+      response: {
+        code: ACCOUNT_USERNAME_REQUIRED_ERROR_CODE,
+      },
+    });
   });
 
   it('returns the official variant tag catalog with severity', () => {
@@ -2152,7 +2214,9 @@ describe('MethodsService variantCount', () => {
     } as unknown as Repository<Method>;
 
     const userRepo = {
-      findOne: jest.fn().mockResolvedValue({ id: 'user-1', role: 'user' }),
+      findOne: jest
+        .fn()
+        .mockResolvedValue({ id: 'user-1', role: 'user', accountUsername: 'user_1' }),
     } as unknown as Repository<User>;
 
     const service = new MethodsService(
@@ -2191,7 +2255,9 @@ describe('MethodsService variantCount', () => {
     } as unknown as Repository<Method>;
 
     const userRepo = {
-      findOne: jest.fn().mockResolvedValue({ id: 'user-1', role: 'super_admin' }),
+      findOne: jest
+        .fn()
+        .mockResolvedValue({ id: 'user-1', role: 'super_admin', accountUsername: 'admin_user' }),
     } as unknown as Repository<User>;
 
     const service = new MethodsService(

@@ -24,6 +24,7 @@ import {
 import type { Request } from 'express';
 import { MethodsService } from './methods.service';
 import { CreateMethodDto, UpdateMethodDto, UpdateMethodBasicDto, UpdateVariantDto } from './dto';
+import { CompleteProfileGuard } from '../auth/complete-profile.guard';
 import { SupabaseAuthGuard } from '../auth/supabase-auth.guard';
 import { SuperAdminGuard } from '../auth/super-admin.guard';
 import type { AuthenticatedUser } from '../auth/auth.types';
@@ -366,12 +367,12 @@ export class MethodsController {
   }
 
   @Get('skills/roadmap')
-  @UseGuards(SupabaseAuthGuard)
+  @UseGuards(SupabaseAuthGuard, CompleteProfileGuard)
   @ApiBearerAuth()
   @ApiOperation({
     summary: 'Get a skill roadmap',
     description:
-      'Returns a level-range roadmap to reach a target level in one skill using the current enabled method variants. Requires authentication, a registered user, and a RuneScape username.',
+      'Returns a level-range roadmap to reach a target level in one skill using the current enabled method variants. Requires authentication, a completed account username, and a RuneScape username.',
   })
   @ApiQuery({
     name: 'username',
@@ -416,7 +417,7 @@ export class MethodsController {
     },
   })
   @ApiUnauthorizedResponse({ description: 'Missing, invalid, or expired bearer token' })
-  @ApiForbiddenResponse({ description: 'Only registered users can use this endpoint' })
+  @ApiForbiddenResponse({ description: 'Complete your account username to use this endpoint' })
   async findSkillRoadmap(
     @Query('username') username?: string,
     @Query('skill') skill?: string,
@@ -584,7 +585,7 @@ export class MethodsController {
   }
 
   @Post('variant/:variantId/like')
-  @UseGuards(SupabaseAuthGuard)
+  @UseGuards(SupabaseAuthGuard, CompleteProfileGuard)
   @ApiBearerAuth()
   @ApiOperation({
     summary: 'Like method variant',
@@ -603,7 +604,7 @@ export class MethodsController {
   }
 
   @Delete('variant/:variantId/like')
-  @UseGuards(SupabaseAuthGuard)
+  @UseGuards(SupabaseAuthGuard, CompleteProfileGuard)
   @ApiBearerAuth()
   @ApiOperation({
     summary: 'Unlike method variant',

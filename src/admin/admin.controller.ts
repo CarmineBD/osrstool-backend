@@ -19,6 +19,7 @@ import {
 } from '@nestjs/swagger';
 import type { Request } from 'express';
 import type { AuthenticatedUser } from '../auth/auth.types';
+import { CompleteProfileGuard } from '../auth/complete-profile.guard';
 import { SupabaseAuthGuard } from '../auth/supabase-auth.guard';
 import { SuperAdminGuard } from '../auth/super-admin.guard';
 import {
@@ -32,7 +33,7 @@ type RequestWithUser = Request & { user: AuthenticatedUser };
 
 @ApiTags('admin')
 @ApiBearerAuth()
-@UseGuards(SupabaseAuthGuard, SuperAdminGuard)
+@UseGuards(SupabaseAuthGuard, CompleteProfileGuard, SuperAdminGuard)
 @Controller('admin')
 export class AdminController {
   constructor(private readonly adminService: AdminService) {}

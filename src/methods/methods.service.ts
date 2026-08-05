@@ -27,6 +27,7 @@ import { VariantRequirements, XpHour, UserInfo } from './types';
 import { RuneScapeApiService } from './RuneScapeApiService';
 import { computeMissingRequirements, filterMethodsByUserStats } from './helpers/requirements';
 import { ConfigService } from '@nestjs/config';
+import { createAccountUsernameRequiredException } from '../auth/account-username-required.exception';
 import { User } from '../auth/entities/user.entity';
 import { calculateMarketImpact, type MarketImpactResult } from './market-impact-calculator';
 import { Item } from '../items/entities/item.entity';
@@ -878,6 +879,20 @@ export class MethodsService implements OnModuleDestroy {
     }
   }
 
+  private async assertCompletedAccountProfile(
+    userId: string,
+    email?: string | null,
+  ): Promise<User> {
+    await this.ensureUserExists(userId, email);
+    const user = await this.userRepo.findOne({ where: { id: userId } });
+
+    if (!user?.accountUsername) {
+      throw createAccountUsernameRequiredException();
+    }
+
+    return user;
+  }
+
   private getVariantLikesCount(variant: { likesCount?: number | null }): number {
     return variant.likesCount ?? 0;
   }
@@ -892,7 +907,7 @@ export class MethodsService implements OnModuleDestroy {
 
   async likeVariant(variantId: string, userId: string, email?: string | null): Promise<void> {
     const variant = await this.ensureVariantExists(variantId);
-    await this.ensureUserExists(userId, email);
+    await this.assertCompletedAccountProfile(userId, email);
 
     const likedUserIds = variant.likedUserIds ?? [];
     if (likedUserIds.includes(userId)) {
@@ -906,6 +921,7 @@ export class MethodsService implements OnModuleDestroy {
 
   async unlikeVariant(variantId: string, userId: string): Promise<void> {
     const variant = await this.ensureVariantExists(variantId);
+    await this.assertCompletedAccountProfile(userId);
     const likedUserIds = variant.likedUserIds ?? [];
 
     if (!likedUserIds.includes(userId)) {
@@ -923,9 +939,9 @@ export class MethodsService implements OnModuleDestroy {
     authenticatedUserId?: string | null,
   ): Promise<void> {
     const userId = authenticatedUserId ?? (await this.verifySupabaseToken(authorization));
-    const user = await this.userRepo.findOne({ where: { id: userId } });
+    const user = await this.assertCompletedAccountProfile(userId);
 
-    if (!user || user.role !== 'super_admin') {
+    if (user.role !== 'super_admin') {
       throw new ForbiddenException(errorMessage);
     }
   }
@@ -972,13 +988,13 @@ export class MethodsService implements OnModuleDestroy {
     }
 
     const userId = authenticatedUserId ?? (await this.verifySupabaseToken(authorization));
-    const user = await this.userRepo.findOne({ where: { id: userId } });
-    if (!user || user.role !== 'super_admin') {
+    const user = await this.assertCompletedAccountProfile(userId);
+    if (user.role !== 'super_admin') {
       throw new ForbiddenException('Only super_admin can access disabled methods');
     }
   }
 
-  private async assertRegisteredUserForUsername(
+  private async assertCompletedProfileForUsernameQuery(
     username?: string,
     authorization?: string,
     authenticatedUserId?: string | null,
@@ -991,11 +1007,25 @@ export class MethodsService implements OnModuleDestroy {
     if (!normalizedUsername) return;
 
     const userId = authenticatedUserId ?? (await this.verifySupabaseToken(authorization));
-    const user = await this.userRepo.findOne({ where: { id: userId } });
+    await this.assertCompletedAccountProfile(userId);
+  }
 
-    if (!user) {
-      throw new ForbiddenException('Only registered users can use username query parameter');
+  private async assertCompletedProfileForLikedByMeFilter(
+    likedByMeFilter: boolean | undefined,
+    authenticatedUserId?: string | null,
+    authorization?: string,
+  ): Promise<void> {
+    if (likedByMeFilter !== true) {
+      return;
     }
+
+    if (!authenticatedUserId) {
+      throw new UnauthorizedException('likedByMe filter requires authentication');
+    }
+
+    await this.assertCompletedAccountProfile(
+      authenticatedUserId ?? (await this.verifySupabaseToken(authorization)),
+    );
   }
 
   private normalizeOptionalQueryString(
@@ -1175,11 +1205,16 @@ export class MethodsService implements OnModuleDestroy {
     const likedByMeFilter = this.parseBooleanQueryParam(query.likedByMe, 'likedByMe');
     const authenticatedUserId = await this.resolveAuthenticatedUserId(query.authorization);
 
-    if (likedByMeFilter && !authenticatedUserId) {
-      throw new UnauthorizedException('likedByMe filter requires authentication');
-    }
-
-    await this.assertRegisteredUserForUsername(username, query.authorization, authenticatedUserId);
+    await this.assertCompletedProfileForLikedByMeFilter(
+      likedByMeFilter,
+      authenticatedUserId,
+      query.authorization,
+    );
+    await this.assertCompletedProfileForUsernameQuery(
+      username,
+      query.authorization,
+      authenticatedUserId,
+    );
     const { userInfo, warnings } = await this.fetchUserInfo(username);
     const filters = this.buildListFilters(query);
     if (filters.enabled === false) {
@@ -1239,11 +1274,16 @@ export class MethodsService implements OnModuleDestroy {
     const likedByMeFilter = this.parseBooleanQueryParam(query.likedByMe, 'likedByMe');
     const authenticatedUserId = await this.resolveAuthenticatedUserId(query.authorization);
 
-    if (likedByMeFilter && !authenticatedUserId) {
-      throw new UnauthorizedException('likedByMe filter requires authentication');
-    }
-
-    await this.assertRegisteredUserForUsername(username, query.authorization, authenticatedUserId);
+    await this.assertCompletedProfileForLikedByMeFilter(
+      likedByMeFilter,
+      authenticatedUserId,
+      query.authorization,
+    );
+    await this.assertCompletedProfileForUsernameQuery(
+      username,
+      query.authorization,
+      authenticatedUserId,
+    );
     const { userInfo, warnings } = await this.fetchUserInfo(username);
     const filters = this.buildListFilters(query);
     if (filters.enabled === false) {
@@ -1295,7 +1335,7 @@ export class MethodsService implements OnModuleDestroy {
       USERNAME_MAX_LENGTH,
     );
     const authenticatedUserId = await this.resolveAuthenticatedUserId(authorization);
-    await this.assertRegisteredUserForUsername(
+    await this.assertCompletedProfileForUsernameQuery(
       normalizedUsername,
       authorization,
       authenticatedUserId,
@@ -1391,7 +1431,11 @@ export class MethodsService implements OnModuleDestroy {
     const authenticatedUserId =
       query.authenticatedUserId ?? (await this.resolveAuthenticatedUserId(query.authorization));
 
-    await this.assertRegisteredUserForUsername(username, query.authorization, authenticatedUserId);
+    await this.assertCompletedProfileForUsernameQuery(
+      username,
+      query.authorization,
+      authenticatedUserId,
+    );
     if (query.enabled != null) {
       await this.assertSuperAdminForEnabledQueryParam(query.authorization, authenticatedUserId);
     }
@@ -1955,9 +1999,9 @@ export class MethodsService implements OnModuleDestroy {
     await this.timeMethodDetailsStep(
       perfLogsEnabled,
       scope,
-      'assertRegisteredUserForUsername',
+      'assertCompletedProfileForUsernameQuery',
       () =>
-        this.assertRegisteredUserForUsername(
+        this.assertCompletedProfileForUsernameQuery(
           normalizedUsername,
           authorization,
           authenticatedUserId,
@@ -3335,7 +3379,7 @@ export class MethodsService implements OnModuleDestroy {
     likeOptions: ListLikeOptions = {},
     variantsMode: VariantsMode = 'best',
   ): Promise<{ data: any[]; total: number }> {
-    // Obtenemos todos los mÃƒÂ©todos para poder ordenarlos por profit posteriormente
+    // Load every method first so sorting can happen after profit enrichment.
     const allEntities = await this.methodRepo.find({
       where: { enabled: filters.enabled },
       relations: ['variants', 'variants.ioItems'],
@@ -3346,12 +3390,12 @@ export class MethodsService implements OnModuleDestroy {
     }, {});
     let methodsToProcess = allEntities.map((m) => this.toDto(m));
 
-    // Si se pasÃƒÂ³ el objeto userLevels, filtramos los mÃƒÂ©todos antes de enriquecerlos
+    // Apply user-based filtering before enriching variants when user data is available.
     if (userInfo) {
       methodsToProcess = filterMethodsByUserStats(methodsToProcess, userInfo);
     }
 
-    // Enriquecemos la lista (filtrada o no) con la informaciÃƒÂ³n de profit proveniente de Redis
+    // Enrich the current method list with profit data from Redis.
     const itemIds = this.collectItemIdsFromMethods(methodsToProcess);
     const variantIds = methodsToProcess.flatMap((method) =>
       method.variants.map((variant) => variant.id),
@@ -3515,7 +3559,7 @@ export class MethodsService implements OnModuleDestroy {
       });
     }
 
-    // Ordenamiento segÃƒÂºn los parÃƒÂ¡metros recibidos
+    // Sort using the requested client options.
     const comparator = (a: number, b: number) => (sort.order === 'asc' ? a - b : b - a);
 
     const getXpSum = (v: { xpHour?: XpHour | null }): number =>
@@ -3676,7 +3720,7 @@ export class MethodsService implements OnModuleDestroy {
       () =>
         Promise.all(
           methodDto.variants.map(async (variant) => {
-            // Si solo hay una variante se utiliza el id del mÃƒÂ©todo; de lo contrario se usa una clave compuesta
+            // Single-variant methods reuse the variant id as the profit lookup key.
             const profitKey = variant.id;
             const profit = allProfits[profitKey] ?? { low: 0, high: 0 };
             const marketImpact = this.calculateVariantMarketImpact(
