@@ -21,6 +21,10 @@ import type { Request } from 'express';
 import type { AuthenticatedUser } from '../auth/auth.types';
 import { SupabaseAuthGuard } from '../auth/supabase-auth.guard';
 import { SuperAdminGuard } from '../auth/super-admin.guard';
+import {
+  PresenceHistoryQueryDto,
+  PresenceHistoryRange,
+} from '../presence/dto/presence-history-query.dto';
 import { AdminService } from './admin.service';
 import { SyncItemsDto } from './dto/sync-items.dto';
 
@@ -48,6 +52,7 @@ export class AdminController {
             usersRegistered: 10,
             items: 4200,
             quests: 165,
+            activeSessions: 17,
             methods: { total: 50, enabled: 48, disabled: 2 },
             variants: { total: 90, enabled: 85, disabled: 5 },
             enabledMethodVariantsBySkill: [
@@ -81,6 +86,43 @@ export class AdminController {
   @ApiForbiddenResponse({ description: 'Only super_admin can perform this action' })
   async getOverview() {
     return this.adminService.getOverview();
+  }
+
+  @Get('presence/history')
+  @ApiOperation({
+    summary: 'Get concurrent users history',
+    description:
+      'Returns zero-filled concurrent-user history for admin charts. The 72h range includes the current UTC hour as a provisional point sourced from Redis.',
+  })
+  @ApiQuery({
+    name: 'range',
+    required: true,
+    enum: PresenceHistoryRange,
+    description: 'History range to load',
+  })
+  @ApiOkResponse({
+    description: 'Concurrent users history',
+    schema: {
+      example: {
+        data: {
+          range: '72h',
+          granularity: 'hour',
+          timezone: 'UTC',
+          points: [
+            {
+              bucketStart: '2026-08-05T14:00:00.000Z',
+              peakOnline: 17,
+              provisional: false,
+            },
+          ],
+        },
+      },
+    },
+  })
+  @ApiUnauthorizedResponse({ description: 'Missing, invalid, or expired bearer token' })
+  @ApiForbiddenResponse({ description: 'Only super_admin can perform this action' })
+  async getPresenceHistory(@Query() query: PresenceHistoryQueryDto) {
+    return this.adminService.getPresenceHistory(query.range);
   }
 
   @Get('jobs')

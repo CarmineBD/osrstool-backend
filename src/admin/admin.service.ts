@@ -11,6 +11,8 @@ import { Method } from '../methods/entities/method.entity';
 import { MethodVariant } from '../methods/entities/variant.entity';
 import { MethodProfitRefresherService } from '../method-profit-refresher/method-profit-refresher.service';
 import { ADMIN_SCRIPT_NAME_MAX_LENGTH } from '../methods/dto/validation.constants';
+import { PresenceHistoryRange } from '../presence/dto/presence-history-query.dto';
+import { PresenceService } from '../presence/presence.service';
 import { SyncItemsDto } from './dto/sync-items.dto';
 import { AdminScriptExecution } from './entities/admin-script-execution.entity';
 
@@ -36,6 +38,7 @@ export class AdminService {
     private readonly itemsMappingSyncService: ItemsMappingSyncService,
     private readonly itemsWikiSyncService: ItemsWikiSyncService,
     private readonly methodProfitRefresherService: MethodProfitRefresherService,
+    private readonly presenceService: PresenceService,
     private readonly config: ConfigService,
   ) {}
 
@@ -52,6 +55,7 @@ export class AdminService {
       latestExecutions,
       latestItems,
       latestQuests,
+      activeSessions,
     ] = await Promise.all([
       this.userRepo.count(),
       this.itemRepo.count(),
@@ -64,6 +68,7 @@ export class AdminService {
       this.getLatestExecutionsByScript(),
       this.getLatestItems(),
       this.getLatestQuests(),
+      this.getActiveSessionsSafe(),
     ]);
 
     return {
@@ -72,6 +77,7 @@ export class AdminService {
           usersRegistered,
           items,
           quests,
+          activeSessions,
           methods: {
             total: methodsTotal,
             enabled: methodsEnabled,
@@ -86,6 +92,12 @@ export class AdminService {
           quests: latestQuests,
         },
       },
+    };
+  }
+
+  async getPresenceHistory(range: PresenceHistoryRange) {
+    return {
+      data: await this.presenceService.getPresenceHistory(range),
     };
   }
 
@@ -296,6 +308,14 @@ export class AdminService {
       slug: row.slug,
       addedAt: new Date(row.created_at).toISOString(),
     }));
+  }
+
+  private async getActiveSessionsSafe(): Promise<number | null> {
+    try {
+      return await this.presenceService.getOnlineCount();
+    } catch {
+      return null;
+    }
   }
 
   private async runScript(
