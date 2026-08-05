@@ -17,6 +17,8 @@ import { AuthModule } from './auth/auth.module';
 import { CatalogsModule } from './catalogs/catalogs.module';
 import { ItemVolumesModule } from './item-volumes/item-volumes.module';
 import { AdminModule } from './admin/admin.module';
+import { PresenceModule } from './presence/presence.module';
+import { RedisModule } from './redis/redis.module';
 
 const validateEnv = (config: Record<string, string | undefined>) => {
   const hasDatabaseUrl = Boolean(config.DATABASE_URL && config.DATABASE_URL.trim().length > 0);
@@ -63,6 +65,7 @@ const validateEnv = (config: Record<string, string | undefined>) => {
       envFilePath: '.env',
       validate: validateEnv,
     }),
+    RedisModule,
 
     // 1 sola vez, configuración de TypeORM:
     TypeOrmModule.forRootAsync({
@@ -124,6 +127,7 @@ const validateEnv = (config: Record<string, string | undefined>) => {
     AuthModule,
     CatalogsModule,
     AdminModule,
+    PresenceModule,
   ],
   providers: [
     {
