@@ -3,6 +3,7 @@ import { GUARDS_METADATA } from '@nestjs/common/constants';
 import type { Request } from 'express';
 import { SupabaseAuthGuard } from '../auth/supabase-auth.guard';
 import { SuperAdminGuard } from '../auth/super-admin.guard';
+import { PresenceHistoryRange } from '../presence/dto/presence-history-query.dto';
 import { AdminController } from './admin.controller';
 import type { AdminService } from './admin.service';
 
@@ -30,6 +31,17 @@ describe('AdminController', () => {
       { source: 'mapping', dryRun: true },
       'user-1',
     );
+  });
+
+  it('forwards admin presence history requests', async () => {
+    const service: { getPresenceHistory: jest.Mock } = {
+      getPresenceHistory: jest.fn().mockResolvedValue({ data: { points: [] } }),
+    };
+    const controller = new AdminController(service as unknown as AdminService);
+
+    await controller.getPresenceHistory({ range: PresenceHistoryRange.RANGE_72H });
+
+    expect(service.getPresenceHistory).toHaveBeenCalledWith(PresenceHistoryRange.RANGE_72H);
   });
 
   it('keeps quest sync as an explicit placeholder', () => {
