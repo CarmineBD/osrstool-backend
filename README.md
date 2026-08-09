@@ -60,6 +60,10 @@ Available variables:
 - `VARIANT_HISTORY_PRUNE_ENABLED`: Enables hourly pruning of raw and 15m history according to the retention variables.
 - `VARIANT_HISTORY_RAW_RETENTION_HOURS`: Retention for `variant_history` raw points (default `72`).
 - `VARIANT_HISTORY_15M_RETENTION_DAYS`: Retention for `variant_history_15m` rollups (default `90`).
+- `PRESENCE_TTL_SECONDS`: Active heartbeat window in seconds for live presence (default `90`).
+- `PRESENCE_REDIS_KEY`: Redis sorted-set key used for live presence (default `presence:online`).
+- `PRESENCE_HOUR_PEAK_REDIS_PREFIX`: Prefix for hourly peak accumulators in Redis (default `presence:peak:hour:`).
+- `PRESENCE_HOUR_PEAK_TTL_HOURS`: Safety TTL for hourly peak accumulators before persistence (default `96`).
 - `CORS_ORIGINS`: Comma-separated allowed origins (e.g. `https://example.com,https://app.example.com`).
 - `SWAGGER_ENABLED`: Set to `true` to enable Swagger in production (disabled by default in prod).
 - `CDN_BASE`: Base URL for item icons (defaults to OSRS Wiki).
@@ -166,27 +170,60 @@ npm run sync:items:mapping -- --chunkSize=1000
 ## Supabase Auth test endpoint
 
 - `GET /me` is protected and expects `Authorization: Bearer <access_token>`.
-- Only `/me` is protected; existing endpoints are unchanged.
+- `POST /me/account-username` is protected and sets the authenticated account username once.
+- Both endpoints are also available under `/users/me` for compatibility.
 - Token validation is done with Supabase JWKS: `${SUPABASE_PROJECT_URL}/auth/v1/.well-known/jwks.json`.
 - Issuer is validated as `${SUPABASE_PROJECT_URL}/auth/v1`.
 - `GET /me` auto-upserts the authenticated user in `public.users`:
   - Creates user if missing with `plan='free'` and `role='user'`.
-  - Returns `{ data: { id, email, plan, role } }`.
+  - Leaves `account_username` as `NULL` until onboarding is completed.
+  - Returns `{ data: { id, email, username, plan, role } }`.
   - If user exists and email changed, updates email and `updated_at`.
+- `POST /me/account-username`:
+  - Accepts `{ "username": string }`.
+  - Trims and normalizes to lowercase before validation and storage.
+  - Allows only `a-z`, `0-9`, `_`, must start with a letter or number, and must be 3-20 characters long.
+  - Rejects reserved values such as `admin`, `moderator`, `support`, `root`, `system`, `osrstool`, and `rsmethods`.
+  - Returns `409 Conflict` when the username is already taken or the current user already set one.
 
 ## SQL setup for `public.users`
 
 This repository does not include TypeORM migrations yet, so create the table manually in Railway/Postgres:
 
+## Manual SQL setup for `presence_history`
+
+This repository still does not ship automated database migrations between TST and PRO.
+
+Before deploying the presence-history backend changes, execute the versioned SQL file below once in each database:
+
+```txt
+database/sql/create_presence_history.sql
+```
+
+Presence history jobs:
+
+- Hour finalizer: minute `1` every hour in `UTC`
+- Daily rollup: `00:05 UTC`
+- Daily cleanup: immediately after a successful daily rollup
+
+Admin history endpoint:
+
+- `GET /admin/presence/history?range=72h|30d|1y`
+
 ```sql
 CREATE TABLE IF NOT EXISTS public.users (
   id uuid PRIMARY KEY,
   email text NOT NULL,
+  account_username text NULL,
   plan text NOT NULL DEFAULT 'free',
   role text NOT NULL DEFAULT 'user',
   created_at timestamptz NOT NULL DEFAULT now(),
   updated_at timestamptz NOT NULL DEFAULT now()
 );
+
+CREATE UNIQUE INDEX IF NOT EXISTS idx_users_account_username_unique_ci
+ON public.users (LOWER(account_username))
+WHERE account_username IS NOT NULL;
 ```
 
 Optional trigger to auto-update `updated_at` on DB-side updates:
@@ -220,6 +257,14 @@ const me = await fetch('http://localhost:3000/me', {
 
 ```bash
 curl -H "Authorization: Bearer <access_token>" http://localhost:3000/me
+```
+
+```bash
+curl -X POST \
+  -H "Authorization: Bearer <access_token>" \
+  -H "Content-Type: application/json" \
+  -d '{"username":"account_user"}' \
+  http://localhost:3000/me/account-username
 ```
   
 ## Production tips

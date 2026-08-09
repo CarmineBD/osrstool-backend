@@ -9,6 +9,8 @@ import { Quest } from '../catalogs/entities/quest.entity';
 import { Method } from '../methods/entities/method.entity';
 import { MethodVariant } from '../methods/entities/variant.entity';
 import type { MethodProfitRefresherService } from '../method-profit-refresher/method-profit-refresher.service';
+import { PresenceHistoryRange } from '../presence/dto/presence-history-query.dto';
+import type { PresenceService } from '../presence/presence.service';
 import { AdminService } from './admin.service';
 import { AdminScriptExecution } from './entities/admin-script-execution.entity';
 
@@ -78,6 +80,15 @@ describe('AdminService', () => {
       }),
     };
     const profitRefresher = { refresh: jest.fn().mockResolvedValue(undefined) };
+    const presenceService = {
+      getOnlineCount: jest.fn().mockResolvedValue(17),
+      getPresenceHistory: jest.fn().mockResolvedValue({
+        range: PresenceHistoryRange.RANGE_72H,
+        granularity: 'hour',
+        timezone: 'UTC',
+        points: [],
+      }),
+    };
     const config = {
       get: jest.fn((key: string) =>
         key === 'CDN_BASE' ? 'https://oldschool.runescape.wiki/images/' : undefined,
@@ -94,6 +105,7 @@ describe('AdminService', () => {
       mappingSync as unknown as ItemsMappingSyncService,
       wikiSync as unknown as ItemsWikiSyncService,
       profitRefresher as unknown as MethodProfitRefresherService,
+      presenceService as unknown as PresenceService,
       config as unknown as ConfigService,
     );
 
@@ -104,6 +116,7 @@ describe('AdminService', () => {
       variantRepo,
       itemRepo,
       questRepo,
+      presenceService,
     };
   }
 
@@ -125,6 +138,7 @@ describe('AdminService', () => {
       enabled: 2,
       disabled: 1,
     });
+    expect(response.data.counts.activeSessions).toBe(17);
     expect(response.data.counts.enabledMethodVariantsBySkill).toEqual([
       { skill: 'Cooking', variants: 2 },
       { skill: 'Magic', variants: 1 },
@@ -147,6 +161,31 @@ describe('AdminService', () => {
           addedAt: '2026-02-11T21:32:13.214Z',
         },
       ],
+    });
+  });
+
+  it('returns activeSessions as null when redis presence lookup fails', async () => {
+    const { service, presenceService } = createService();
+    presenceService.getOnlineCount.mockRejectedValueOnce(new Error('redis unavailable'));
+
+    const response = await service.getOverview();
+
+    expect(response.data.counts.activeSessions).toBeNull();
+  });
+
+  it('forwards presence history queries to the presence service', async () => {
+    const { service, presenceService } = createService();
+
+    const response = await service.getPresenceHistory(PresenceHistoryRange.RANGE_30D);
+
+    expect(presenceService.getPresenceHistory).toHaveBeenCalledWith(PresenceHistoryRange.RANGE_30D);
+    expect(response).toEqual({
+      data: {
+        range: PresenceHistoryRange.RANGE_72H,
+        granularity: 'hour',
+        timezone: 'UTC',
+        points: [],
+      },
     });
   });
 

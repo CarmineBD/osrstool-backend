@@ -2,6 +2,7 @@
 import {
   ArrayMaxSize,
   IsBoolean,
+  IsEnum,
   IsInt,
   IsOptional,
   Max,
@@ -32,6 +33,7 @@ import { TrimString } from './transforms';
 import { VariantRequirementsDto } from './variant-requirements.dto';
 import { HasMaxRequirementEntries } from './validators/requirement-entry-count.validator';
 import { SKILL_KEY_VALUES } from './skill.constants';
+import { ActionType } from '../action-type.enum';
 
 const RISK_LEVEL_PATTERN = /^(100|[1-9]?\d)$/;
 
@@ -46,11 +48,13 @@ export class CreateVariantDto {
   @Min(1)
   icon_id: number;
 
-  @IsOptional()
   @IsInt()
   @Min(0)
   @Max(MAX_CLICK_INTENSITY)
-  actionsPerHour?: number;
+  actionsPerHour: number;
+
+  @IsEnum(ActionType)
+  actionType: ActionType;
 
   @IsOptional()
   @IsArray()

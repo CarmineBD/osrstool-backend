@@ -6,6 +6,7 @@ jest.mock('jose', () => ({
 import { GUARDS_METADATA } from '@nestjs/common/constants';
 import { BadRequestException } from '@nestjs/common';
 import type { Request } from 'express';
+import { CompleteProfileGuard } from '../auth/complete-profile.guard';
 import { SupabaseAuthGuard } from '../auth/supabase-auth.guard';
 import { SuperAdminGuard } from '../auth/super-admin.guard';
 import { MethodsController } from './methods.controller';
@@ -65,6 +66,95 @@ describe('MethodsController skills summary endpoint', () => {
       'Bearer token',
       'false',
     );
+  });
+});
+
+describe('MethodsController skill roadmap endpoint', () => {
+  it('requires SupabaseAuthGuard and CompleteProfileGuard for the roadmap endpoint', () => {
+    const descriptor = Object.getOwnPropertyDescriptor(
+      MethodsController.prototype,
+      'findSkillRoadmap',
+    );
+
+    expect(descriptor?.value).toBeDefined();
+
+    const handler = descriptor?.value as object;
+    const guards = Reflect.getMetadata(GUARDS_METADATA, handler) as unknown[];
+
+    expect(guards).toEqual([SupabaseAuthGuard, CompleteProfileGuard]);
+  });
+
+  it('rejects query params outside the roadmap contract', async () => {
+    const svc: { skillRoadmapResponse: jest.Mock } = {
+      skillRoadmapResponse: jest.fn(),
+    };
+
+    const controller = new MethodsController(svc as unknown as MethodsService);
+
+    await expect(
+      controller.findSkillRoadmap(
+        'zezima',
+        'cooking',
+        'fastest',
+        undefined,
+        'true',
+        ['safe'],
+        undefined,
+        {
+          username: 'zezima',
+          skill: 'cooking',
+          strategy: 'fastest',
+          page: '1',
+        },
+        undefined,
+      ),
+    ).rejects.toBeInstanceOf(BadRequestException);
+
+    expect(svc.skillRoadmapResponse).not.toHaveBeenCalled();
+  });
+
+  it('forwards roadmap params, auth header and authenticated user id to the service', async () => {
+    const svc: { skillRoadmapResponse: jest.Mock } = {
+      skillRoadmapResponse: jest.fn().mockResolvedValue({ data: { roadmap: {} }, meta: {} }),
+    };
+
+    const controller = new MethodsController(svc as unknown as MethodsService);
+    const req = {
+      headers: { authorization: 'Bearer token' },
+      user: { id: 'user-1', email: null },
+    } as unknown as Request & { user?: { id: string; email: null } };
+
+    await controller.findSkillRoadmap(
+      'zezima',
+      'cooking',
+      'most_afk',
+      '90',
+      'true',
+      ['safe', 'ge_limits'],
+      'false',
+      {
+        username: 'zezima',
+        skill: 'cooking',
+        strategy: 'most_afk',
+        target_level: '90',
+        show_only_free_to_play: 'true',
+        ignoredTags: ['safe', 'ge_limits'],
+        enabled: 'false',
+      },
+      req,
+    );
+
+    expect(svc.skillRoadmapResponse).toHaveBeenCalledWith({
+      username: 'zezima',
+      skill: 'cooking',
+      strategy: 'most_afk',
+      target_level: '90',
+      show_only_free_to_play: 'true',
+      ignoredTags: ['safe', 'ge_limits'],
+      enabled: 'false',
+      authorization: 'Bearer token',
+      authenticatedUserId: 'user-1',
+    });
   });
 });
 

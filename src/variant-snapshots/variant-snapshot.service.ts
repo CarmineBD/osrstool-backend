@@ -25,6 +25,7 @@ export class VariantSnapshotService {
       method: variant.method,
       label: variant.label,
       actionsPerHour: variant.actionsPerHour,
+      actionType: variant.actionType,
       xpHour: variant.xpHour,
       clickIntensity: variant.clickIntensity,
       afkiness: variant.afkiness,

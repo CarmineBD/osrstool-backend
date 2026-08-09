@@ -1,6 +1,6 @@
-import { Injectable, Logger, OnModuleInit } from '@nestjs/common';
+import { Injectable, Logger, OnModuleInit, Optional } from '@nestjs/common';
 import { Cron } from '@nestjs/schedule';
-import Redis from 'ioredis';
+import IORedis, { Redis } from 'ioredis';
 import { HttpService } from '@nestjs/axios';
 import { firstValueFrom } from 'rxjs';
 import { ConfigService } from '@nestjs/config';
@@ -8,6 +8,7 @@ import { InjectRepository } from '@nestjs/typeorm';
 import { Repository } from 'typeorm';
 import { ItemPriceRule, ItemPriceRuleType } from './entities/item-price-rule.entity';
 import { parseBooleanEnv } from '../common/utils/parse-boolean-env';
+import { RedisService } from '../redis/redis.service';
 
 interface Price {
   high?: number;
@@ -45,9 +46,11 @@ export class PricesService implements OnModuleInit {
     private readonly config: ConfigService,
     @InjectRepository(ItemPriceRule)
     private readonly priceRuleRepo: Repository<ItemPriceRule>,
+    @Optional() redisService?: RedisService,
   ) {
-    const redisUrl = this.config.get<string>('REDIS_URL') as string;
-    this.redis = new Redis(redisUrl);
+    this.redis =
+      redisService?.getClient() ??
+      new IORedis((this.config.get<string>('REDIS_URL') as string) ?? '');
 
     const rawWindow = this.config.get<string>('PRICE_CHANGE_WINDOW_SECONDS');
     const parsedWindow = rawWindow ? Number.parseInt(rawWindow, 10) : NaN;

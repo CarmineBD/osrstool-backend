@@ -1,4 +1,5 @@
 import { VariantRequirements, VariantRecommendations, XpHour } from '../types';
+import { ActionType } from '../action-type.enum';
 
 export interface VariantDto {
   id: string;
@@ -7,6 +8,7 @@ export interface VariantDto {
   inputs: { id: number; quantity: number; reason?: string | null }[];
   outputs: { id: number; quantity: number; reason?: string | null }[];
   actionsPerHour?: number;
+  actionType?: ActionType;
   label?: string;
   description?: string | null;
   clickIntensity?: number;
@@ -65,6 +67,7 @@ export class MethodDto {
       label: string;
       description: string | null;
       actionsPerHour: number;
+      actionType: ActionType;
       clickIntensity: number;
       afkiness: number;
       riskLevel: string;
@@ -105,6 +108,7 @@ export class MethodDto {
         label: variant.label,
         description: variant.description,
         actionsPerHour: variant.actionsPerHour,
+        actionType: variant.actionType,
         clickIntensity: variant.clickIntensity,
         afkiness: variant.afkiness,
         riskLevel: variant.riskLevel,

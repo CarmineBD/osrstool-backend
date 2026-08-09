@@ -24,6 +24,7 @@ import {
 import type { Request } from 'express';
 import { MethodsService } from './methods.service';
 import { CreateMethodDto, UpdateMethodDto, UpdateMethodBasicDto, UpdateVariantDto } from './dto';
+import { CompleteProfileGuard } from '../auth/complete-profile.guard';
 import { SupabaseAuthGuard } from '../auth/supabase-auth.guard';
 import { SuperAdminGuard } from '../auth/super-admin.guard';
 import type { AuthenticatedUser } from '../auth/auth.types';
@@ -53,6 +54,7 @@ const METHOD_EXAMPLE = {
       inputs: [{ id: 3144, quantity: 1, reason: null }],
       outputs: [{ id: 3145, quantity: 1, reason: null }],
       actionsPerHour: 1200,
+      actionType: 'items',
       clickIntensity: 2,
       afkiness: 2,
       riskLevel: 'low',
@@ -84,6 +86,78 @@ const METHOD_TAGS_EXAMPLE = VARIANT_TAG_DEFINITIONS.map((tag) => ({
   severity: tag.severity,
   description: tag.description,
 }));
+
+const ROADMAP_EXAMPLE = {
+  status: 'ok',
+  data: {
+    roadmap: {
+      skill: 'cooking',
+      strategy: 'fastest',
+      currentLevel: 1,
+      currentExperience: 0,
+      targetLevel: 99,
+      targetExperience: 13034431,
+      totalHours: 42.5,
+      averageAfkPercent: 76.2,
+      totalProfit: {
+        low: -1200000,
+        high: 3500000,
+      },
+      totalInputs: [{ id: 317, quantity: 2609 }],
+      totalOutputs: [{ id: 315, quantity: 2609 }],
+      ranges: [
+        {
+          levelStart: 1,
+          levelEnd: 13,
+          experienceStart: 0,
+          experienceEnd: 1154,
+          experienceNeeded: 1154,
+          hours: 0.2,
+          afkPercent: 100,
+          profit: { low: -200, high: 500 },
+          method: {
+            id: 'm_123',
+            name: 'Cooked shrimp',
+            slug: 'cooked-shrimp',
+            icon_id: 315,
+            category: 'Cooking',
+            enabled: true,
+          },
+          variant: {
+            id: 'v_456',
+            slug: 'shrimp-basic',
+            icon_id: 315,
+            label: 'Basic',
+            xpPerHour: 5000,
+            afkiness: null,
+            lowProfit: -1000,
+            highProfit: 2500,
+            members: false,
+            tags: [],
+          },
+        },
+      ],
+      warnings: [],
+    },
+    user: {
+      levels: { Cooking: 1 },
+      quests: {},
+      achievement_diaries: {},
+    },
+  },
+  warnings: [],
+  meta: {
+    username: 'zezima',
+    skill: 'cooking',
+    strategy: 'fastest',
+    target_level: 99,
+    enabled: true,
+    show_only_free_to_play: true,
+    ignoredTags: [],
+    computedAt: 1771459200,
+    usesExactSkillExperience: true,
+  },
+};
 
 @ApiTags('methods')
 @Controller('methods')
@@ -292,6 +366,100 @@ export class MethodsController {
     return this.svc.skillsSummaryWithProfitResponse(username, req?.headers.authorization, enabled);
   }
 
+  @Get('skills/roadmap')
+  @UseGuards(SupabaseAuthGuard, CompleteProfileGuard)
+  @ApiBearerAuth()
+  @ApiOperation({
+    summary: 'Get a skill roadmap',
+    description:
+      'Returns a level-range roadmap to reach a target level in one skill using the current enabled method variants. Requires authentication, a completed account username, and a RuneScape username.',
+  })
+  @ApiQuery({
+    name: 'username',
+    required: true,
+    description: 'RuneScape username used to load player stats',
+  })
+  @ApiQuery({
+    name: 'skill',
+    required: true,
+    description: 'Target skill',
+  })
+  @ApiQuery({
+    name: 'strategy',
+    required: true,
+    description: 'One of fastest, profitable, most_afk',
+  })
+  @ApiQuery({
+    name: 'target_level',
+    required: false,
+    description:
+      'Target level to reach. Defaults to 99 and cannot be lower than the player current level in the selected skill.',
+  })
+  @ApiQuery({
+    name: 'show_only_free_to_play',
+    required: false,
+    description: 'true to build the roadmap using only free-to-play variants',
+  })
+  @ApiQuery({
+    name: 'ignoredTags',
+    required: false,
+    description: 'Comma-separated or repeated variant tag keys to ignore.',
+  })
+  @ApiQuery({
+    name: 'enabled',
+    required: false,
+    description: 'true or false (default true). Only super_admin can use this query parameter.',
+  })
+  @ApiOkResponse({
+    description: 'Skill roadmap',
+    schema: {
+      example: ROADMAP_EXAMPLE,
+    },
+  })
+  @ApiUnauthorizedResponse({ description: 'Missing, invalid, or expired bearer token' })
+  @ApiForbiddenResponse({ description: 'Complete your account username to use this endpoint' })
+  async findSkillRoadmap(
+    @Query('username') username?: string,
+    @Query('skill') skill?: string,
+    @Query('strategy') strategy?: string,
+    @Query('target_level') targetLevel?: string,
+    @Query('show_only_free_to_play') showOnlyFreeToPlay?: string | boolean,
+    @Query('ignoredTags') ignoredTags?: string | string[],
+    @Query('enabled') enabled?: string | boolean,
+    @Query() query?: Record<string, string | string[] | undefined>,
+    @Req() req?: RequestWithUser,
+  ): Promise<unknown> {
+    const allowedQueryParams = new Set([
+      'username',
+      'skill',
+      'strategy',
+      'target_level',
+      'show_only_free_to_play',
+      'ignoredTags',
+      'enabled',
+    ]);
+    const disallowedQueryParams = Object.keys(query ?? {}).filter(
+      (key) => !allowedQueryParams.has(key),
+    );
+    if (disallowedQueryParams.length > 0) {
+      throw new BadRequestException(
+        'Only username, skill, strategy, target_level, show_only_free_to_play, ignoredTags and enabled query parameters are allowed',
+      );
+    }
+
+    return this.svc.skillRoadmapResponse({
+      username,
+      skill,
+      strategy,
+      target_level: targetLevel,
+      show_only_free_to_play: showOnlyFreeToPlay,
+      ignoredTags,
+      enabled,
+      authorization: req?.headers.authorization,
+      authenticatedUserId: req?.user?.id,
+    });
+  }
+
   @Get('trending-profit')
   @ApiOperation({
     summary: 'List methods by profit growth',
@@ -417,7 +585,7 @@ export class MethodsController {
   }
 
   @Post('variant/:variantId/like')
-  @UseGuards(SupabaseAuthGuard)
+  @UseGuards(SupabaseAuthGuard, CompleteProfileGuard)
   @ApiBearerAuth()
   @ApiOperation({
     summary: 'Like method variant',
@@ -436,7 +604,7 @@ export class MethodsController {
   }
 
   @Delete('variant/:variantId/like')
-  @UseGuards(SupabaseAuthGuard)
+  @UseGuards(SupabaseAuthGuard, CompleteProfileGuard)
   @ApiBearerAuth()
   @ApiOperation({
     summary: 'Unlike method variant',

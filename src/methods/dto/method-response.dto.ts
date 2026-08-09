@@ -1,6 +1,7 @@
 // src/methods/dto/method-response.dto.ts
 import { IoItemDto } from './io-item.dto';
 import { XpHour, VariantRecommendations, VariantRequirements } from '../types';
+import { ActionType } from '../action-type.enum';
 
 export class VariantTagResponseDto {
   label: string;
@@ -16,6 +17,7 @@ export class VariantResponseDto {
   description?: string;
   xpHour?: XpHour;
   actionsPerHour?: number;
+  actionType?: ActionType;
   clickIntensity?: number;
   afkiness?: number;
   riskLevel?: string;

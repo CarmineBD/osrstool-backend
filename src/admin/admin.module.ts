@@ -8,6 +8,7 @@ import { Item } from '../items/entities/item.entity';
 import { MethodProfitRefresherModule } from '../method-profit-refresher/method-profit-refresher.module';
 import { Method } from '../methods/entities/method.entity';
 import { MethodVariant } from '../methods/entities/variant.entity';
+import { PresenceModule } from '../presence/presence.module';
 import { AdminController } from './admin.controller';
 import { AdminService } from './admin.service';
 import { AdminScriptExecution } from './entities/admin-script-execution.entity';
@@ -18,6 +19,7 @@ import { AdminScriptExecution } from './entities/admin-script-execution.entity';
     AuthModule,
     ItemsModule,
     MethodProfitRefresherModule,
+    PresenceModule,
   ],
   controllers: [AdminController],
   providers: [AdminService],

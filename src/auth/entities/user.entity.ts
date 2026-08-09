@@ -8,6 +8,9 @@ export class User {
   @Column({ type: 'text' })
   email: string;
 
+  @Column({ name: 'account_username', type: 'text', nullable: true })
+  accountUsername: string | null;
+
   @Column({ type: 'text', default: 'free' })
   plan: string;
 
