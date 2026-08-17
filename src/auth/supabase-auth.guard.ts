@@ -1,13 +1,18 @@
 import { CanActivate, ExecutionContext, Injectable, UnauthorizedException } from '@nestjs/common';
 import { ConfigService } from '@nestjs/config';
 import type { Request } from 'express';
+import { RedisService } from '../redis/redis.service';
 import type { AuthenticatedUser } from './auth.types';
+import { buildDeletedUserAuthKey } from './deleted-user-auth.util';
 
 type RequestWithUser = Request & { user?: AuthenticatedUser };
 
 @Injectable()
 export class SupabaseAuthGuard implements CanActivate {
-  constructor(private readonly configService: ConfigService) {}
+  constructor(
+    private readonly configService: ConfigService,
+    private readonly redisService: RedisService,
+  ) {}
 
   async canActivate(context: ExecutionContext): Promise<boolean> {
     const req = context.switchToHttp().getRequest<RequestWithUser>();
@@ -56,6 +61,13 @@ export class SupabaseAuthGuard implements CanActivate {
     const subject = payload.sub;
     if (!subject || typeof subject !== 'string') {
       throw new UnauthorizedException('Authenticated token does not include user id');
+    }
+
+    const deletedUserMarker = await this.redisService
+      .getClient()
+      .get(buildDeletedUserAuthKey(subject));
+    if (deletedUserMarker !== null) {
+      throw new UnauthorizedException('User account has been deleted');
     }
 
     req.user = {

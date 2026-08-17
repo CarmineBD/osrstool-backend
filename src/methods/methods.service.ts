@@ -28,6 +28,7 @@ import { RuneScapeApiService } from './RuneScapeApiService';
 import { computeMissingRequirements, filterMethodsByUserStats } from './helpers/requirements';
 import { ConfigService } from '@nestjs/config';
 import { createAccountUsernameRequiredException } from '../auth/account-username-required.exception';
+import { buildDeletedUserAuthKey } from '../auth/deleted-user-auth.util';
 import { User } from '../auth/entities/user.entity';
 import { calculateMarketImpact, type MarketImpactResult } from './market-impact-calculator';
 import { Item } from '../items/entities/item.entity';
@@ -838,6 +839,11 @@ export class MethodsService implements OnModuleDestroy {
     const subject = payload.sub;
     if (!subject || typeof subject !== 'string') {
       throw new UnauthorizedException('Authenticated token does not include user id');
+    }
+
+    const deletedUserMarker = await this.redis.get(buildDeletedUserAuthKey(subject));
+    if (deletedUserMarker !== null) {
+      throw new UnauthorizedException('User account has been deleted');
     }
 
     return subject;
