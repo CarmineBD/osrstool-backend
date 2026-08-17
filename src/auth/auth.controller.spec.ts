@@ -3,7 +3,7 @@ import { AuthController } from './auth.controller';
 import type { AuthService } from './auth.service';
 
 describe('AuthController', () => {
-  it('returns the authenticated profile including account username', async () => {
+  it('returns the authenticated profile including account username and terms status', async () => {
     const authService = {
       getOrCreateUser: jest.fn().mockResolvedValue({
         id: 'user-1',
@@ -13,6 +13,10 @@ describe('AuthController', () => {
         role: 'user',
       }),
       getGivenLikesCount: jest.fn().mockResolvedValue(3),
+      getCurrentTermsStatusForUser: jest.fn().mockResolvedValue({
+        currentVersion: 'v1',
+        accepted: false,
+      }),
     } as unknown as AuthService;
     const controller = new AuthController(authService);
 
@@ -28,6 +32,10 @@ describe('AuthController', () => {
         plan: 'free',
         role: 'user',
         likes: 3,
+        terms: {
+          currentVersion: 'v1',
+          accepted: false,
+        },
       },
     });
   });
@@ -64,6 +72,39 @@ describe('AuthController', () => {
         } as never,
         { username: 'account_user' },
       ),
+    ).rejects.toBeInstanceOf(ForbiddenException);
+  });
+
+  it('accepts the current terms for the authenticated user', async () => {
+    const authService = {
+      acceptCurrentTerms: jest.fn().mockResolvedValue({
+        currentVersion: 'v1',
+        accepted: true,
+      }),
+    } as unknown as AuthService;
+    const controller = new AuthController(authService);
+
+    await expect(
+      controller.acceptTerms({
+        user: { id: 'user-1', email: 'user@example.com' },
+      } as never),
+    ).resolves.toEqual({
+      data: {
+        terms: {
+          currentVersion: 'v1',
+          accepted: true,
+        },
+      },
+    });
+  });
+
+  it('rejects terms acceptance when authenticated user id is missing', async () => {
+    const controller = new AuthController({} as AuthService);
+
+    await expect(
+      controller.acceptTerms({
+        user: { id: '', email: 'user@example.com' },
+      } as never),
     ).rejects.toBeInstanceOf(ForbiddenException);
   });
 });

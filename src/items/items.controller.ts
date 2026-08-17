@@ -28,6 +28,7 @@ import { ItemsService } from './items.service';
 import { BulkUpsertDto, CreateItemDto, UpdateItemDto } from './dto';
 import { SupabaseAuthGuard } from '../auth/supabase-auth.guard';
 import { SuperAdminGuard } from '../auth/super-admin.guard';
+import { TermsAcceptanceGuard } from '../auth/terms-acceptance.guard';
 
 const SORT_WHITELIST = new Set([
   'id',
@@ -208,7 +209,7 @@ export class ItemsController {
   }
 
   @Post()
-  @UseGuards(SupabaseAuthGuard, SuperAdminGuard)
+  @UseGuards(SupabaseAuthGuard, TermsAcceptanceGuard, SuperAdminGuard)
   @ApiBearerAuth()
   @ApiOperation({ summary: 'Create item', description: 'Creates a new item.' })
   @ApiCreatedResponse({ description: 'Item created', schema: { example: ITEM_EXAMPLE } })
@@ -219,7 +220,7 @@ export class ItemsController {
   }
 
   @Patch(':id')
-  @UseGuards(SupabaseAuthGuard, SuperAdminGuard)
+  @UseGuards(SupabaseAuthGuard, TermsAcceptanceGuard, SuperAdminGuard)
   @ApiBearerAuth()
   @ApiOperation({ summary: 'Update item', description: 'Updates an existing item.' })
   @ApiOkResponse({ description: 'Item updated', schema: { example: ITEM_EXAMPLE } })
@@ -230,7 +231,7 @@ export class ItemsController {
   }
 
   @Delete(':id')
-  @UseGuards(SupabaseAuthGuard, SuperAdminGuard)
+  @UseGuards(SupabaseAuthGuard, TermsAcceptanceGuard, SuperAdminGuard)
   @ApiBearerAuth()
   @HttpCode(204)
   @ApiOperation({ summary: 'Delete item', description: 'Removes an item by id.' })
@@ -242,7 +243,7 @@ export class ItemsController {
   }
 
   @Post('bulk-upsert')
-  @UseGuards(SupabaseAuthGuard, SuperAdminGuard)
+  @UseGuards(SupabaseAuthGuard, TermsAcceptanceGuard, SuperAdminGuard)
   @ApiBearerAuth()
   @ApiOperation({
     summary: 'Bulk upsert items',

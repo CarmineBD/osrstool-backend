@@ -1,11 +1,24 @@
-﻿feat: add completed account username onboarding and enforce it across methods/admin routes
+## Summary
 
-This branch introduces support for completing and storing an authenticated user's account username via the Supabase auth flow. It also enforces profile completion for protected methods and admin routes that require a completed account username.
+- Add versioned Terms of Service acceptance storage, the authenticated acceptance endpoint, and current terms status in the profile response.
+- Enforce current Terms of Service acceptance on protected authenticated, admin, and write endpoints that should require it.
+- Document the new terms acceptance endpoint and manual SQL setup in the backend README.
 
-Highlights:
-- Add `POST /me/account-username` endpoint for username completion
-- Persist normalized, lowercase `account_username` on the user record
-- Add database migration and unique case-insensitive username index
-- Add `CompleteProfileGuard` and enforce it for admin and methods endpoints
-- Refine methods service auth handling to return structured account username errors
-- Refactor presence service tests for stable timers and mocks
+## User-facing changelog
+
+- Signed-in users can now register acceptance of the current Terms of Service through the account API.
+- Protected account and admin actions now require the current Terms of Service to be accepted before they can be used.
+
+## How to test
+
+- `npm run lint`
+- `$env:CI='true'; npm test`
+- `npm run build`
+- Call `GET /me` with a valid bearer token and confirm the response includes `terms.currentVersion` and `terms.accepted`.
+- Call `POST /me/terms/acceptance` with the same token and confirm it returns `accepted: true` and remains idempotent on repeat requests.
+- Call a terms-protected endpoint without a current acceptance record and confirm it returns a `403` response with code `TERMS_ACCEPTANCE_REQUIRED`.
+
+## Notes
+
+- Run `sql/2026-08-17-add-user-terms-acceptances.sql` once in each environment before using the new flow.
+- The backend currently enforces `CURRENT_TERMS_VERSION = v1`.
