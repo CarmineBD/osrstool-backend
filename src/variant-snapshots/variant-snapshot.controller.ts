@@ -9,6 +9,7 @@ import {
 } from '@nestjs/swagger';
 import { SupabaseAuthGuard } from '../auth/supabase-auth.guard';
 import { SuperAdminGuard } from '../auth/super-admin.guard';
+import { TermsAcceptanceGuard } from '../auth/terms-acceptance.guard';
 import { VariantSnapshotService } from './variant-snapshot.service';
 
 @ApiTags('variant-snapshots')
@@ -17,7 +18,7 @@ export class VariantSnapshotController {
   constructor(private readonly svc: VariantSnapshotService) {}
 
   @Delete(':id')
-  @UseGuards(SupabaseAuthGuard, SuperAdminGuard)
+  @UseGuards(SupabaseAuthGuard, TermsAcceptanceGuard, SuperAdminGuard)
   @ApiBearerAuth()
   @ApiOperation({ summary: 'Delete variant snapshot', description: 'Removes a snapshot by id.' })
   @ApiOkResponse({ description: 'Snapshot removed', schema: { example: { data: null } } })

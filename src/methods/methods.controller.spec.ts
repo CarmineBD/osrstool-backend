@@ -9,6 +9,7 @@ import type { Request } from 'express';
 import { CompleteProfileGuard } from '../auth/complete-profile.guard';
 import { SupabaseAuthGuard } from '../auth/supabase-auth.guard';
 import { SuperAdminGuard } from '../auth/super-admin.guard';
+import { TermsAcceptanceGuard } from '../auth/terms-acceptance.guard';
 import { MethodsController } from './methods.controller';
 import type { MethodsService } from './methods.service';
 
@@ -22,12 +23,12 @@ describe('MethodsController guard metadata', () => {
   ];
 
   it.each(writeRoutes)(
-    'requires SupabaseAuthGuard and SuperAdminGuard for %s endpoint',
+    'requires SupabaseAuthGuard, TermsAcceptanceGuard and SuperAdminGuard for %s endpoint',
     (methodName) => {
       const handler = MethodsController.prototype[methodName];
       const guards = Reflect.getMetadata(GUARDS_METADATA, handler) as unknown[];
 
-      expect(guards).toEqual([SupabaseAuthGuard, SuperAdminGuard]);
+      expect(guards).toEqual([SupabaseAuthGuard, TermsAcceptanceGuard, SuperAdminGuard]);
     },
   );
 });
@@ -70,7 +71,7 @@ describe('MethodsController skills summary endpoint', () => {
 });
 
 describe('MethodsController skill roadmap endpoint', () => {
-  it('requires SupabaseAuthGuard and CompleteProfileGuard for the roadmap endpoint', () => {
+  it('requires SupabaseAuthGuard, TermsAcceptanceGuard and CompleteProfileGuard for the roadmap endpoint', () => {
     const descriptor = Object.getOwnPropertyDescriptor(
       MethodsController.prototype,
       'findSkillRoadmap',
@@ -81,7 +82,7 @@ describe('MethodsController skill roadmap endpoint', () => {
     const handler = descriptor?.value as object;
     const guards = Reflect.getMetadata(GUARDS_METADATA, handler) as unknown[];
 
-    expect(guards).toEqual([SupabaseAuthGuard, CompleteProfileGuard]);
+    expect(guards).toEqual([SupabaseAuthGuard, TermsAcceptanceGuard, CompleteProfileGuard]);
   });
 
   it('rejects query params outside the roadmap contract', async () => {

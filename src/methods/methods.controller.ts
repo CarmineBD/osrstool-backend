@@ -27,6 +27,7 @@ import { CreateMethodDto, UpdateMethodDto, UpdateMethodBasicDto, UpdateVariantDt
 import { CompleteProfileGuard } from '../auth/complete-profile.guard';
 import { SupabaseAuthGuard } from '../auth/supabase-auth.guard';
 import { SuperAdminGuard } from '../auth/super-admin.guard';
+import { TermsAcceptanceGuard } from '../auth/terms-acceptance.guard';
 import type { AuthenticatedUser } from '../auth/auth.types';
 import { VARIANT_TAG_DEFINITIONS, VARIANT_TAG_QUERY_VALUES } from './variant-tags';
 
@@ -165,7 +166,7 @@ export class MethodsController {
   constructor(private readonly svc: MethodsService) {}
 
   @Post()
-  @UseGuards(SupabaseAuthGuard, SuperAdminGuard)
+  @UseGuards(SupabaseAuthGuard, TermsAcceptanceGuard, SuperAdminGuard)
   @ApiBearerAuth()
   @ApiOperation({ summary: 'Create method', description: 'Creates a new method.' })
   @ApiOkResponse({ description: 'Method created', schema: { example: { data: METHOD_EXAMPLE } } })
@@ -367,7 +368,7 @@ export class MethodsController {
   }
 
   @Get('skills/roadmap')
-  @UseGuards(SupabaseAuthGuard, CompleteProfileGuard)
+  @UseGuards(SupabaseAuthGuard, TermsAcceptanceGuard, CompleteProfileGuard)
   @ApiBearerAuth()
   @ApiOperation({
     summary: 'Get a skill roadmap',
@@ -417,7 +418,10 @@ export class MethodsController {
     },
   })
   @ApiUnauthorizedResponse({ description: 'Missing, invalid, or expired bearer token' })
-  @ApiForbiddenResponse({ description: 'Complete your account username to use this endpoint' })
+  @ApiForbiddenResponse({
+    description:
+      'Accept the current Terms of Service and complete your account username to use this endpoint',
+  })
   async findSkillRoadmap(
     @Query('username') username?: string,
     @Query('skill') skill?: string,
@@ -585,7 +589,7 @@ export class MethodsController {
   }
 
   @Post('variant/:variantId/like')
-  @UseGuards(SupabaseAuthGuard, CompleteProfileGuard)
+  @UseGuards(SupabaseAuthGuard, TermsAcceptanceGuard, CompleteProfileGuard)
   @ApiBearerAuth()
   @ApiOperation({
     summary: 'Like method variant',
@@ -604,7 +608,7 @@ export class MethodsController {
   }
 
   @Delete('variant/:variantId/like')
-  @UseGuards(SupabaseAuthGuard, CompleteProfileGuard)
+  @UseGuards(SupabaseAuthGuard, TermsAcceptanceGuard, CompleteProfileGuard)
   @ApiBearerAuth()
   @ApiOperation({
     summary: 'Unlike method variant',
@@ -716,7 +720,7 @@ export class MethodsController {
   }
 
   @Put(':id')
-  @UseGuards(SupabaseAuthGuard, SuperAdminGuard)
+  @UseGuards(SupabaseAuthGuard, TermsAcceptanceGuard, SuperAdminGuard)
   @ApiBearerAuth()
   @ApiOperation({ summary: 'Update method', description: 'Updates an existing method.' })
   @ApiOkResponse({ description: 'Method updated', schema: { example: { data: METHOD_EXAMPLE } } })
@@ -728,7 +732,7 @@ export class MethodsController {
   }
 
   @Put(':id/basic')
-  @UseGuards(SupabaseAuthGuard, SuperAdminGuard)
+  @UseGuards(SupabaseAuthGuard, TermsAcceptanceGuard, SuperAdminGuard)
   @ApiBearerAuth()
   @ApiOperation({
     summary: 'Update method (basic)',
@@ -743,7 +747,7 @@ export class MethodsController {
   }
 
   @Put('variant/:id')
-  @UseGuards(SupabaseAuthGuard, SuperAdminGuard)
+  @UseGuards(SupabaseAuthGuard, TermsAcceptanceGuard, SuperAdminGuard)
   @ApiBearerAuth()
   @ApiOperation({
     summary: 'Update method variant',
@@ -764,7 +768,7 @@ export class MethodsController {
   }
 
   @Delete(':id')
-  @UseGuards(SupabaseAuthGuard, SuperAdminGuard)
+  @UseGuards(SupabaseAuthGuard, TermsAcceptanceGuard, SuperAdminGuard)
   @ApiBearerAuth()
   @ApiOperation({ summary: 'Delete method', description: 'Removes a method by id.' })
   @ApiOkResponse({ description: 'Method removed', schema: { example: { data: null } } })

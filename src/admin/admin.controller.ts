@@ -22,6 +22,7 @@ import type { AuthenticatedUser } from '../auth/auth.types';
 import { CompleteProfileGuard } from '../auth/complete-profile.guard';
 import { SupabaseAuthGuard } from '../auth/supabase-auth.guard';
 import { SuperAdminGuard } from '../auth/super-admin.guard';
+import { TermsAcceptanceGuard } from '../auth/terms-acceptance.guard';
 import {
   PresenceHistoryQueryDto,
   PresenceHistoryRange,
@@ -33,7 +34,7 @@ type RequestWithUser = Request & { user: AuthenticatedUser };
 
 @ApiTags('admin')
 @ApiBearerAuth()
-@UseGuards(SupabaseAuthGuard, CompleteProfileGuard, SuperAdminGuard)
+@UseGuards(SupabaseAuthGuard, TermsAcceptanceGuard, CompleteProfileGuard, SuperAdminGuard)
 @Controller('admin')
 export class AdminController {
   constructor(private readonly adminService: AdminService) {}

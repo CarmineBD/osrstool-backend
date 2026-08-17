@@ -4,6 +4,8 @@ import { Repository } from 'typeorm';
 import type { AuthenticatedUser } from './auth.types';
 import { User } from './entities/user.entity';
 import { MethodVariant } from '../methods/entities/variant.entity';
+import { UserTermsAcceptance } from './entities/user-terms-acceptance.entity';
+import { CURRENT_TERMS_VERSION } from './terms.constants';
 
 const ACCOUNT_USERNAME_MIN_LENGTH = 3;
 const ACCOUNT_USERNAME_MAX_LENGTH = 20;
@@ -28,14 +30,33 @@ export class AuthService {
     private readonly userRepo: Repository<User>,
     @InjectRepository(MethodVariant)
     private readonly variantRepo: Repository<MethodVariant>,
+    @InjectRepository(UserTermsAcceptance)
+    private readonly userTermsAcceptanceRepo: Repository<UserTermsAcceptance>,
   ) {}
+
+  async getCurrentTermsStatusForUser(
+    userId: string,
+  ): Promise<{ currentVersion: string; accepted: boolean }> {
+    const currentAcceptance = await this.userTermsAcceptanceRepo.findOne({
+      where: {
+        userId,
+        termsVersion: CURRENT_TERMS_VERSION,
+      },
+    });
+
+    return {
+      currentVersion: CURRENT_TERMS_VERSION,
+      accepted: Boolean(currentAcceptance),
+    };
+  }
 
   async getOrCreateUser(authUser: Pick<AuthenticatedUser, 'id' | 'email'>): Promise<User> {
     const existingUser = await this.userRepo.findOne({ where: { id: authUser.id } });
     const nextEmail = authUser.email ?? '';
+    let user: User;
 
     if (!existingUser) {
-      return this.userRepo.save(
+      user = await this.userRepo.save(
         this.userRepo.create({
           id: authUser.id,
           email: nextEmail,
@@ -44,14 +65,14 @@ export class AuthService {
           role: 'user',
         }),
       );
-    }
-
-    if (existingUser.email !== nextEmail) {
+    } else if (existingUser.email !== nextEmail) {
       existingUser.email = nextEmail;
-      return this.userRepo.save(existingUser);
+      user = await this.userRepo.save(existingUser);
+    } else {
+      user = existingUser;
     }
 
-    return existingUser;
+    return user;
   }
 
   async setAccountUsername(
@@ -88,6 +109,43 @@ export class AuthService {
       .createQueryBuilder('method_variant')
       .where(':userId = ANY(method_variant.liked_user_ids)', { userId })
       .getCount();
+  }
+
+  async acceptCurrentTerms(
+    authUser: Pick<AuthenticatedUser, 'id' | 'email'>,
+  ): Promise<{ currentVersion: string; accepted: boolean }> {
+    const user = await this.getOrCreateUser(authUser);
+    const existingAcceptance = await this.userTermsAcceptanceRepo.findOne({
+      where: {
+        userId: user.id,
+        termsVersion: CURRENT_TERMS_VERSION,
+      },
+    });
+
+    if (existingAcceptance) {
+      return {
+        currentVersion: CURRENT_TERMS_VERSION,
+        accepted: true,
+      };
+    }
+
+    try {
+      await this.userTermsAcceptanceRepo.save(
+        this.userTermsAcceptanceRepo.create({
+          userId: user.id,
+          termsVersion: CURRENT_TERMS_VERSION,
+        }),
+      );
+    } catch (error) {
+      if (!this.isTermsAcceptanceConflictError(error)) {
+        throw error;
+      }
+    }
+
+    return {
+      currentVersion: CURRENT_TERMS_VERSION,
+      accepted: true,
+    };
   }
 
   private normalizeAccountUsername(value: string): string {
@@ -130,6 +188,24 @@ export class AuthService {
       candidate.constraint === 'users_account_username_unique_ci' ||
       candidate.constraint === 'idx_users_account_username_unique_ci' ||
       (typeof candidate.detail === 'string' && candidate.detail.includes('account_username'))
+    );
+  }
+
+  private isTermsAcceptanceConflictError(error: unknown): boolean {
+    if (!error || typeof error !== 'object') {
+      return false;
+    }
+
+    const candidate = error as { code?: unknown; constraint?: unknown; detail?: unknown };
+    if (candidate.code !== '23505') {
+      return false;
+    }
+
+    return (
+      candidate.constraint === 'uq_user_terms_acceptances_user_version' ||
+      (typeof candidate.detail === 'string' &&
+        candidate.detail.includes('user_id') &&
+        candidate.detail.includes('terms_version'))
     );
   }
 }
