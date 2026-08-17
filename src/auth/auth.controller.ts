@@ -1,4 +1,13 @@
-import { Body, Controller, ForbiddenException, Get, Post, Req, UseGuards } from '@nestjs/common';
+import {
+  Body,
+  Controller,
+  Delete,
+  ForbiddenException,
+  Get,
+  Post,
+  Req,
+  UseGuards,
+} from '@nestjs/common';
 import {
   ApiBadRequestResponse,
   ApiBearerAuth,
@@ -148,6 +157,40 @@ export class AuthController {
     return {
       data: {
         terms,
+      },
+    };
+  }
+
+  @Delete(['me', 'users/me'])
+  @UseGuards(SupabaseAuthGuard)
+  @ApiBearerAuth()
+  @ApiOperation({
+    summary: 'Delete authenticated user account',
+    description:
+      'Deletes the authenticated user account in both Postgres and Supabase Auth, and removes stored user-linked references.',
+  })
+  @ApiOkResponse({
+    description: 'Authenticated user account deleted',
+    schema: {
+      example: {
+        data: {
+          deleted: true,
+        },
+      },
+    },
+  })
+  @ApiUnauthorizedResponse({ description: 'Missing, invalid, or expired bearer token' })
+  @ApiForbiddenResponse({ description: 'Authenticated token does not include user id' })
+  async deleteMe(@Req() req: RequestWithUser) {
+    if (!req.user?.id) {
+      throw new ForbiddenException('Authenticated user id is required');
+    }
+
+    await this.authService.deleteAuthenticatedUser(req.user);
+
+    return {
+      data: {
+        deleted: true,
       },
     };
   }

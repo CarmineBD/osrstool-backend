@@ -107,4 +107,31 @@ describe('AuthController', () => {
       } as never),
     ).rejects.toBeInstanceOf(ForbiddenException);
   });
+
+  it('deletes the authenticated user account', async () => {
+    const authService = {
+      deleteAuthenticatedUser: jest.fn().mockResolvedValue(undefined),
+    } as unknown as AuthService;
+    const controller = new AuthController(authService);
+
+    await expect(
+      controller.deleteMe({
+        user: { id: 'user-1', email: 'user@example.com', exp: 1_800_000_000 },
+      } as never),
+    ).resolves.toEqual({
+      data: {
+        deleted: true,
+      },
+    });
+  });
+
+  it('rejects account deletion when authenticated user id is missing', async () => {
+    const controller = new AuthController({} as AuthService);
+
+    await expect(
+      controller.deleteMe({
+        user: { id: '', email: 'user@example.com' },
+      } as never),
+    ).rejects.toBeInstanceOf(ForbiddenException);
+  });
 });
