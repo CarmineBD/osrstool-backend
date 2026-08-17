@@ -1,24 +1,23 @@
 ## Summary
 
-- Add versioned Terms of Service acceptance storage, the authenticated acceptance endpoint, and current terms status in the profile response.
-- Enforce current Terms of Service acceptance on protected authenticated, admin, and write endpoints that should require it.
-- Document the new terms acceptance endpoint and manual SQL setup in the backend README.
+- Add an authenticated account deletion endpoint that removes the user from Postgres, clears linked references, and deletes the Supabase Auth user.
+- Reject already-issued tokens for deleted accounts by recording a Redis tombstone and checking it in guarded and optional-auth flows.
 
 ## User-facing changelog
 
-- Signed-in users can now register acceptance of the current Terms of Service through the account API.
-- Protected account and admin actions now require the current Terms of Service to be accepted before they can be used.
+- Signed-in users can now delete their account through the account API in a single step.
+- Fixed an issue where a deleted account could still access authenticated endpoints until its existing token expired.
 
 ## How to test
 
+- `npm test -- auth/auth.controller.spec.ts auth/auth.service.spec.ts`
+- `npm test -- auth/supabase-auth.guard.spec.ts`
 - `npm run lint`
-- `$env:CI='true'; npm test`
+- `npm test`
 - `npm run build`
-- Call `GET /me` with a valid bearer token and confirm the response includes `terms.currentVersion` and `terms.accepted`.
-- Call `POST /me/terms/acceptance` with the same token and confirm it returns `accepted: true` and remains idempotent on repeat requests.
-- Call a terms-protected endpoint without a current acceptance record and confirm it returns a `403` response with code `TERMS_ACCEPTANCE_REQUIRED`.
+- Call `DELETE /me` with a valid bearer token and confirm it returns `{ "data": { "deleted": true } }`.
+- Retry an authenticated request with the same token and confirm it now returns `401` with `User account has been deleted`.
 
 ## Notes
 
-- Run `sql/2026-08-17-add-user-terms-acceptances.sql` once in each environment before using the new flow.
-- The backend currently enforces `CURRENT_TERMS_VERSION = v1`.
+- `SUPABASE_SERVICE_ROLE_KEY` must be configured together with `SUPABASE_PROJECT_URL` for the self-deletion flow to work.
