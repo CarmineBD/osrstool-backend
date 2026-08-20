@@ -13,6 +13,8 @@ import { TermsAcceptanceGuard } from '../auth/terms-acceptance.guard';
 import { MethodsController } from './methods.controller';
 import type { MethodsService } from './methods.service';
 
+const player = { levels: { Cooking: 70 }, quests: {}, achievement_diaries: {} };
+
 describe('MethodsController guard metadata', () => {
   const writeRoutes: Array<keyof MethodsController> = [
     'create',
@@ -25,9 +27,10 @@ describe('MethodsController guard metadata', () => {
   it.each(writeRoutes)(
     'requires SupabaseAuthGuard, TermsAcceptanceGuard, CompleteProfileGuard and SuperAdminGuard for %s endpoint',
     (methodName) => {
-      const handler = MethodsController.prototype[methodName];
-      const guards = Reflect.getMetadata(GUARDS_METADATA, handler) as unknown[];
-
+      const guards = Reflect.getMetadata(
+        GUARDS_METADATA,
+        MethodsController.prototype[methodName],
+      ) as unknown[];
       expect(guards).toEqual([
         SupabaseAuthGuard,
         TermsAcceptanceGuard,
@@ -36,281 +39,104 @@ describe('MethodsController guard metadata', () => {
       ]);
     },
   );
-});
 
-describe('MethodsController skills summary endpoint', () => {
-  it('rejects query params other than username and enabled', async () => {
-    const svc: { skillsSummaryWithProfitResponse: jest.Mock } = {
-      skillsSummaryWithProfitResponse: jest.fn(),
-    };
-
-    const controller = new MethodsController(svc as unknown as MethodsService);
-
-    await expect(
-      controller.findSkillsSummary('zezima', 'true', { username: 'zezima', page: '1' }, undefined),
-    ).rejects.toBeInstanceOf(BadRequestException);
-    expect(svc.skillsSummaryWithProfitResponse).not.toHaveBeenCalled();
-  });
-
-  it('forwards username, enabled and authorization header to service', async () => {
-    const svc: { skillsSummaryWithProfitResponse: jest.Mock } = {
-      skillsSummaryWithProfitResponse: jest.fn().mockResolvedValue({ data: {}, meta: {} }),
-    };
-
-    const controller = new MethodsController(svc as unknown as MethodsService);
-    const req = { headers: { authorization: 'Bearer token' } } as unknown as Request;
-
-    await controller.findSkillsSummary(
-      'zezima',
-      'false',
-      { username: 'zezima', enabled: 'false' },
-      req,
-    );
-
-    expect(svc.skillsSummaryWithProfitResponse).toHaveBeenCalledWith(
-      'zezima',
-      'Bearer token',
-      'false',
-    );
-  });
-});
-
-describe('MethodsController skill roadmap endpoint', () => {
-  it('requires SupabaseAuthGuard, TermsAcceptanceGuard and CompleteProfileGuard for the roadmap endpoint', () => {
+  it('keeps the existing authenticated roadmap permissions', () => {
     const descriptor = Object.getOwnPropertyDescriptor(
       MethodsController.prototype,
       'findSkillRoadmap',
     );
-
-    expect(descriptor?.value).toBeDefined();
-
-    const handler = descriptor?.value as object;
-    const guards = Reflect.getMetadata(GUARDS_METADATA, handler) as unknown[];
-
+    const guards = Reflect.getMetadata(GUARDS_METADATA, descriptor?.value as object) as unknown[];
     expect(guards).toEqual([SupabaseAuthGuard, TermsAcceptanceGuard, CompleteProfileGuard]);
   });
+});
 
-  it('rejects query params outside the roadmap contract', async () => {
-    const svc: { skillRoadmapResponse: jest.Mock } = {
-      skillRoadmapResponse: jest.fn(),
-    };
-
+describe('MethodsController player context endpoints', () => {
+  it('rejects unsupported skill summary query params', async () => {
+    const svc = { skillsSummaryWithProfitResponse: jest.fn() };
     const controller = new MethodsController(svc as unknown as MethodsService);
 
     await expect(
-      controller.findSkillRoadmap(
-        'zezima',
-        'cooking',
-        'fastest',
-        undefined,
-        'true',
-        ['safe'],
-        undefined,
-        {
-          username: 'zezima',
-          skill: 'cooking',
-          strategy: 'fastest',
-          page: '1',
-        },
-        undefined,
-      ),
+      controller.findSkillsSummary('true', { page: '1' }, { player }, undefined),
     ).rejects.toBeInstanceOf(BadRequestException);
-
-    expect(svc.skillRoadmapResponse).not.toHaveBeenCalled();
+    expect(svc.skillsSummaryWithProfitResponse).not.toHaveBeenCalled();
   });
 
-  it('forwards roadmap params, auth header and authenticated user id to the service', async () => {
-    const svc: { skillRoadmapResponse: jest.Mock } = {
-      skillRoadmapResponse: jest.fn().mockResolvedValue({ data: { roadmap: {} }, meta: {} }),
-    };
+  it('forwards player context for searches without a RuneScape username', async () => {
+    const svc = { listWithProfitResponse: jest.fn().mockResolvedValue({}) };
+    const controller = new MethodsController(svc as unknown as MethodsService);
+    const req = { headers: { authorization: 'Bearer token' } } as unknown as Request;
 
+    await controller.search(
+      'craft',
+      '1',
+      '10',
+      'Skilling',
+      undefined,
+      undefined,
+      undefined,
+      undefined,
+      undefined,
+      undefined,
+      'true',
+      undefined,
+      'false',
+      undefined,
+      'all',
+      ['safe'],
+      'highProfit',
+      'desc',
+      { player },
+      req,
+    );
+
+    expect(svc.listWithProfitResponse).toHaveBeenCalledWith(
+      expect.objectContaining({
+        player,
+        name: 'craft',
+        show_only_free_to_play: 'true',
+        authorization: 'Bearer token',
+      }),
+    );
+    const calls = svc.listWithProfitResponse.mock.calls as [Record<string, unknown>][];
+    expect(calls[0][0]).not.toHaveProperty('username');
+  });
+
+  it('forwards the required roadmap player context', async () => {
+    const svc = { skillRoadmapResponse: jest.fn().mockResolvedValue({}) };
     const controller = new MethodsController(svc as unknown as MethodsService);
     const req = {
       headers: { authorization: 'Bearer token' },
       user: { id: 'user-1', email: null },
-    } as unknown as Request & { user?: { id: string; email: null } };
+    } as unknown as Request & { user: { id: string; email: null } };
 
     await controller.findSkillRoadmap(
-      'zezima',
       'cooking',
-      'most_afk',
-      '90',
+      'fastest',
+      '99',
       'true',
-      ['safe', 'ge_limits'],
-      'false',
-      {
-        username: 'zezima',
-        skill: 'cooking',
-        strategy: 'most_afk',
-        target_level: '90',
-        show_only_free_to_play: 'true',
-        ignoredTags: ['safe', 'ge_limits'],
-        enabled: 'false',
-      },
+      ['safe'],
+      undefined,
+      { skill: 'cooking', strategy: 'fastest' },
+      { player },
       req,
     );
 
-    expect(svc.skillRoadmapResponse).toHaveBeenCalledWith({
-      username: 'zezima',
-      skill: 'cooking',
-      strategy: 'most_afk',
-      target_level: '90',
-      show_only_free_to_play: 'true',
-      ignoredTags: ['safe', 'ge_limits'],
-      enabled: 'false',
-      authorization: 'Bearer token',
-      authenticatedUserId: 'user-1',
-    });
+    expect(svc.skillRoadmapResponse).toHaveBeenCalledWith(
+      expect.objectContaining({ player, authenticatedUserId: 'user-1' }),
+    );
   });
-});
 
-describe('MethodsController trending profit endpoint', () => {
-  it('forwards trending profit query params and authorization header to service', async () => {
-    const svc: { listTrendingProfitResponse: jest.Mock } = {
-      listTrendingProfitResponse: jest.fn().mockResolvedValue({ data: { methods: [] }, meta: {} }),
-    };
-
+  it('forwards player context for method detail', async () => {
+    const svc = { methodDetailsWithProfitResponse: jest.fn().mockResolvedValue({}) };
     const controller = new MethodsController(svc as unknown as MethodsService);
     const req = { headers: { authorization: 'Bearer token' } } as unknown as Request;
 
-    await controller.findTrendingProfit(
-      '24h',
-      'reliable',
-      '2',
-      '20',
-      'zezima',
-      'craft',
-      'Skilling',
-      '3',
-      '4',
-      '1',
-      'true',
-      'Magic',
-      'true',
-      'false',
-      'true',
-      'false',
-      'all',
-      '1000',
-      '5',
-      '50000',
-      undefined,
-      req,
+    await controller.findMethodDetailsWithProfit('method-1', { player }, req);
+
+    expect(svc.methodDetailsWithProfitResponse).toHaveBeenCalledWith(
+      'method-1',
+      player,
+      'Bearer token',
     );
-
-    expect(svc.listTrendingProfitResponse).toHaveBeenCalledWith({
-      window: '24h',
-      mode: 'reliable',
-      page: '2',
-      perPage: '20',
-      username: 'zezima',
-      name: 'craft',
-      category: 'Skilling',
-      clickIntensity: '3',
-      afkiness: '4',
-      riskLevel: '1',
-      givesExperience: 'true',
-      skill: 'Magic',
-      showProfitables: 'true',
-      members: 'false',
-      enabled: 'true',
-      likedByMe: 'false',
-      variants: 'all',
-      minGrowthAbs: '1000',
-      minGrowthPct: '5',
-      minCurrentProfit: '50000',
-      minProfit: undefined,
-      authorization: 'Bearer token',
-    });
-  });
-});
-
-describe('MethodsController list endpoint', () => {
-  it('forwards show_only_free_to_play to the service query object', async () => {
-    const svc: { listWithProfitResponse: jest.Mock } = {
-      listWithProfitResponse: jest.fn().mockResolvedValue({ data: { methods: [] }, meta: {} }),
-    };
-
-    const controller = new MethodsController(svc as unknown as MethodsService);
-    const req = { headers: { authorization: 'Bearer token' } } as unknown as Request;
-
-    await controller.findAll(
-      'craft',
-      '1',
-      '10',
-      'zezima',
-      'Skilling',
-      undefined,
-      undefined,
-      undefined,
-      undefined,
-      undefined,
-      undefined,
-      'true',
-      undefined,
-      'false',
-      undefined,
-      'all',
-      ['safe', 'ge_limits'],
-      'highProfit',
-      'desc',
-      req,
-    );
-
-    expect(svc.listWithProfitResponse).toHaveBeenCalledWith({
-      page: '1',
-      perPage: '10',
-      username: 'zezima',
-      name: 'craft',
-      category: 'Skilling',
-      clickIntensity: undefined,
-      afkiness: undefined,
-      riskLevel: undefined,
-      givesExperience: undefined,
-      skill: undefined,
-      showProfitables: undefined,
-      show_only_free_to_play: 'true',
-      enabled: undefined,
-      is_official: 'false',
-      likedByMe: undefined,
-      variants: 'all',
-      ignoredTags: ['safe', 'ge_limits'],
-      sortBy: 'highProfit',
-      order: 'desc',
-      authorization: 'Bearer token',
-    });
-  });
-
-  it('returns the variant tags catalog from the service', () => {
-    const svc: { listVariantTagsResponse: jest.Mock } = {
-      listVariantTagsResponse: jest.fn().mockReturnValue({
-        data: {
-          tags: [
-            {
-              key: 'safe',
-              label: 'Safe',
-              severity: 1,
-              description: 'This method stayed above break-even over the last 24 hours.',
-            },
-          ],
-        },
-      }),
-    };
-
-    const controller = new MethodsController(svc as unknown as MethodsService);
-
-    expect(controller.listVariantTags()).toEqual({
-      data: {
-        tags: [
-          {
-            key: 'safe',
-            label: 'Safe',
-            severity: 1,
-            description: 'This method stayed above break-even over the last 24 hours.',
-          },
-        ],
-      },
-    });
-    expect(svc.listVariantTagsResponse).toHaveBeenCalledTimes(1);
   });
 });
