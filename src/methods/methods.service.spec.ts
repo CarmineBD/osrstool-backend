@@ -808,7 +808,6 @@ describe('MethodsService variantCount', () => {
     expect(verifyTokenSpy).not.toHaveBeenCalled();
     expect(result.status).toBe('ok');
   });
-
   it('throws on skill summaries when username is sent by a user without a completed account username', async () => {
     const methodRepo = {
       find: jest.fn().mockResolvedValue([]),
@@ -2323,30 +2322,33 @@ describe('MethodsService variantCount', () => {
     );
 
     await expect(
-      service.create({
-        name: 'Test method',
-        icon_id: 4151,
-        variants: [
-          {
-            label: 'Variant A',
-            icon_id: 4152,
-            actionsPerHour: 100,
-            actionType: ActionType.ITEMS,
-            members: false,
-            inputs: [{ id: 100, quantity: 1, type: 'input' }],
-            outputs: [],
-          },
-          {
-            label: 'Variant B',
-            icon_id: 4152,
-            actionsPerHour: 100,
-            actionType: ActionType.ITEMS,
-            members: false,
-            inputs: [],
-            outputs: [{ id: 101, quantity: 1, type: 'output' }],
-          },
-        ],
-      }),
+      service.create(
+        {
+          name: 'Test method',
+          icon_id: 4151,
+          variants: [
+            {
+              label: 'Variant A',
+              icon_id: 4152,
+              actionsPerHour: 100,
+              actionType: ActionType.ITEMS,
+              members: false,
+              inputs: [{ id: 100, quantity: 1, type: 'input' }],
+              outputs: [],
+            },
+            {
+              label: 'Variant B',
+              icon_id: 4152,
+              actionsPerHour: 100,
+              actionType: ActionType.ITEMS,
+              members: false,
+              inputs: [],
+              outputs: [{ id: 101, quantity: 1, type: 'output' }],
+            },
+          ],
+        },
+        'user-1',
+      ),
     ).rejects.toMatchObject({
       response: {
         code: 'F2P_VARIANT_CONTAINS_MEMBERS_ITEMS',
@@ -2367,6 +2369,99 @@ describe('MethodsService variantCount', () => {
 
     expect(createMethod).not.toHaveBeenCalled();
     expect(saveMethod).not.toHaveBeenCalled();
+  });
+
+  it('stores createdBy and computes isOfficial from the creator role on create', async () => {
+    const createdMethod = { id: 'm1' } as Method;
+    const createMethod = jest.fn().mockReturnValue(createdMethod);
+    const saveMethod = jest.fn().mockResolvedValue(createdMethod);
+    const methodRepo = {
+      create: createMethod,
+      save: saveMethod,
+      count: jest.fn().mockResolvedValue(0),
+    } as unknown as Repository<Method>;
+
+    const createdVariant = { id: 'v1' } as MethodVariant;
+    const variantRepo = {
+      create: jest.fn().mockReturnValue(createdVariant),
+      save: jest.fn().mockResolvedValue(createdVariant),
+      count: jest.fn().mockResolvedValue(0),
+    } as unknown as Repository<MethodVariant>;
+
+    const ioRepo = {
+      create: jest
+        .fn()
+        .mockImplementation(
+          (payload: Partial<VariantIoItem>): VariantIoItem => payload as VariantIoItem,
+        ),
+      save: jest.fn().mockResolvedValue(undefined),
+    } as unknown as Repository<VariantIoItem>;
+
+    const userRepo = {
+      findOne: jest
+        .fn()
+        .mockResolvedValue({ id: 'user-1', role: 'user', accountUsername: 'user_1' }),
+    } as unknown as Repository<User>;
+
+    const service = new MethodsService(
+      methodRepo,
+      variantRepo,
+      ioRepo,
+      {} as Repository<VariantHistory>,
+      createMethodLikeRepo(),
+      userRepo,
+      {} as VariantSnapshotService,
+      {} as RuneScapeApiService,
+      { get: jest.fn().mockReturnValue('redis://localhost:6379') } as unknown as ConfigService,
+      {
+        find: jest.fn().mockResolvedValue([
+          { id: 100, members: false },
+          { id: 200, members: false },
+          { id: 4151, members: false },
+          { id: 4152, members: false },
+        ]),
+      } as unknown as Repository<Item>,
+    );
+
+    jest.spyOn(service, 'findOne').mockResolvedValue({
+      id: 'm1',
+      name: 'Created method',
+      slug: 'created-method',
+      icon_id: 4151,
+      description: '',
+      category: 'skilling',
+      enabled: true,
+      is_official: false,
+      variants: [],
+    });
+
+    await service.create(
+      {
+        name: 'Created method',
+        icon_id: 4151,
+        category: 'skilling',
+        enabled: true,
+        variants: [
+          {
+            label: 'Variant A',
+            icon_id: 4152,
+            actionsPerHour: 100,
+            actionType: ActionType.ITEMS,
+            inputs: [{ id: 100, quantity: 1, type: 'input' }],
+            outputs: [{ id: 200, quantity: 1, type: 'output' }],
+          },
+        ],
+      },
+      'user-1',
+    );
+
+    expect(createMethod).toHaveBeenCalledWith(
+      expect.objectContaining({
+        createdBy: 'user-1',
+        isOfficial: false,
+      }),
+    );
+    expect(saveMethod).toHaveBeenCalledWith(createdMethod);
   });
 
   it('rejects updateVariant when the resulting free-to-play variant includes members-only items', async () => {
@@ -2859,3 +2954,4 @@ describe('MethodsService trending profit', () => {
     );
   });
 });
+

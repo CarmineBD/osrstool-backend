@@ -23,12 +23,17 @@ describe('MethodsController guard metadata', () => {
   ];
 
   it.each(writeRoutes)(
-    'requires SupabaseAuthGuard, TermsAcceptanceGuard and SuperAdminGuard for %s endpoint',
+    'requires SupabaseAuthGuard, TermsAcceptanceGuard, CompleteProfileGuard and SuperAdminGuard for %s endpoint',
     (methodName) => {
       const handler = MethodsController.prototype[methodName];
       const guards = Reflect.getMetadata(GUARDS_METADATA, handler) as unknown[];
 
-      expect(guards).toEqual([SupabaseAuthGuard, TermsAcceptanceGuard, SuperAdminGuard]);
+      expect(guards).toEqual([
+        SupabaseAuthGuard,
+        TermsAcceptanceGuard,
+        CompleteProfileGuard,
+        SuperAdminGuard,
+      ]);
     },
   );
 });

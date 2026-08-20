@@ -20,8 +20,11 @@ import { VariantIoItem } from '../src/methods/entities/io-item.entity';
 import { VariantHistory } from '../src/methods/entities/variant-history.entity';
 import { ActionType } from '../src/methods/action-type.enum';
 import { createPgMemAdapter } from './utils/pg-mem';
+import { User } from '../src/auth/entities/user.entity';
 
 jest.mock('pg', () => createPgMemAdapter());
+
+const TEST_AUTH_USER_ID = '11111111-1111-1111-1111-111111111111';
 
 describe('Methods (e2e)', () => {
   let app: INestApplication;
@@ -126,6 +129,12 @@ describe('Methods (e2e)', () => {
     });
   };
 
+  const buildStoredMethodPayload = (overrides: Partial<Method>): Partial<Method> => ({
+    createdBy: TEST_AUTH_USER_ID,
+    isOfficial: true,
+    ...overrides,
+  });
+
   beforeAll(async () => {
     const testApp = await createTestApp();
     app = testApp.app;
@@ -136,7 +145,15 @@ describe('Methods (e2e)', () => {
     await dataSource.query('DELETE FROM "variant_io_items"');
     await dataSource.query('DELETE FROM "method_variants"');
     await dataSource.query('DELETE FROM "money_making_methods"');
+    await dataSource.query('DELETE FROM "users"');
     await dataSource.query('DELETE FROM "items"');
+    await dataSource.getRepository(User).save({
+      id: TEST_AUTH_USER_ID,
+      email: 'admin@example.com',
+      accountUsername: 'admin_user',
+      role: 'super_admin',
+      plan: 'free',
+    });
     redisCall.mockReset();
   });
 
@@ -152,12 +169,14 @@ describe('Methods (e2e)', () => {
     const ioRepo = dataSource.getRepository(VariantIoItem);
     const seed = buildMethodFixture();
 
-    const savedMethod = await methodRepo.save({
-      name: seed.name,
-      slug: seed.slug,
-      description: seed.description,
-      category: seed.category,
-    });
+    const savedMethod = await methodRepo.save(
+      buildStoredMethodPayload({
+        name: seed.name,
+        slug: seed.slug,
+        description: seed.description,
+        category: seed.category,
+      }),
+    );
 
     const [variantA, variantB] = seed.variants;
     const savedVariantA = await variantRepo.save({
@@ -252,12 +271,14 @@ describe('Methods (e2e)', () => {
     const ioRepo = dataSource.getRepository(VariantIoItem);
     const seed = buildMethodFixture();
 
-    const savedMethod = await methodRepo.save({
-      name: seed.name,
-      slug: seed.slug,
-      description: seed.description,
-      category: seed.category,
-    });
+    const savedMethod = await methodRepo.save(
+      buildStoredMethodPayload({
+        name: seed.name,
+        slug: seed.slug,
+        description: seed.description,
+        category: seed.category,
+      }),
+    );
 
     const [variantA, variantB] = seed.variants;
     const savedVariantA = await variantRepo.save({
@@ -360,12 +381,14 @@ describe('Methods (e2e)', () => {
     const variantRepo = dataSource.getRepository(MethodVariant);
     const seed = buildMethodFixture();
 
-    const savedMethod = await methodRepo.save({
-      name: seed.name,
-      slug: seed.slug,
-      description: seed.description,
-      category: seed.category,
-    });
+    const savedMethod = await methodRepo.save(
+      buildStoredMethodPayload({
+        name: seed.name,
+        slug: seed.slug,
+        description: seed.description,
+        category: seed.category,
+      }),
+    );
 
     const [variantA, variantB] = seed.variants;
     const savedVariantA = await variantRepo.save({
@@ -430,12 +453,14 @@ describe('Methods (e2e)', () => {
     const variantRepo = dataSource.getRepository(MethodVariant);
     const seed = buildMethodFixture();
 
-    const savedMethod = await methodRepo.save({
-      name: seed.name,
-      slug: seed.slug,
-      description: seed.description,
-      category: seed.category,
-    });
+    const savedMethod = await methodRepo.save(
+      buildStoredMethodPayload({
+        name: seed.name,
+        slug: seed.slug,
+        description: seed.description,
+        category: seed.category,
+      }),
+    );
 
     const [variantA, variantB] = seed.variants;
     const savedVariantA = await variantRepo.save({
@@ -503,12 +528,14 @@ describe('Methods (e2e)', () => {
     const historyRepo = dataSource.getRepository(VariantHistory);
     const seed = buildMethodFixture();
 
-    const savedMethod = await methodRepo.save({
-      name: seed.name,
-      slug: seed.slug,
-      description: seed.description,
-      category: seed.category,
-    });
+    const savedMethod = await methodRepo.save(
+      buildStoredMethodPayload({
+        name: seed.name,
+        slug: seed.slug,
+        description: seed.description,
+        category: seed.category,
+      }),
+    );
 
     const [variantA, variantB] = seed.variants;
     const savedVariantA = await variantRepo.save({
@@ -577,18 +604,22 @@ describe('Methods (e2e)', () => {
     const historyRepo = dataSource.getRepository(VariantHistory);
     const seed = buildMethodFixture();
 
-    const smallMethod = await methodRepo.save({
-      name: 'Small mover',
-      slug: 'small-mover',
-      description: seed.description,
-      category: seed.category,
-    });
-    const bigMethod = await methodRepo.save({
-      name: 'Big mover',
-      slug: 'big-mover',
-      description: seed.description,
-      category: seed.category,
-    });
+    const smallMethod = await methodRepo.save(
+      buildStoredMethodPayload({
+        name: 'Small mover',
+        slug: 'small-mover',
+        description: seed.description,
+        category: seed.category,
+      }),
+    );
+    const bigMethod = await methodRepo.save(
+      buildStoredMethodPayload({
+        name: 'Big mover',
+        slug: 'big-mover',
+        description: seed.description,
+        category: seed.category,
+      }),
+    );
 
     const smallVariant = await variantRepo.save({
       label: 'Small variant',
@@ -714,12 +745,14 @@ describe('Methods (e2e)', () => {
     const ioRepo = dataSource.getRepository(VariantIoItem);
     const seed = buildMethodFixture();
 
-    const savedMethod = await methodRepo.save({
-      name: seed.name,
-      slug: seed.slug,
-      description: seed.description,
-      category: seed.category,
-    });
+    const savedMethod = await methodRepo.save(
+      buildStoredMethodPayload({
+        name: seed.name,
+        slug: seed.slug,
+        description: seed.description,
+        category: seed.category,
+      }),
+    );
 
     const [variantA, variantB] = seed.variants;
     const savedVariantA = await variantRepo.save({
@@ -825,11 +858,13 @@ describe('Methods (e2e)', () => {
       data: {
         id: string;
         icon_id: number;
+        is_official: boolean;
         variants: Array<{ id: string; icon_id: number }>;
       };
     };
 
     expect(createdBody.data.icon_id).toBe(4151);
+    expect(createdBody.data.is_official).toBe(true);
     expect(createdBody.data.variants[0].icon_id).toBe(4152);
 
     mockRedisProfits({
@@ -845,6 +880,10 @@ describe('Methods (e2e)', () => {
         method: {
           id: string;
           icon_id: number;
+          is_official: boolean;
+          created_by: { id: string; username: string | null } | null;
+          created_at: string;
+          updated_at: string;
           variants: Array<{ id: string; icon_id: number }>;
         };
       };
@@ -854,7 +893,14 @@ describe('Methods (e2e)', () => {
     expect(detailBody.data.method).toMatchObject({
       id: createdBody.data.id,
       icon_id: 4151,
+      is_official: true,
+      created_by: {
+        id: TEST_AUTH_USER_ID,
+        username: 'admin_user',
+      },
     });
+    expect(new Date(detailBody.data.method.created_at).toString()).not.toBe('Invalid Date');
+    expect(new Date(detailBody.data.method.updated_at).toString()).not.toBe('Invalid Date');
     expect(detailBody.data.method.variants[0]).toMatchObject({
       id: createdBody.data.variants[0].id,
       icon_id: 4152,
@@ -963,14 +1009,16 @@ describe('Methods (e2e)', () => {
     const methodRepo = dataSource.getRepository(Method);
     const variantRepo = dataSource.getRepository(MethodVariant);
 
-    const savedMethod = await methodRepo.save({
-      name: 'Editable method',
-      slug: 'editable-method',
-      iconId: 4151,
-      description: 'Safe markdown',
-      category: 'Skilling',
-      enabled: true,
-    });
+    const savedMethod = await methodRepo.save(
+      buildStoredMethodPayload({
+        name: 'Editable method',
+        slug: 'editable-method',
+        iconId: 4151,
+        description: 'Safe markdown',
+        category: 'Skilling',
+        enabled: true,
+      }),
+    );
 
     const savedVariant = await variantRepo.save({
       label: 'Editable variant',
@@ -1019,14 +1067,16 @@ describe('Methods (e2e)', () => {
     const methodRepo = dataSource.getRepository(Method);
     const variantRepo = dataSource.getRepository(MethodVariant);
 
-    const savedMethod = await methodRepo.save({
-      name: 'Editable method',
-      slug: 'editable-method',
-      iconId: 4151,
-      description: 'Safe markdown',
-      category: 'Skilling',
-      enabled: true,
-    });
+    const savedMethod = await methodRepo.save(
+      buildStoredMethodPayload({
+        name: 'Editable method',
+        slug: 'editable-method',
+        iconId: 4151,
+        description: 'Safe markdown',
+        category: 'Skilling',
+        enabled: true,
+      }),
+    );
 
     const savedVariant = await variantRepo.save({
       label: 'Editable variant',
@@ -1082,14 +1132,16 @@ describe('Methods (e2e)', () => {
     const methodRepo = dataSource.getRepository(Method);
     const variantRepo = dataSource.getRepository(MethodVariant);
 
-    const savedMethod = await methodRepo.save({
-      name: 'Editable method',
-      slug: 'editable-method',
-      iconId: 4151,
-      description: 'Safe markdown',
-      category: 'Skilling',
-      enabled: true,
-    });
+    const savedMethod = await methodRepo.save(
+      buildStoredMethodPayload({
+        name: 'Editable method',
+        slug: 'editable-method',
+        iconId: 4151,
+        description: 'Safe markdown',
+        category: 'Skilling',
+        enabled: true,
+      }),
+    );
 
     const savedVariant = await variantRepo.save({
       label: 'Existing F2P variant',
@@ -1154,14 +1206,16 @@ describe('Methods (e2e)', () => {
     const methodRepo = dataSource.getRepository(Method);
     const variantRepo = dataSource.getRepository(MethodVariant);
 
-    const savedMethod = await methodRepo.save({
-      name: 'Variant edit method',
-      slug: 'variant-edit-method',
-      iconId: 4151,
-      description: 'Safe markdown',
-      category: 'Skilling',
-      enabled: true,
-    });
+    const savedMethod = await methodRepo.save(
+      buildStoredMethodPayload({
+        name: 'Variant edit method',
+        slug: 'variant-edit-method',
+        iconId: 4151,
+        description: 'Safe markdown',
+        category: 'Skilling',
+        enabled: true,
+      }),
+    );
 
     const savedVariant = await variantRepo.save({
       label: 'Variant edit variant',
@@ -1203,14 +1257,16 @@ describe('Methods (e2e)', () => {
     const methodRepo = dataSource.getRepository(Method);
     const variantRepo = dataSource.getRepository(MethodVariant);
 
-    const savedMethod = await methodRepo.save({
-      name: 'Variant edit method',
-      slug: 'variant-edit-method',
-      iconId: 4151,
-      description: 'Safe markdown',
-      category: 'Skilling',
-      enabled: true,
-    });
+    const savedMethod = await methodRepo.save(
+      buildStoredMethodPayload({
+        name: 'Variant edit method',
+        slug: 'variant-edit-method',
+        iconId: 4151,
+        description: 'Safe markdown',
+        category: 'Skilling',
+        enabled: true,
+      }),
+    );
 
     const savedVariant = await variantRepo.save({
       label: 'Variant edit variant',
@@ -1259,14 +1315,16 @@ describe('Methods (e2e)', () => {
     const methodRepo = dataSource.getRepository(Method);
     const variantRepo = dataSource.getRepository(MethodVariant);
 
-    const savedMethod = await methodRepo.save({
-      name: 'Variant edit method',
-      slug: 'variant-edit-method',
-      iconId: 4151,
-      description: 'Safe markdown',
-      category: 'Skilling',
-      enabled: true,
-    });
+    const savedMethod = await methodRepo.save(
+      buildStoredMethodPayload({
+        name: 'Variant edit method',
+        slug: 'variant-edit-method',
+        iconId: 4151,
+        description: 'Safe markdown',
+        category: 'Skilling',
+        enabled: true,
+      }),
+    );
 
     const savedVariant = await variantRepo.save({
       label: 'Variant edit variant',
@@ -1415,13 +1473,15 @@ describe('Methods (e2e)', () => {
     const methodRepo = dataSource.getRepository(Method);
     const variantRepo = dataSource.getRepository(MethodVariant);
 
-    const savedMethod = await methodRepo.save({
-      name: 'Snapshot method',
-      slug: 'snapshot-method',
-      description: 'Safe markdown',
-      category: 'Skilling',
-      enabled: true,
-    });
+    const savedMethod = await methodRepo.save(
+      buildStoredMethodPayload({
+        name: 'Snapshot method',
+        slug: 'snapshot-method',
+        description: 'Safe markdown',
+        category: 'Skilling',
+        enabled: true,
+      }),
+    );
 
     const savedVariant = await variantRepo.save({
       label: 'Snapshot variant',

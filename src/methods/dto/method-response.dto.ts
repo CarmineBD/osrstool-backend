@@ -45,5 +45,12 @@ export class MethodResponseDto {
   icon_id?: number | null;
   description?: string;
   category?: string;
+  is_official?: boolean;
+  created_by?: {
+    id: string;
+    username: string | null;
+  } | null;
+  created_at?: Date;
+  updated_at?: Date;
   variants: VariantResponseDto[];
 }

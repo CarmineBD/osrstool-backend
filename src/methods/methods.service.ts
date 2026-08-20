@@ -229,6 +229,13 @@ interface MethodDetailsWithProfit {
   description?: string;
   category?: string;
   enabled: boolean;
+  is_official?: boolean;
+  created_by?: {
+    id: string;
+    username: string | null;
+  } | null;
+  created_at?: Date;
+  updated_at?: Date;
   variants: Array<Record<string, unknown>>;
 }
 
@@ -2132,6 +2139,15 @@ export class MethodsService implements OnModuleDestroy {
     return slug;
   }
 
+  private async getMethodCreatorOrThrow(userId: string): Promise<User> {
+    const user = await this.userRepo.findOne({ where: { id: userId } });
+    if (!user) {
+      throw new UnauthorizedException('Authenticated user account was not found');
+    }
+
+    return user;
+  }
+
   private async assertIconItemIdsExist(iconIds: number[]): Promise<void> {
     const uniqueIconIds = [...new Set(iconIds.filter((iconId) => Number.isInteger(iconId)))];
     if (uniqueIconIds.length === 0) return;
@@ -2306,10 +2322,11 @@ export class MethodsService implements OnModuleDestroy {
     );
   }
 
-  async create(createDto: CreateMethodDto): Promise<MethodDto> {
+  async create(createDto: CreateMethodDto, authenticatedUserId: string): Promise<MethodDto> {
     await this.validateCreateIconIds(createDto);
     await this.validateCreateVariantMembership(createDto);
 
+    const creator = await this.getMethodCreatorOrThrow(authenticatedUserId);
     const { name, description, category, enabled, variants, icon_id } = createDto;
     const method = this.methodRepo.create({
       name,
@@ -2317,6 +2334,8 @@ export class MethodsService implements OnModuleDestroy {
       category,
       enabled,
       iconId: icon_id,
+      createdBy: creator.id,
+      isOfficial: creator.role === 'super_admin',
     });
     method.slug = await this.generateMethodSlug(name);
     await this.methodRepo.save(method);
@@ -3682,9 +3701,17 @@ export class MethodsService implements OnModuleDestroy {
     const perfLogsEnabled = this.isMethodDetailsPerfLogEnabled();
     const scope = `findMethodDetailsWithProfit id=${id}`;
     const totalStartedAt = performance.now();
-    const methodDto = await this.timeMethodDetailsStep(perfLogsEnabled, scope, 'findOne', () =>
-      this.findOne(id),
+    const methodEntity = await this.timeMethodDetailsStep(perfLogsEnabled, scope, 'findOne', () =>
+      this.methodRepo.findOne({
+        where: { id },
+        relations: ['variants', 'variants.ioItems', 'createdByUser'],
+      }),
     );
+    if (!methodEntity) {
+      throw new NotFoundException(`Method ${id} not found`);
+    }
+
+    const methodDto = this.toDto(methodEntity);
     const itemIds = this.collectItemIdsFromVariants(methodDto.variants);
     const variantIds = methodDto.variants.map((variant) => variant.id);
     const [allProfits, pricesByItem, volumes24hByItem, itemMetadataById, safety24hByVariantId] =
@@ -3810,7 +3837,17 @@ export class MethodsService implements OnModuleDestroy {
       description: methodDto.description,
       category: methodDto.category,
       enabled: methodDto.enabled,
+      is_official: methodDto.is_official,
+      created_by: methodEntity.createdBy
+        ? {
+            id: methodEntity.createdBy,
+            username: methodEntity.createdByUser?.accountUsername ?? null,
+          }
+        : null,
+      created_at: methodEntity.createdAt,
+      updated_at: methodEntity.updatedAt,
       variants: enrichedVariants,
     };
   }
 }
+
