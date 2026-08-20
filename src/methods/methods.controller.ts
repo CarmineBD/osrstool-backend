@@ -237,6 +237,12 @@ export class MethodsController {
     description: 'true or false (default true)',
   })
   @ApiQuery({
+    name: 'is_official',
+    required: false,
+    description:
+      'true or false (default true). is_official=false requires authentication, an account username, and accepted Terms of Service.',
+  })
+  @ApiQuery({
     name: 'sortBy',
     required: false,
     description:
@@ -286,6 +292,7 @@ export class MethodsController {
     @Query('showProfitables') showProfitables?: string,
     @Query('show_only_free_to_play') showOnlyFreeToPlay?: string | boolean,
     @Query('enabled') enabled?: string | boolean,
+    @Query('is_official') isOfficial?: string | boolean,
     @Query('likedByMe') likedByMe?: string | boolean,
     @Query('variants') variants?: string,
     @Query('ignoredTags') ignoredTags?: string | string[],
@@ -307,6 +314,7 @@ export class MethodsController {
       showProfitables,
       show_only_free_to_play: showOnlyFreeToPlay,
       enabled,
+      is_official: isOfficial,
       likedByMe,
       variants,
       ignoredTags,

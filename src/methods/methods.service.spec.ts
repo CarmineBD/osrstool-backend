@@ -8,12 +8,14 @@ import { VariantSnapshotService } from '../variant-snapshots/variant-snapshot.se
 import { RuneScapeApiService } from './RuneScapeApiService';
 import { buildItemFixture, buildMethodFixture } from '../testing/fixtures';
 import type { ConfigService } from '@nestjs/config';
+import type { AuthService } from '../auth/auth.service';
 import { User } from '../auth/entities/user.entity';
 import { BadRequestException, ForbiddenException, UnauthorizedException } from '@nestjs/common';
 import { Item } from '../items/entities/item.entity';
 import { VARIANT_TAG_DEFINITIONS } from './variant-tags';
 import { ActionType } from './action-type.enum';
 import { ACCOUNT_USERNAME_REQUIRED_ERROR_CODE } from '../auth/account-username-required.exception';
+import { TERMS_ACCEPTANCE_REQUIRED_ERROR_CODE } from '../auth/terms-acceptance-required.exception';
 
 type MethodDetailsWithProfitResult = Awaited<
   ReturnType<MethodsService['findMethodDetailsWithProfit']>
@@ -808,6 +810,158 @@ describe('MethodsService variantCount', () => {
     expect(verifyTokenSpy).not.toHaveBeenCalled();
     expect(result.status).toBe('ok');
   });
+
+  it('defaults GET /methods to is_official=true', async () => {
+    const findMock = jest.fn().mockResolvedValue([]);
+    const methodRepo = {
+      find: findMock,
+    } as unknown as Repository<Method>;
+
+    const service = new MethodsService(
+      methodRepo,
+      {} as Repository<MethodVariant>,
+      {} as Repository<VariantIoItem>,
+      {} as Repository<VariantHistory>,
+      createMethodLikeRepo(),
+      {} as Repository<User>,
+      {} as VariantSnapshotService,
+      {} as RuneScapeApiService,
+      { get: jest.fn().mockReturnValue('redis://localhost:6379') } as unknown as ConfigService,
+    );
+
+    await service.listWithProfitResponse({
+      page: '1',
+      perPage: '10',
+    });
+
+    expect(findMock).toHaveBeenCalledWith({
+      where: { enabled: true, isOfficial: true },
+      relations: ['variants', 'variants.ioItems'],
+    });
+  });
+
+  it('requires authentication for is_official=false', async () => {
+    const service = new MethodsService(
+      { find: jest.fn().mockResolvedValue([]) } as unknown as Repository<Method>,
+      {} as Repository<MethodVariant>,
+      {} as Repository<VariantIoItem>,
+      {} as Repository<VariantHistory>,
+      createMethodLikeRepo(),
+      {} as Repository<User>,
+      {} as VariantSnapshotService,
+      {} as RuneScapeApiService,
+      { get: jest.fn().mockReturnValue('redis://localhost:6379') } as unknown as ConfigService,
+    );
+
+    await expect(
+      service.listWithProfitResponse({
+        page: '1',
+        perPage: '10',
+        is_official: 'false',
+      }),
+    ).rejects.toBeInstanceOf(UnauthorizedException);
+  });
+
+  it('requires accepted terms for is_official=false', async () => {
+    const findMock = jest.fn().mockResolvedValue([]);
+    const methodRepo = {
+      find: findMock,
+    } as unknown as Repository<Method>;
+
+    const userRepo = {
+      findOne: jest
+        .fn()
+        .mockResolvedValue({ id: 'user-1', role: 'user', accountUsername: 'user_1' }),
+    } as unknown as Repository<User>;
+
+    const authService = {
+      getCurrentTermsStatusForUser: jest.fn().mockResolvedValue({
+        currentVersion: 'v1',
+        accepted: false,
+      }),
+    } as unknown as AuthService;
+
+    const service = new MethodsService(
+      methodRepo,
+      {} as Repository<MethodVariant>,
+      {} as Repository<VariantIoItem>,
+      {} as Repository<VariantHistory>,
+      createMethodLikeRepo(),
+      userRepo,
+      {} as VariantSnapshotService,
+      {} as RuneScapeApiService,
+      { get: jest.fn().mockReturnValue('redis://localhost:6379') } as unknown as ConfigService,
+      undefined,
+      undefined,
+      authService,
+    );
+
+    jest.spyOn(service as any, 'verifySupabaseToken').mockResolvedValue('user-1');
+
+    await expect(
+      service.listWithProfitResponse({
+        page: '1',
+        perPage: '10',
+        is_official: 'false',
+        authorization: 'Bearer token',
+      }),
+    ).rejects.toMatchObject({
+      response: {
+        code: TERMS_ACCEPTANCE_REQUIRED_ERROR_CODE,
+      },
+    });
+    expect(findMock).not.toHaveBeenCalled();
+  });
+
+  it('supports is_official=false for authenticated users with username and accepted terms', async () => {
+    const findMock = jest.fn().mockResolvedValue([]);
+    const methodRepo = {
+      find: findMock,
+    } as unknown as Repository<Method>;
+
+    const userRepo = {
+      findOne: jest
+        .fn()
+        .mockResolvedValue({ id: 'user-1', role: 'user', accountUsername: 'user_1' }),
+    } as unknown as Repository<User>;
+
+    const authService = {
+      getCurrentTermsStatusForUser: jest.fn().mockResolvedValue({
+        currentVersion: 'v1',
+        accepted: true,
+      }),
+    } as unknown as AuthService;
+
+    const service = new MethodsService(
+      methodRepo,
+      {} as Repository<MethodVariant>,
+      {} as Repository<VariantIoItem>,
+      {} as Repository<VariantHistory>,
+      createMethodLikeRepo(),
+      userRepo,
+      {} as VariantSnapshotService,
+      {} as RuneScapeApiService,
+      { get: jest.fn().mockReturnValue('redis://localhost:6379') } as unknown as ConfigService,
+      undefined,
+      undefined,
+      authService,
+    );
+
+    jest.spyOn(service as any, 'verifySupabaseToken').mockResolvedValue('user-1');
+
+    await service.listWithProfitResponse({
+      page: '1',
+      perPage: '10',
+      is_official: 'false',
+      authorization: 'Bearer token',
+    });
+
+    expect(findMock).toHaveBeenCalledWith({
+      where: { enabled: true, isOfficial: false },
+      relations: ['variants', 'variants.ioItems'],
+    });
+  });
+
   it('throws on skill summaries when username is sent by a user without a completed account username', async () => {
     const methodRepo = {
       find: jest.fn().mockResolvedValue([]),
@@ -2954,4 +3108,3 @@ describe('MethodsService trending profit', () => {
     );
   });
 });
-
