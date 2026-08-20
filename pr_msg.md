@@ -1,25 +1,22 @@
 ## Summary
 
-- Add method ownership and official metadata to method persistence and detail responses.
-- Record the authenticated creator when creating methods and derive official status from the creator role.
-- Require authentication, a completed profile, and accepted terms before listing unofficial methods with `is_official=false`.
-- Cover the new method metadata and unofficial-listing rules with controller, service, and e2e tests.
+- Add an authenticated, rate-limited player information lookup endpoint.
+- Accept supplied player context in method search, summary, roadmap, trending, and detail endpoints instead of fetching it for each request.
+- Update method endpoint tests for the player-context contract.
 
 ## User-facing changelog
 
-- Method detail responses now include official status, creator information, and creation/update timestamps.
-- Unofficial methods can now be requested explicitly, but only for authenticated users with a completed profile and accepted terms.
+- Players can now load their OSRS profile once and use it across personalized method recommendations, summaries, roadmaps, trends, and details.
 
 ## How to test
 
 - `npm run lint`
 - `npm test`
 - `npm run build`
-- Create a method as a super admin and confirm the response marks it as official and includes creator metadata in the method detail payload.
-- Call `GET /methods?is_official=false` without authentication and confirm it is rejected.
-- Call `GET /methods?is_official=false` as an authenticated user with accepted terms and a completed profile and confirm unofficial methods are returned.
+- Call `POST /player/info` with an authenticated account that has accepted the Terms of Service, then send its response as `player` in the body of a personalized method endpoint.
 
 ## Notes
 
 - Base branch: `develop`
 - Target environment: `TST`
+- Personalized method endpoints now use `POST` so player context can be supplied in the request body.
