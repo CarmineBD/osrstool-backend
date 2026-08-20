@@ -7,6 +7,7 @@ import {
   BadRequestException,
   UnauthorizedException,
   ForbiddenException,
+  ServiceUnavailableException,
 } from '@nestjs/common';
 import { performance } from 'node:perf_hooks';
 import { InjectRepository } from '@nestjs/typeorm';
@@ -30,6 +31,8 @@ import { ConfigService } from '@nestjs/config';
 import { createAccountUsernameRequiredException } from '../auth/account-username-required.exception';
 import { buildDeletedUserAuthKey } from '../auth/deleted-user-auth.util';
 import { User } from '../auth/entities/user.entity';
+import { AuthService } from '../auth/auth.service';
+import { createTermsAcceptanceRequiredException } from '../auth/terms-acceptance-required.exception';
 import { calculateMarketImpact, type MarketImpactResult } from './market-impact-calculator';
 import { Item } from '../items/entities/item.entity';
 import { RedisService } from '../redis/redis.service';
@@ -98,6 +101,7 @@ interface ListFilters {
   members?: boolean;
   ignoredTags?: Set<VariantTagQueryValue>;
   enabled: boolean;
+  isOfficial?: boolean;
 }
 
 interface SortOptions {
@@ -131,6 +135,7 @@ interface ListQuery {
   members?: string | boolean;
   show_only_free_to_play?: string | boolean;
   enabled?: string | boolean;
+  is_official?: string | boolean;
   likedByMe?: string | boolean;
   ignoredTags?: string | string[];
   variants?: string;
@@ -229,6 +234,13 @@ interface MethodDetailsWithProfit {
   description?: string;
   category?: string;
   enabled: boolean;
+  is_official?: boolean;
+  created_by?: {
+    id: string;
+    username: string | null;
+  } | null;
+  created_at?: Date;
+  updated_at?: Date;
   variants: Array<Record<string, unknown>>;
 }
 
@@ -439,6 +451,7 @@ export class MethodsService implements OnModuleDestroy {
     @InjectRepository(Item)
     private readonly itemRepo?: Repository<Item>,
     @Optional() redisService?: RedisService,
+    @Optional() private readonly authService?: AuthService,
   ) {
     const sharedRedis = redisService?.getClient();
     this.redis = sharedRedis ?? new IORedis((this.config.get<string>('REDIS_URL') as string) ?? '');
@@ -586,6 +599,7 @@ export class MethodsService implements OnModuleDestroy {
       members: showOnlyFreeToPlayFilter === true ? false : membersFilter,
       ignoredTags: this.parseIgnoredTagsQueryParam(ignoredTags),
       enabled: enabledParsed ?? true,
+      isOfficial: this.parseBooleanQueryParam(query.is_official, 'is_official'),
     };
   }
 
@@ -899,6 +913,26 @@ export class MethodsService implements OnModuleDestroy {
     return user;
   }
 
+  private async assertAcceptedTerms(userId: string): Promise<void> {
+    if (!this.authService) {
+      throw new ServiceUnavailableException('Terms acceptance service is unavailable');
+    }
+
+    const termsStatus = await this.authService.getCurrentTermsStatusForUser(userId);
+    if (!termsStatus.accepted) {
+      throw createTermsAcceptanceRequiredException(termsStatus.currentVersion);
+    }
+  }
+
+  private async assertCompletedAccountProfileAndAcceptedTerms(
+    userId: string,
+    email?: string | null,
+  ): Promise<User> {
+    const user = await this.assertCompletedAccountProfile(userId, email);
+    await this.assertAcceptedTerms(user.id);
+    return user;
+  }
+
   private getVariantLikesCount(variant: { likesCount?: number | null }): number {
     return variant.likesCount ?? 0;
   }
@@ -1032,6 +1066,21 @@ export class MethodsService implements OnModuleDestroy {
     await this.assertCompletedAccountProfile(
       authenticatedUserId ?? (await this.verifySupabaseToken(authorization)),
     );
+  }
+
+  private async assertCanUseUnofficialMethodsFilter(
+    isOfficialFilter: boolean | undefined,
+    authenticatedUserId?: string | null,
+  ): Promise<void> {
+    if (isOfficialFilter !== false) {
+      return;
+    }
+
+    if (!authenticatedUserId) {
+      throw new UnauthorizedException('The is_official=false filter requires authentication');
+    }
+
+    await this.assertCompletedAccountProfileAndAcceptedTerms(authenticatedUserId);
   }
 
   private normalizeOptionalQueryString(
@@ -1221,8 +1270,10 @@ export class MethodsService implements OnModuleDestroy {
       query.authorization,
       authenticatedUserId,
     );
-    const { userInfo, warnings } = await this.fetchUserInfo(username);
     const filters = this.buildListFilters(query);
+    filters.isOfficial ??= true;
+    await this.assertCanUseUnofficialMethodsFilter(filters.isOfficial, authenticatedUserId);
+    const { userInfo, warnings } = await this.fetchUserInfo(username);
     if (filters.enabled === false) {
       await this.assertSuperAdminForDisabledMethods(query.authorization);
     }
@@ -2132,6 +2183,15 @@ export class MethodsService implements OnModuleDestroy {
     return slug;
   }
 
+  private async getMethodCreatorOrThrow(userId: string): Promise<User> {
+    const user = await this.userRepo.findOne({ where: { id: userId } });
+    if (!user) {
+      throw new UnauthorizedException('Authenticated user account was not found');
+    }
+
+    return user;
+  }
+
   private async assertIconItemIdsExist(iconIds: number[]): Promise<void> {
     const uniqueIconIds = [...new Set(iconIds.filter((iconId) => Number.isInteger(iconId)))];
     if (uniqueIconIds.length === 0) return;
@@ -2306,10 +2366,11 @@ export class MethodsService implements OnModuleDestroy {
     );
   }
 
-  async create(createDto: CreateMethodDto): Promise<MethodDto> {
+  async create(createDto: CreateMethodDto, authenticatedUserId: string): Promise<MethodDto> {
     await this.validateCreateIconIds(createDto);
     await this.validateCreateVariantMembership(createDto);
 
+    const creator = await this.getMethodCreatorOrThrow(authenticatedUserId);
     const { name, description, category, enabled, variants, icon_id } = createDto;
     const method = this.methodRepo.create({
       name,
@@ -2317,6 +2378,8 @@ export class MethodsService implements OnModuleDestroy {
       category,
       enabled,
       iconId: icon_id,
+      createdBy: creator.id,
+      isOfficial: creator.role === 'super_admin',
     });
     method.slug = await this.generateMethodSlug(name);
     await this.methodRepo.save(method);
@@ -3181,7 +3244,10 @@ export class MethodsService implements OnModuleDestroy {
     variantsMode: VariantsMode = 'best',
   ): Promise<{ data: any[]; total: number }> {
     const allEntities = await this.methodRepo.find({
-      where: { enabled: filters.enabled },
+      where: {
+        enabled: filters.enabled,
+        ...(filters.isOfficial != null ? { isOfficial: filters.isOfficial } : {}),
+      },
       relations: ['variants', 'variants.ioItems'],
     });
     const variantCounts = allEntities.reduce<Record<string, number>>((acc, method) => {
@@ -3387,7 +3453,10 @@ export class MethodsService implements OnModuleDestroy {
   ): Promise<{ data: any[]; total: number }> {
     // Load every method first so sorting can happen after profit enrichment.
     const allEntities = await this.methodRepo.find({
-      where: { enabled: filters.enabled },
+      where: {
+        enabled: filters.enabled,
+        ...(filters.isOfficial != null ? { isOfficial: filters.isOfficial } : {}),
+      },
       relations: ['variants', 'variants.ioItems'],
     });
     const variantCounts = allEntities.reduce<Record<string, number>>((acc, method) => {
@@ -3682,9 +3751,17 @@ export class MethodsService implements OnModuleDestroy {
     const perfLogsEnabled = this.isMethodDetailsPerfLogEnabled();
     const scope = `findMethodDetailsWithProfit id=${id}`;
     const totalStartedAt = performance.now();
-    const methodDto = await this.timeMethodDetailsStep(perfLogsEnabled, scope, 'findOne', () =>
-      this.findOne(id),
+    const methodEntity = await this.timeMethodDetailsStep(perfLogsEnabled, scope, 'findOne', () =>
+      this.methodRepo.findOne({
+        where: { id },
+        relations: ['variants', 'variants.ioItems', 'createdByUser'],
+      }),
     );
+    if (!methodEntity) {
+      throw new NotFoundException(`Method ${id} not found`);
+    }
+
+    const methodDto = this.toDto(methodEntity);
     const itemIds = this.collectItemIdsFromVariants(methodDto.variants);
     const variantIds = methodDto.variants.map((variant) => variant.id);
     const [allProfits, pricesByItem, volumes24hByItem, itemMetadataById, safety24hByVariantId] =
@@ -3810,6 +3887,15 @@ export class MethodsService implements OnModuleDestroy {
       description: methodDto.description,
       category: methodDto.category,
       enabled: methodDto.enabled,
+      is_official: methodDto.is_official,
+      created_by: methodEntity.createdBy
+        ? {
+            id: methodEntity.createdBy,
+            username: methodEntity.createdByUser?.accountUsername ?? null,
+          }
+        : null,
+      created_at: methodEntity.createdAt,
+      updated_at: methodEntity.updatedAt,
       variants: enrichedVariants,
     };
   }

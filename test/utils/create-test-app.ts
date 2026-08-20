@@ -25,6 +25,13 @@ import { Skill } from '../../src/catalogs/entities/skill.entity';
 import { SupabaseAuthGuard } from '../../src/auth/supabase-auth.guard';
 import { SuperAdminGuard } from '../../src/auth/super-admin.guard';
 import { ItemVolumesService } from '../../src/item-volumes/item-volumes.service';
+import { TermsAcceptanceGuard } from '../../src/auth/terms-acceptance.guard';
+import { CompleteProfileGuard } from '../../src/auth/complete-profile.guard';
+
+const TEST_AUTH_USER = {
+  id: '11111111-1111-1111-1111-111111111111',
+  email: 'admin@example.com',
+};
 
 export interface TestApp {
   app: INestApplication;
@@ -95,6 +102,16 @@ export const createTestApp = async (): Promise<TestApp> => {
     .overrideProvider(ItemVolumesService)
     .useValue(itemVolumesService)
     .overrideGuard(SupabaseAuthGuard)
+    .useValue({
+      canActivate: (context: { switchToHttp: () => { getRequest: () => { user?: unknown } } }) => {
+        const req = context.switchToHttp().getRequest();
+        req.user = TEST_AUTH_USER;
+        return true;
+      },
+    })
+    .overrideGuard(TermsAcceptanceGuard)
+    .useValue({ canActivate: () => true })
+    .overrideGuard(CompleteProfileGuard)
     .useValue({ canActivate: () => true })
     .overrideGuard(SuperAdminGuard)
     .useValue({ canActivate: () => true })

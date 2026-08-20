@@ -4,10 +4,14 @@ import {
   PrimaryGeneratedColumn,
   Column,
   CreateDateColumn,
+  UpdateDateColumn,
   OneToMany,
+  ManyToOne,
+  JoinColumn,
   Check,
 } from 'typeorm';
 import { MethodVariant } from './variant.entity';
+import { User } from '../../auth/entities/user.entity';
 
 @Entity('money_making_methods')
 export class Method {
@@ -33,8 +37,21 @@ export class Method {
   @Column({ type: 'boolean', default: true })
   enabled: boolean;
 
-  @CreateDateColumn({ name: 'created_at' })
-  createdAt: Date;
+  @Column({ name: 'created_by', type: 'uuid' })
+  createdBy?: string;
+
+  @ManyToOne(() => User, { nullable: true, createForeignKeyConstraints: false })
+  @JoinColumn({ name: 'created_by', referencedColumnName: 'id' })
+  createdByUser?: User | null;
+
+  @Column({ name: 'is_official', type: 'boolean', default: false })
+  isOfficial?: boolean;
+
+  @CreateDateColumn({ name: 'created_at', type: 'timestamptz' })
+  createdAt?: Date;
+
+  @UpdateDateColumn({ name: 'updated_at', type: 'timestamptz' })
+  updatedAt?: Date;
 
   @OneToMany(() => MethodVariant, (v) => v.method, { cascade: true })
   variants: MethodVariant[];

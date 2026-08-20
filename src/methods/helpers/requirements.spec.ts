@@ -16,7 +16,7 @@ describe('requirements helpers', () => {
 
   it('matches lowercase level requirements against user stats', () => {
     const methods = [
-      new MethodDto('m1', 'Magic method', 'magic-method', null, '', 'skilling', true, [
+      new MethodDto('m1', 'Magic method', 'magic-method', null, '', 'skilling', true, true, [
         {
           id: 'v1',
           slug: 'v1',

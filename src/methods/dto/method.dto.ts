@@ -31,6 +31,7 @@ export class MethodDto {
   description?: string;
   category?: string;
   enabled: boolean;
+  is_official: boolean;
   variants: VariantDto[];
 
   constructor(
@@ -41,6 +42,7 @@ export class MethodDto {
     description: string,
     category: string,
     enabled: boolean,
+    is_official: boolean,
     variants: VariantDto[],
   ) {
     this.id = id;
@@ -50,6 +52,7 @@ export class MethodDto {
     this.description = description;
     this.category = category;
     this.enabled = enabled;
+    this.is_official = is_official;
     this.variants = variants;
   }
   static fromEntity(e: {
@@ -60,6 +63,7 @@ export class MethodDto {
     description?: string;
     category?: string;
     enabled: boolean;
+    isOfficial?: boolean | null;
     variants: Array<{
       id: string;
       slug: string;
@@ -131,6 +135,7 @@ export class MethodDto {
       e.description || '',
       e.category || '',
       e.enabled,
+      e.isOfficial ?? false,
       variants,
     );
   }

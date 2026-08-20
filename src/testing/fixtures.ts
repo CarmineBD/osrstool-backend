@@ -33,6 +33,10 @@ export const buildMethodFixture = (): Method => {
   method.slug = 'method-one';
   method.description = 'Test method';
   method.category = 'Skilling';
+  method.createdBy = '11111111-1111-1111-1111-111111111111';
+  method.isOfficial = true;
+  method.createdAt = new Date('2026-01-31T19:30:00.000Z');
+  method.updatedAt = new Date('2026-01-31T19:30:00.000Z');
 
   const variantA = new MethodVariant();
   variantA.label = 'Variant A';

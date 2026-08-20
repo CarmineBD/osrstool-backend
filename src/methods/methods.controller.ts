@@ -46,6 +46,7 @@ const METHOD_EXAMPLE = {
   description: 'Cook karambwans for profit.',
   category: 'Cooking',
   enabled: true,
+  is_official: true,
   variants: [
     {
       id: 'v_456',
@@ -79,6 +80,16 @@ const METHOD_EXAMPLE = {
       wilderness: false,
     },
   ],
+};
+
+const METHOD_DETAIL_EXAMPLE = {
+  ...METHOD_EXAMPLE,
+  created_by: {
+    id: 'e139f001-33bf-4a11-91da-e9952d3c8574',
+    username: 'carmi',
+  },
+  created_at: '2026-08-19T10:00:00.000Z',
+  updated_at: '2026-08-19T11:00:00.000Z',
 };
 
 const METHOD_TAGS_EXAMPLE = VARIANT_TAG_DEFINITIONS.map((tag) => ({
@@ -166,14 +177,18 @@ export class MethodsController {
   constructor(private readonly svc: MethodsService) {}
 
   @Post()
-  @UseGuards(SupabaseAuthGuard, TermsAcceptanceGuard, SuperAdminGuard)
+  @UseGuards(SupabaseAuthGuard, TermsAcceptanceGuard, CompleteProfileGuard, SuperAdminGuard)
   @ApiBearerAuth()
   @ApiOperation({ summary: 'Create method', description: 'Creates a new method.' })
   @ApiOkResponse({ description: 'Method created', schema: { example: { data: METHOD_EXAMPLE } } })
   @ApiUnauthorizedResponse({ description: 'Missing, invalid, or expired bearer token' })
   @ApiForbiddenResponse({ description: 'Only super_admin can perform this action' })
-  async create(@Body() dto: CreateMethodDto) {
-    const created = await this.svc.create(dto);
+  async create(@Body() dto: CreateMethodDto, @Req() req: RequestWithUser) {
+    if (!req.user?.id) {
+      throw new ForbiddenException('Authenticated user id is required');
+    }
+
+    const created = await this.svc.create(dto, req.user.id);
     return { data: created };
   }
 
@@ -220,6 +235,12 @@ export class MethodsController {
     name: 'enabled',
     required: false,
     description: 'true or false (default true)',
+  })
+  @ApiQuery({
+    name: 'is_official',
+    required: false,
+    description:
+      'true or false (default true). is_official=false requires authentication, an account username, and accepted Terms of Service.',
   })
   @ApiQuery({
     name: 'sortBy',
@@ -271,6 +292,7 @@ export class MethodsController {
     @Query('showProfitables') showProfitables?: string,
     @Query('show_only_free_to_play') showOnlyFreeToPlay?: string | boolean,
     @Query('enabled') enabled?: string | boolean,
+    @Query('is_official') isOfficial?: string | boolean,
     @Query('likedByMe') likedByMe?: string | boolean,
     @Query('variants') variants?: string,
     @Query('ignoredTags') ignoredTags?: string | string[],
@@ -292,6 +314,7 @@ export class MethodsController {
       showProfitables,
       show_only_free_to_play: showOnlyFreeToPlay,
       enabled,
+      is_official: isOfficial,
       likedByMe,
       variants,
       ignoredTags,
@@ -672,7 +695,7 @@ export class MethodsController {
     schema: {
       example: {
         status: 'ok',
-        data: { method: METHOD_EXAMPLE, user: null },
+        data: { method: METHOD_DETAIL_EXAMPLE, user: null },
         warnings: [],
         meta: {},
       },
@@ -705,7 +728,7 @@ export class MethodsController {
     schema: {
       example: {
         status: 'ok',
-        data: { method: METHOD_EXAMPLE, user: null },
+        data: { method: METHOD_DETAIL_EXAMPLE, user: null },
         warnings: [],
         meta: {},
       },
@@ -720,7 +743,7 @@ export class MethodsController {
   }
 
   @Put(':id')
-  @UseGuards(SupabaseAuthGuard, TermsAcceptanceGuard, SuperAdminGuard)
+  @UseGuards(SupabaseAuthGuard, TermsAcceptanceGuard, CompleteProfileGuard, SuperAdminGuard)
   @ApiBearerAuth()
   @ApiOperation({ summary: 'Update method', description: 'Updates an existing method.' })
   @ApiOkResponse({ description: 'Method updated', schema: { example: { data: METHOD_EXAMPLE } } })
@@ -732,7 +755,7 @@ export class MethodsController {
   }
 
   @Put(':id/basic')
-  @UseGuards(SupabaseAuthGuard, TermsAcceptanceGuard, SuperAdminGuard)
+  @UseGuards(SupabaseAuthGuard, TermsAcceptanceGuard, CompleteProfileGuard, SuperAdminGuard)
   @ApiBearerAuth()
   @ApiOperation({
     summary: 'Update method (basic)',
@@ -747,7 +770,7 @@ export class MethodsController {
   }
 
   @Put('variant/:id')
-  @UseGuards(SupabaseAuthGuard, TermsAcceptanceGuard, SuperAdminGuard)
+  @UseGuards(SupabaseAuthGuard, TermsAcceptanceGuard, CompleteProfileGuard, SuperAdminGuard)
   @ApiBearerAuth()
   @ApiOperation({
     summary: 'Update method variant',
@@ -768,7 +791,7 @@ export class MethodsController {
   }
 
   @Delete(':id')
-  @UseGuards(SupabaseAuthGuard, TermsAcceptanceGuard, SuperAdminGuard)
+  @UseGuards(SupabaseAuthGuard, TermsAcceptanceGuard, CompleteProfileGuard, SuperAdminGuard)
   @ApiBearerAuth()
   @ApiOperation({ summary: 'Delete method', description: 'Removes a method by id.' })
   @ApiOkResponse({ description: 'Method removed', schema: { example: { data: null } } })
