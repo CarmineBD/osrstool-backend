@@ -1,5 +1,6 @@
 import { Injectable, HttpException, HttpStatus } from '@nestjs/common';
 import { SKILL_KEY_VALUES } from './dto/skill.constants';
+import type { UserInfo } from './types';
 
 interface Quests {
   [quest: string]: number;
@@ -38,7 +39,7 @@ export interface RuneScapeSkillProgress {
 
 @Injectable()
 export class RuneScapeApiService {
-  async fetchUserInfo(username: string): Promise<any> {
+  async fetchUserInfo(username: string): Promise<UserInfo> {
     const url = `https://sync.runescape.wiki/runelite/player/${username}/STANDARD`;
     try {
       const res = await fetch(url, {
