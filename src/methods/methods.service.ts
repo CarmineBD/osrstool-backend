@@ -25,7 +25,6 @@ import IORedis, { Redis } from 'ioredis';
 import { VariantSnapshotService } from '../variant-snapshots/variant-snapshot.service';
 import { slugify, fallbackSlug } from '../utils/slug';
 import { VariantRequirements, XpHour, UserInfo } from './types';
-import { RuneScapeApiService } from './RuneScapeApiService';
 import { computeMissingRequirements, filterMethodsByUserStats } from './helpers/requirements';
 import { ConfigService } from '@nestjs/config';
 import { createAccountUsernameRequiredException } from '../auth/account-username-required.exception';
@@ -43,7 +42,6 @@ import {
   MAX_CLICK_INTENSITY,
   MAX_RISK_LEVEL,
   QUERY_SEARCH_MAX_LENGTH,
-  USERNAME_MAX_LENGTH,
 } from './dto/validation.constants';
 import {
   buildVariantTags,
@@ -123,7 +121,7 @@ type TrendingProfitMode = 'reliable' | 'instant' | 'slow';
 interface ListQuery {
   page?: string;
   perPage?: string;
-  username?: string;
+  player?: UserInfo;
   name?: string;
   category?: string;
   clickIntensity?: string;
@@ -295,7 +293,7 @@ interface SkillSummaryBySkill {
 type RoadmapStrategy = 'fastest' | 'profitable' | 'most_afk';
 
 interface RoadmapQuery {
-  username?: string;
+  player?: UserInfo;
   skill?: string;
   strategy?: string;
   target_level?: string;
@@ -446,7 +444,6 @@ export class MethodsService implements OnModuleDestroy {
     private readonly userRepo: Repository<User>,
 
     private readonly snapshotSvc: VariantSnapshotService,
-    private readonly runescapeApi: RuneScapeApiService,
     private readonly config: ConfigService,
     @InjectRepository(Item)
     private readonly itemRepo?: Repository<Item>,
@@ -485,74 +482,6 @@ export class MethodsService implements OnModuleDestroy {
     } finally {
       const elapsedMs = performance.now() - startedAt;
       this.logger.log(`[perf] ${scope} ${label} ${elapsedMs.toFixed(1)}ms`);
-    }
-  }
-
-  private async fetchUserInfo(username?: string): Promise<{
-    userInfo: UserInfo | null;
-    warnings: { code: string; message: string }[];
-  }> {
-    if (!username) return { userInfo: null, warnings: [] };
-    try {
-      const userInfo = (await this.runescapeApi.fetchUserInfo(username)) as UserInfo;
-      return { userInfo, warnings: [] };
-    } catch (error: any) {
-      const message = `No se pudo obtener la informacion del usuario "${username}".`;
-      if (error instanceof Error && error.message.includes('status 404')) {
-        return { userInfo: null, warnings: [{ code: 'USER_NOT_FOUND', message }] };
-      }
-      return { userInfo: null, warnings: [{ code: 'USER_LOOKUP_FAILED', message }] };
-    }
-  }
-
-  private async fetchRequiredRoadmapUserInfo(username: string): Promise<UserInfo> {
-    const { userInfo, warnings } = await this.fetchUserInfo(username);
-    if (userInfo) {
-      return userInfo;
-    }
-
-    const warningMessage =
-      warnings[0]?.message ?? `No se pudo obtener la informacion del usuario "${username}".`;
-    throw new BadRequestException(warningMessage);
-  }
-
-  private async fetchRoadmapSkillProgress(
-    username: string,
-    skill: string,
-    fallbackLevel: number,
-  ): Promise<RoadmapSkillProgress> {
-    const fallbackExperience = this.getExperienceForLevel(fallbackLevel);
-
-    try {
-      const progress = await this.runescapeApi.fetchSkillProgress(username, skill);
-      if (!progress) {
-        return {
-          level: fallbackLevel,
-          experience: fallbackExperience,
-          usesExactExperience: false,
-        };
-      }
-
-      const effectiveLevel = Math.max(
-        1,
-        Math.min(
-          ROADMAP_TARGET_LEVEL,
-          Math.max(progress.level, this.getLevelForExperience(progress.experience)),
-        ),
-      );
-      const minimumExperience = this.getExperienceForLevel(effectiveLevel);
-
-      return {
-        level: effectiveLevel,
-        experience: Math.max(progress.experience, minimumExperience),
-        usesExactExperience: true,
-      };
-    } catch {
-      return {
-        level: fallbackLevel,
-        experience: fallbackExperience,
-        usesExactExperience: false,
-      };
     }
   }
 
@@ -1034,22 +963,6 @@ export class MethodsService implements OnModuleDestroy {
     }
   }
 
-  private async assertCompletedProfileForUsernameQuery(
-    username?: string,
-    authorization?: string,
-    authenticatedUserId?: string | null,
-  ): Promise<void> {
-    const normalizedUsername = this.normalizeOptionalQueryString(
-      username,
-      'username',
-      USERNAME_MAX_LENGTH,
-    );
-    if (!normalizedUsername) return;
-
-    const userId = authenticatedUserId ?? (await this.verifySupabaseToken(authorization));
-    await this.assertCompletedAccountProfile(userId);
-  }
-
   private async assertCompletedProfileForLikedByMeFilter(
     likedByMeFilter: boolean | undefined,
     authenticatedUserId?: string | null,
@@ -1249,11 +1162,6 @@ export class MethodsService implements OnModuleDestroy {
   }
 
   async listWithProfitResponse(query: ListQuery) {
-    const username = this.normalizeOptionalQueryString(
-      query.username,
-      'username',
-      USERNAME_MAX_LENGTH,
-    );
     const p = this.parsePositiveIntegerQueryParam(query.page, 'page', 100);
     const pp = this.parsePositiveIntegerQueryParam(query.perPage, 'perPage', 100);
     const variantsMode = this.parseVariantsQueryParam(query.variants);
@@ -1265,15 +1173,10 @@ export class MethodsService implements OnModuleDestroy {
       authenticatedUserId,
       query.authorization,
     );
-    await this.assertCompletedProfileForUsernameQuery(
-      username,
-      query.authorization,
-      authenticatedUserId,
-    );
     const filters = this.buildListFilters(query);
     filters.isOfficial ??= true;
     await this.assertCanUseUnofficialMethodsFilter(filters.isOfficial, authenticatedUserId);
-    const { userInfo, warnings } = await this.fetchUserInfo(username);
+    const userInfo = query.player;
     if (filters.enabled === false) {
       await this.assertSuperAdminForDisabledMethods(query.authorization);
     }
@@ -1300,13 +1203,12 @@ export class MethodsService implements OnModuleDestroy {
       pageSize: pp,
       perPage: pp, // Backward-compatible alias for existing clients.
       hasNext,
-      ...(username ? { username } : {}),
     };
 
     return {
-      status: warnings.length ? 'partial' : 'ok',
+      status: 'ok',
       data: { methods: result.data, user: userInfo },
-      warnings,
+      warnings: [],
       meta,
     };
   }
@@ -1320,11 +1222,6 @@ export class MethodsService implements OnModuleDestroy {
   }
 
   async listTrendingProfitResponse(query: TrendingProfitQuery) {
-    const username = this.normalizeOptionalQueryString(
-      query.username,
-      'username',
-      USERNAME_MAX_LENGTH,
-    );
     const p = this.parsePositiveIntegerQueryParam(query.page, 'page', 100);
     const pp = this.parsePositiveIntegerQueryParam(query.perPage, 'perPage', 100);
     const variantsMode = this.parseVariantsQueryParam(query.variants);
@@ -1336,12 +1233,7 @@ export class MethodsService implements OnModuleDestroy {
       authenticatedUserId,
       query.authorization,
     );
-    await this.assertCompletedProfileForUsernameQuery(
-      username,
-      query.authorization,
-      authenticatedUserId,
-    );
-    const { userInfo, warnings } = await this.fetchUserInfo(username);
+    const userInfo = query.player;
     const filters = this.buildListFilters(query);
     if (filters.enabled === false) {
       await this.assertSuperAdminForDisabledMethods(query.authorization);
@@ -1370,34 +1262,23 @@ export class MethodsService implements OnModuleDestroy {
       hasNext,
       window: trendingOptions.window,
       mode: trendingOptions.mode,
-      ...(username ? { username } : {}),
     };
 
     return {
-      status: warnings.length ? 'partial' : 'ok',
+      status: 'ok',
       data: { methods: result.data, user: userInfo },
-      warnings,
+      warnings: [],
       meta,
     };
   }
 
   async skillsSummaryWithProfitResponse(
-    username?: string,
+    player?: UserInfo,
     authorization?: string,
     enabledParam?: string | boolean,
   ) {
-    const normalizedUsername = this.normalizeOptionalQueryString(
-      username,
-      'username',
-      USERNAME_MAX_LENGTH,
-    );
     const authenticatedUserId = await this.resolveAuthenticatedUserId(authorization);
-    await this.assertCompletedProfileForUsernameQuery(
-      normalizedUsername,
-      authorization,
-      authenticatedUserId,
-    );
-    const { userInfo } = await this.fetchUserInfo(normalizedUsername);
+    const userInfo = player;
     if (enabledParam != null) {
       await this.assertSuperAdminForEnabledQueryParam(authorization);
     }
@@ -1466,20 +1347,15 @@ export class MethodsService implements OnModuleDestroy {
     return {
       data,
       meta: {
-        ...(username ? { username } : {}),
         computedAt: Math.floor(Date.now() / 1000),
       },
     };
   }
 
   async skillRoadmapResponse(query: RoadmapQuery) {
-    const username = this.normalizeOptionalQueryString(
-      query.username,
-      'username',
-      USERNAME_MAX_LENGTH,
-    );
-    if (!username) {
-      throw new BadRequestException('username is required');
+    const userInfo = query.player;
+    if (!userInfo) {
+      throw new BadRequestException('player is required');
     }
 
     const skill = this.parseRequiredSkillQueryParam(query.skill);
@@ -1488,11 +1364,6 @@ export class MethodsService implements OnModuleDestroy {
     const authenticatedUserId =
       query.authenticatedUserId ?? (await this.resolveAuthenticatedUserId(query.authorization));
 
-    await this.assertCompletedProfileForUsernameQuery(
-      username,
-      query.authorization,
-      authenticatedUserId,
-    );
     if (query.enabled != null) {
       await this.assertSuperAdminForEnabledQueryParam(query.authorization, authenticatedUserId);
     }
@@ -1502,12 +1373,21 @@ export class MethodsService implements OnModuleDestroy {
       this.parseBooleanQueryParam(query.show_only_free_to_play, 'show_only_free_to_play') ?? false;
     const ignoredTags = new Set(this.parseIgnoredTagsQueryParam(query.ignoredTags) ?? []);
 
-    const userInfo = await this.fetchRequiredRoadmapUserInfo(username);
-    const fallbackLevel = Math.max(
+    const currentLevel = Math.max(
       1,
       Math.min(ROADMAP_TARGET_LEVEL, this.normalizeUserLevels(userInfo.levels)[skill] ?? 1),
     );
-    const skillProgress = await this.fetchRoadmapSkillProgress(username, skill, fallbackLevel);
+    const exactExperience = this.normalizeUserLevels(userInfo.experience)[skill];
+    const minimumExperienceForCurrentLevel = this.getExperienceForLevel(currentLevel);
+    const skillProgress: RoadmapSkillProgress = {
+      level: currentLevel,
+      experience:
+        Number.isFinite(exactExperience) && exactExperience >= minimumExperienceForCurrentLevel
+          ? exactExperience
+          : minimumExperienceForCurrentLevel,
+      usesExactExperience:
+        Number.isFinite(exactExperience) && exactExperience >= minimumExperienceForCurrentLevel,
+    };
     if (targetLevel < skillProgress.level) {
       throw new BadRequestException(
         `target_level must be greater than or equal to the player's current ${skill} level (${skillProgress.level})`,
@@ -1543,7 +1423,6 @@ export class MethodsService implements OnModuleDestroy {
       },
       warnings: roadmap.warnings,
       meta: {
-        username,
         skill,
         strategy,
         target_level: targetLevel,
@@ -2034,15 +1913,10 @@ export class MethodsService implements OnModuleDestroy {
     };
   }
 
-  async methodDetailsWithProfitResponse(id: string, username?: string, authorization?: string) {
+  async methodDetailsWithProfitResponse(id: string, player?: UserInfo, authorization?: string) {
     const perfLogsEnabled = this.isMethodDetailsPerfLogEnabled();
     const scope = `methodDetails id=${id}`;
     const totalStartedAt = performance.now();
-    const normalizedUsername = this.normalizeOptionalQueryString(
-      username,
-      'username',
-      USERNAME_MAX_LENGTH,
-    );
 
     const authenticatedUserId = await this.timeMethodDetailsStep(
       perfLogsEnabled,
@@ -2053,23 +1927,7 @@ export class MethodsService implements OnModuleDestroy {
     await this.timeMethodDetailsStep(perfLogsEnabled, scope, 'assertCanAccessMethodDetails', () =>
       this.assertCanAccessMethodDetails(id, authorization, authenticatedUserId),
     );
-    await this.timeMethodDetailsStep(
-      perfLogsEnabled,
-      scope,
-      'assertCompletedProfileForUsernameQuery',
-      () =>
-        this.assertCompletedProfileForUsernameQuery(
-          normalizedUsername,
-          authorization,
-          authenticatedUserId,
-        ),
-    );
-    const { userInfo, warnings } = await this.timeMethodDetailsStep(
-      perfLogsEnabled,
-      scope,
-      'fetchUserInfo',
-      () => this.fetchUserInfo(normalizedUsername),
-    );
+    const userInfo = player;
     const method = await this.timeMethodDetailsStep(
       perfLogsEnabled,
       scope,
@@ -2089,18 +1947,16 @@ export class MethodsService implements OnModuleDestroy {
     }
 
     return {
-      status: warnings.length ? 'partial' : 'ok',
+      status: 'ok',
       data: { method, user: userInfo },
-      warnings,
-      meta: {
-        ...(normalizedUsername ? { username: normalizedUsername } : {}),
-      },
+      warnings: [],
+      meta: {},
     };
   }
 
   async methodDetailsWithProfitResponseBySlug(
     slug: string,
-    username?: string,
+    player?: UserInfo,
     authorization?: string,
   ) {
     const perfLogsEnabled = this.isMethodDetailsPerfLogEnabled();
@@ -2117,7 +1973,7 @@ export class MethodsService implements OnModuleDestroy {
       perfLogsEnabled,
       scope,
       'methodDetailsWithProfitResponse',
-      () => this.methodDetailsWithProfitResponse(method.id, username, authorization),
+      () => this.methodDetailsWithProfitResponse(method.id, player, authorization),
     );
 
     if (perfLogsEnabled) {
