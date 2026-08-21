@@ -3,6 +3,8 @@ import {
   Controller,
   ForbiddenException,
   Get,
+  HttpCode,
+  HttpStatus,
   Post,
   Put,
   Patch,
@@ -161,6 +163,7 @@ const ROADMAP_EXAMPLE = {
     },
     user: {
       levels: { Cooking: 1 },
+      experience: { cooking: 0 },
       quests: {},
       achievement_diaries: {},
     },
@@ -201,6 +204,7 @@ export class MethodsController {
   }
 
   @Post('search')
+  @HttpCode(HttpStatus.OK)
   @ApiOperation({
     summary: 'List methods with profit',
     description:
@@ -349,6 +353,7 @@ export class MethodsController {
   }
 
   @Post('skills/summary')
+  @HttpCode(HttpStatus.OK)
   @ApiOperation({
     summary: 'Get skill summaries',
     description:
@@ -394,6 +399,7 @@ export class MethodsController {
   }
 
   @Post('skills/roadmap')
+  @HttpCode(HttpStatus.OK)
   @UseGuards(SupabaseAuthGuard, TermsAcceptanceGuard, CompleteProfileGuard)
   @ApiBearerAuth()
   @ApiOperation({
@@ -486,6 +492,7 @@ export class MethodsController {
   }
 
   @Post('trending-profit')
+  @HttpCode(HttpStatus.OK)
   @ApiOperation({
     summary: 'List methods by profit growth',
     description:
@@ -679,6 +686,7 @@ export class MethodsController {
   }
 
   @Post('slug/:slug')
+  @HttpCode(HttpStatus.OK)
   @ApiOperation({
     summary: 'Get method detail by slug',
     description:
@@ -709,6 +717,7 @@ export class MethodsController {
   }
 
   @Post(':id')
+  @HttpCode(HttpStatus.OK)
   @ApiOperation({
     summary: 'Get method detail',
     description:
@@ -735,7 +744,6 @@ export class MethodsController {
   }
 
   @Patch(':id')
-  @Put(':id')
   @UseGuards(SupabaseAuthGuard, TermsAcceptanceGuard, CompleteProfileGuard, SuperAdminGuard)
   @ApiBearerAuth()
   @ApiOperation({ summary: 'Update method', description: 'Updates an existing method.' })
@@ -745,6 +753,17 @@ export class MethodsController {
   async update(@Param('id') id: string, @Body() dto: UpdateMethodDto) {
     const updated = await this.svc.update(id, dto);
     return { data: updated };
+  }
+
+  @Put(':id')
+  @UseGuards(SupabaseAuthGuard, TermsAcceptanceGuard, CompleteProfileGuard, SuperAdminGuard)
+  @ApiBearerAuth()
+  @ApiOperation({ summary: 'Replace method', description: 'Replaces an existing method.' })
+  @ApiOkResponse({ description: 'Method updated', schema: { example: { data: METHOD_EXAMPLE } } })
+  @ApiUnauthorizedResponse({ description: 'Missing, invalid, or expired bearer token' })
+  @ApiForbiddenResponse({ description: 'Only super_admin can perform this action' })
+  async replace(@Param('id') id: string, @Body() dto: UpdateMethodDto) {
+    return this.update(id, dto);
   }
 
   @Put(':id/basic')

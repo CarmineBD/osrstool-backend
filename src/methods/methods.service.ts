@@ -1373,14 +1373,20 @@ export class MethodsService implements OnModuleDestroy {
       this.parseBooleanQueryParam(query.show_only_free_to_play, 'show_only_free_to_play') ?? false;
     const ignoredTags = new Set(this.parseIgnoredTagsQueryParam(query.ignoredTags) ?? []);
 
-    const fallbackLevel = Math.max(
+    const currentLevel = Math.max(
       1,
       Math.min(ROADMAP_TARGET_LEVEL, this.normalizeUserLevels(userInfo.levels)[skill] ?? 1),
     );
+    const exactExperience = this.normalizeUserLevels(userInfo.experience)[skill];
+    const minimumExperienceForCurrentLevel = this.getExperienceForLevel(currentLevel);
     const skillProgress: RoadmapSkillProgress = {
-      level: fallbackLevel,
-      experience: this.getExperienceForLevel(fallbackLevel),
-      usesExactExperience: false,
+      level: currentLevel,
+      experience:
+        Number.isFinite(exactExperience) && exactExperience >= minimumExperienceForCurrentLevel
+          ? exactExperience
+          : minimumExperienceForCurrentLevel,
+      usesExactExperience:
+        Number.isFinite(exactExperience) && exactExperience >= minimumExperienceForCurrentLevel,
     };
     if (targetLevel < skillProgress.level) {
       throw new BadRequestException(

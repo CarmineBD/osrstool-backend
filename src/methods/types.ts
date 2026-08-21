@@ -45,6 +45,7 @@ export type VariantRecommendations = VariantRequirements;
 
 export interface UserInfo {
   levels: Record<string, number>;
+  experience: Record<string, number>;
   quests: Record<string, number>;
   achievement_diaries: Record<
     string,

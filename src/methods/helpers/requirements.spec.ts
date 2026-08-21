@@ -10,6 +10,7 @@ describe('requirements helpers', () => {
       Defence: 75,
       Magic: 80,
     },
+    experience: {},
     quests: {},
     achievement_diaries: {},
   };

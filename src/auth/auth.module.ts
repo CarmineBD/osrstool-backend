@@ -10,9 +10,10 @@ import { TermsAcceptanceGuard } from './terms-acceptance.guard';
 import { User } from './entities/user.entity';
 import { UserTermsAcceptance } from './entities/user-terms-acceptance.entity';
 import { MethodVariant } from '../methods/entities/variant.entity';
+import { RedisModule } from '../redis/redis.module';
 
 @Module({
-  imports: [TypeOrmModule.forFeature([User, MethodVariant, UserTermsAcceptance])],
+  imports: [TypeOrmModule.forFeature([User, MethodVariant, UserTermsAcceptance]), RedisModule],
   controllers: [AuthController],
   providers: [
     SupabaseAuthGuard,

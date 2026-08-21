@@ -13,12 +13,18 @@ import { TermsAcceptanceGuard } from '../auth/terms-acceptance.guard';
 import { MethodsController } from './methods.controller';
 import type { MethodsService } from './methods.service';
 
-const player = { levels: { Cooking: 70 }, quests: {}, achievement_diaries: {} };
+const player = {
+  levels: { Cooking: 70 },
+  experience: { cooking: 737627 },
+  quests: {},
+  achievement_diaries: {},
+};
 
 describe('MethodsController guard metadata', () => {
   const writeRoutes: Array<keyof MethodsController> = [
     'create',
     'update',
+    'replace',
     'updateBasic',
     'updateVariant',
     'remove',
