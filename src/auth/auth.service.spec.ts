@@ -26,7 +26,7 @@ describe('AuthService', () => {
   let termsRepo: jest.Mocked<Pick<Repository<UserTermsAcceptance>, 'findOne' | 'create' | 'save'>>;
   let configService: jest.Mocked<Pick<ConfigService, 'get'>>;
   let dataSource: { transaction: jest.MockedFunction<TransactionRunner> };
-  let redisClient: { set: jest.Mock; zrem: jest.Mock };
+  let redisClient: { set: jest.Mock; del: jest.Mock; zrem: jest.Mock };
   let redisService: jest.Mocked<Pick<RedisService, 'getClient'>>;
   let likesQueryBuilder: {
     where: jest.Mock;
@@ -60,6 +60,7 @@ describe('AuthService', () => {
     };
     redisClient = {
       set: jest.fn().mockResolvedValue('OK'),
+      del: jest.fn().mockResolvedValue(1),
       zrem: jest.fn().mockResolvedValue(1),
     };
     redisService = {
@@ -435,6 +436,12 @@ describe('AuthService', () => {
     >;
 
     expect(dataSource.transaction).toHaveBeenCalledTimes(1);
+    expect(redisClient.set.mock.invocationCallOrder[0]).toBeLessThan(
+      (global.fetch as jest.MockedFunction<typeof fetch>).mock.invocationCallOrder[0],
+    );
+    expect(
+      (global.fetch as jest.MockedFunction<typeof fetch>).mock.invocationCallOrder[0],
+    ).toBeLessThan(dataSource.transaction.mock.invocationCallOrder[0]);
     expect(queryCalls).toHaveLength(4);
     expect(String(queryCalls[0][0])).toContain('UPDATE method_variants');
     expect(queryCalls[0][1]).toEqual(['user-1']);
@@ -530,6 +537,29 @@ describe('AuthService', () => {
       BadGatewayException,
     );
 
-    expect(redisClient.set).not.toHaveBeenCalled();
+    expect(redisClient.set).toHaveBeenCalledTimes(1);
+    expect(redisClient.del).toHaveBeenCalledWith(buildDeletedUserAuthKey('user-1'));
+    expect(dataSource.transaction).not.toHaveBeenCalled();
+  });
+
+  it('does not delete the Supabase or Postgres user when the auth tombstone cannot be stored', async () => {
+    configService.get.mockImplementation((key: string) => {
+      switch (key) {
+        case 'SUPABASE_PROJECT_URL':
+          return 'https://example.supabase.co';
+        case 'SUPABASE_SERVICE_ROLE_KEY':
+          return 'service-role-key';
+        default:
+          return undefined;
+      }
+    });
+    redisClient.set.mockRejectedValueOnce(new Error('redis unavailable'));
+
+    await expect(service.deleteAuthenticatedUser({ id: 'user-1' })).rejects.toThrow(
+      'redis unavailable',
+    );
+
+    expect(global.fetch).not.toHaveBeenCalled();
+    expect(dataSource.transaction).not.toHaveBeenCalled();
   });
 });

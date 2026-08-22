@@ -1359,6 +1359,8 @@ export class MethodsService implements OnModuleDestroy {
     );
     const userInfo = query.player;
     const filters = this.buildListFilters(query);
+    filters.isOfficial ??= true;
+    await this.assertCanUseUnofficialMethodsFilter(filters.isOfficial, authenticatedUserId);
     if (filters.enabled === false) {
       await this.assertSuperAdminForDisabledMethods(query.authorization);
     }
@@ -3334,6 +3336,7 @@ export class MethodsService implements OnModuleDestroy {
             slug,
             icon_id,
             iconSource,
+            actionType,
             clickIntensity,
             afkiness,
             riskLevel,
@@ -3349,6 +3352,7 @@ export class MethodsService implements OnModuleDestroy {
             slug,
             icon_id,
             iconSource,
+            actionType,
             xpHour,
             label,
             description,
@@ -3558,6 +3562,7 @@ export class MethodsService implements OnModuleDestroy {
             slug,
             icon_id,
             iconSource,
+            actionType,
             clickIntensity,
             afkiness,
             riskLevel,
@@ -3573,6 +3578,7 @@ export class MethodsService implements OnModuleDestroy {
             slug,
             icon_id,
             iconSource,
+            actionType,
             xpHour,
             label,
             description,
