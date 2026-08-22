@@ -19,6 +19,7 @@ import { ItemVolumesModule } from './item-volumes/item-volumes.module';
 import { AdminModule } from './admin/admin.module';
 import { PresenceModule } from './presence/presence.module';
 import { RedisModule } from './redis/redis.module';
+import { IconsModule } from './icons/icons.module';
 
 const validateEnv = (config: Record<string, string | undefined>) => {
   const hasDatabaseUrl = Boolean(config.DATABASE_URL && config.DATABASE_URL.trim().length > 0);
@@ -123,6 +124,7 @@ const validateEnv = (config: Record<string, string | undefined>) => {
     PricesModule,
     ItemVolumesModule,
     ItemsModule,
+    IconsModule,
     SystemModule,
     AuthModule,
     CatalogsModule,
