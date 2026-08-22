@@ -2,6 +2,7 @@
 import { IoItemDto } from './io-item.dto';
 import { XpHour, VariantRecommendations, VariantRequirements } from '../types';
 import { ActionType } from '../action-type.enum';
+import { IconSource } from '../../icons/icon-source.enum';
 
 export class VariantTagResponseDto {
   label: string;
@@ -13,6 +14,7 @@ export class VariantResponseDto {
   id: string;
   slug: string;
   icon_id?: number | null;
+  iconSource: IconSource;
   label: string;
   description?: string;
   xpHour?: XpHour;
@@ -43,7 +45,15 @@ export class MethodResponseDto {
   name: string;
   slug: string;
   icon_id?: number | null;
+  iconSource: IconSource;
   description?: string;
   category?: string;
+  is_official?: boolean;
+  created_by?: {
+    id: string;
+    username: string | null;
+  } | null;
+  created_at?: Date;
+  updated_at?: Date;
   variants: VariantResponseDto[];
 }

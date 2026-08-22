@@ -170,6 +170,7 @@ npm run sync:items:mapping -- --chunkSize=1000
 ## Supabase Auth test endpoint
 
 - `GET /me` is protected and expects `Authorization: Bearer <access_token>`.
+- `POST /me/terms/acceptance` is protected and registers acceptance of the current Terms of Service version for the authenticated user.
 - `POST /me/account-username` is protected and sets the authenticated account username once.
 - Both endpoints are also available under `/users/me` for compatibility.
 - Token validation is done with Supabase JWKS: `${SUPABASE_PROJECT_URL}/auth/v1/.well-known/jwks.json`.
@@ -177,8 +178,12 @@ npm run sync:items:mapping -- --chunkSize=1000
 - `GET /me` auto-upserts the authenticated user in `public.users`:
   - Creates user if missing with `plan='free'` and `role='user'`.
   - Leaves `account_username` as `NULL` until onboarding is completed.
-  - Returns `{ data: { id, email, username, plan, role } }`.
+  - Returns `{ data: { id, email, username, plan, role, terms } }`.
   - If user exists and email changed, updates email and `updated_at`.
+- `POST /me/terms/acceptance`:
+  - Accepts no user id or version input from the client.
+  - Registers acceptance for the authenticated user and the backend-configured current version only.
+  - Is idempotent for repeated attempts on the same version.
 - `POST /me/account-username`:
   - Accepts `{ "username": string }`.
   - Trims and normalizes to lowercase before validation and storage.
@@ -189,6 +194,12 @@ npm run sync:items:mapping -- --chunkSize=1000
 ## SQL setup for `public.users`
 
 This repository does not include TypeORM migrations yet, so create the table manually in Railway/Postgres:
+
+For versioned Terms of Service acceptances, execute this SQL file once per environment:
+
+```txt
+sql/2026-08-17-add-user-terms-acceptances.sql
+```
 
 ## Manual SQL setup for `presence_history`
 
@@ -243,6 +254,7 @@ BEFORE UPDATE ON public.users
 FOR EACH ROW
 EXECUTE FUNCTION public.set_updated_at();
 ```
+
 - In frontend, get the token with Supabase Auth:
 
 ```ts
@@ -266,7 +278,7 @@ curl -X POST \
   -d '{"username":"account_user"}' \
   http://localhost:3000/me/account-username
 ```
-  
+
 ## Production tips
 
 - Set `NODE_ENV=production` to disable Swagger by default.

@@ -14,6 +14,7 @@ import { Method } from './method.entity';
 import { VariantIoItem } from './io-item.entity';
 import { XpHour, VariantRequirements, VariantRecommendations } from '../types';
 import { ActionType } from '../action-type.enum';
+import { IconSource } from '../../icons/icon-source.enum';
 
 @Entity('method_variants')
 @Unique('UQ_variant_method_slug', ['method', 'slug'])
@@ -35,8 +36,11 @@ export class MethodVariant {
   @Column({ type: 'text', nullable: true })
   description: string | null;
 
-  @Column({ name: 'icon_id', type: 'int', nullable: true })
+  @Column({ name: 'icon_id', type: 'bigint', nullable: true })
   iconId?: number | null;
+
+  @Column({ name: 'icon_source', type: 'text', default: IconSource.ITEM })
+  iconSource: IconSource;
 
   // AquÃƒÂ­ forzamos que xpHour se guarde/lea de la columna xp_hour
   @Column({

@@ -20,8 +20,13 @@ import { VariantIoItem } from '../src/methods/entities/io-item.entity';
 import { VariantHistory } from '../src/methods/entities/variant-history.entity';
 import { ActionType } from '../src/methods/action-type.enum';
 import { createPgMemAdapter } from './utils/pg-mem';
+import { User } from '../src/auth/entities/user.entity';
+import { IconSource } from '../src/icons/icon-source.enum';
+import { GameIcon } from '../src/icons/entities/game-icon.entity';
 
 jest.mock('pg', () => createPgMemAdapter());
+
+const TEST_AUTH_USER_ID = '11111111-1111-1111-1111-111111111111';
 
 describe('Methods (e2e)', () => {
   let app: INestApplication;
@@ -30,12 +35,14 @@ describe('Methods (e2e)', () => {
   type CreateMethodPayload = {
     name: string;
     icon_id: number;
+    iconSource: IconSource;
     description: string;
     category: string;
     enabled: boolean;
     variants: Array<{
       label: string;
       icon_id: number;
+      iconSource: IconSource;
       actionsPerHour?: number;
       actionType?: ActionType;
       description?: string;
@@ -58,6 +65,7 @@ describe('Methods (e2e)', () => {
   const buildValidCreateMethodPayload = (): CreateMethodPayload => ({
     name: 'Validated method',
     icon_id: 4151,
+    iconSource: IconSource.ITEM,
     description: 'Texto **markdown** con [link](https://example.com)',
     category: 'Skilling',
     enabled: true,
@@ -65,6 +73,7 @@ describe('Methods (e2e)', () => {
       {
         label: 'Validated variant',
         icon_id: 4152,
+        iconSource: IconSource.ITEM,
         actionsPerHour: 2,
         actionType: ActionType.ITEMS,
         description: 'Lista:\n- item 1\n- item 2',
@@ -126,6 +135,12 @@ describe('Methods (e2e)', () => {
     });
   };
 
+  const buildStoredMethodPayload = (overrides: Partial<Method>): Partial<Method> => ({
+    createdBy: TEST_AUTH_USER_ID,
+    isOfficial: true,
+    ...overrides,
+  });
+
   beforeAll(async () => {
     const testApp = await createTestApp();
     app = testApp.app;
@@ -136,7 +151,16 @@ describe('Methods (e2e)', () => {
     await dataSource.query('DELETE FROM "variant_io_items"');
     await dataSource.query('DELETE FROM "method_variants"');
     await dataSource.query('DELETE FROM "money_making_methods"');
+    await dataSource.query('DELETE FROM "icons"');
+    await dataSource.query('DELETE FROM "users"');
     await dataSource.query('DELETE FROM "items"');
+    await dataSource.getRepository(User).save({
+      id: TEST_AUTH_USER_ID,
+      email: 'admin@example.com',
+      accountUsername: 'admin_user',
+      role: 'super_admin',
+      plan: 'free',
+    });
     redisCall.mockReset();
   });
 
@@ -146,18 +170,20 @@ describe('Methods (e2e)', () => {
     }
   });
 
-  it('GET /methods returns best variant and variantCount', async () => {
+  it('POST /methods/search returns best variant and variantCount', async () => {
     const methodRepo = dataSource.getRepository(Method);
     const variantRepo = dataSource.getRepository(MethodVariant);
     const ioRepo = dataSource.getRepository(VariantIoItem);
     const seed = buildMethodFixture();
 
-    const savedMethod = await methodRepo.save({
-      name: seed.name,
-      slug: seed.slug,
-      description: seed.description,
-      category: seed.category,
-    });
+    const savedMethod = await methodRepo.save(
+      buildStoredMethodPayload({
+        name: seed.name,
+        slug: seed.slug,
+        description: seed.description,
+        category: seed.category,
+      }),
+    );
 
     const [variantA, variantB] = seed.variants;
     const savedVariantA = await variantRepo.save({
@@ -218,7 +244,7 @@ describe('Methods (e2e)', () => {
     });
 
     const server = app.getHttpServer() as unknown as Server;
-    const res = await request(server).get('/methods').expect(200);
+    const res = await request(server).post('/methods/search').send({}).expect(200);
 
     const body = res.body as {
       status: string;
@@ -246,18 +272,37 @@ describe('Methods (e2e)', () => {
     expect(result.variants[0].id).toBe(variantIds[1]);
   });
 
-  it('GET /methods?variants=all returns one row per variant', async () => {
+  it('rejects malformed nested player context with a validation error', async () => {
+    const server = app.getHttpServer() as unknown as Server;
+
+    const res = await request(server).post('/methods/search').send({ player: {} }).expect(400);
+    const body = res.body as { message?: unknown };
+
+    const messages = Array.isArray(body.message) ? body.message.map(String) : [];
+    expect(messages).toEqual(
+      expect.arrayContaining([
+        'player.levels must be an object',
+        'player.experience must be an object',
+        'player.quests must be an object',
+        'player.achievement_diaries must be an object',
+      ]),
+    );
+  });
+
+  it('POST /methods/search?variants=all returns one row per variant', async () => {
     const methodRepo = dataSource.getRepository(Method);
     const variantRepo = dataSource.getRepository(MethodVariant);
     const ioRepo = dataSource.getRepository(VariantIoItem);
     const seed = buildMethodFixture();
 
-    const savedMethod = await methodRepo.save({
-      name: seed.name,
-      slug: seed.slug,
-      description: seed.description,
-      category: seed.category,
-    });
+    const savedMethod = await methodRepo.save(
+      buildStoredMethodPayload({
+        name: seed.name,
+        slug: seed.slug,
+        description: seed.description,
+        category: seed.category,
+      }),
+    );
 
     const [variantA, variantB] = seed.variants;
     const savedVariantA = await variantRepo.save({
@@ -318,7 +363,7 @@ describe('Methods (e2e)', () => {
     });
 
     const server = app.getHttpServer() as unknown as Server;
-    const res = await request(server).get('/methods?variants=all').expect(200);
+    const res = await request(server).post('/methods/search?variants=all').send({}).expect(200);
 
     const body = res.body as {
       status: string;
@@ -355,17 +400,19 @@ describe('Methods (e2e)', () => {
     });
   });
 
-  it('GET /methods?show_only_free_to_play=true&variants=all returns only free-to-play variants', async () => {
+  it('POST /methods/search?show_only_free_to_play=true&variants=all returns only free-to-play variants', async () => {
     const methodRepo = dataSource.getRepository(Method);
     const variantRepo = dataSource.getRepository(MethodVariant);
     const seed = buildMethodFixture();
 
-    const savedMethod = await methodRepo.save({
-      name: seed.name,
-      slug: seed.slug,
-      description: seed.description,
-      category: seed.category,
-    });
+    const savedMethod = await methodRepo.save(
+      buildStoredMethodPayload({
+        name: seed.name,
+        slug: seed.slug,
+        description: seed.description,
+        category: seed.category,
+      }),
+    );
 
     const [variantA, variantB] = seed.variants;
     const savedVariantA = await variantRepo.save({
@@ -411,7 +458,8 @@ describe('Methods (e2e)', () => {
 
     const server = app.getHttpServer() as unknown as Server;
     const res = await request(server)
-      .get('/methods?show_only_free_to_play=true&variants=all')
+      .post('/methods/search?show_only_free_to_play=true&variants=all')
+      .send({})
       .expect(200);
 
     const body = res.body as {
@@ -425,17 +473,19 @@ describe('Methods (e2e)', () => {
     });
   });
 
-  it('GET /methods?show_only_free_to_play=false&variants=all does not filter out members variants', async () => {
+  it('POST /methods/search?show_only_free_to_play=false&variants=all does not filter out members variants', async () => {
     const methodRepo = dataSource.getRepository(Method);
     const variantRepo = dataSource.getRepository(MethodVariant);
     const seed = buildMethodFixture();
 
-    const savedMethod = await methodRepo.save({
-      name: seed.name,
-      slug: seed.slug,
-      description: seed.description,
-      category: seed.category,
-    });
+    const savedMethod = await methodRepo.save(
+      buildStoredMethodPayload({
+        name: seed.name,
+        slug: seed.slug,
+        description: seed.description,
+        category: seed.category,
+      }),
+    );
 
     const [variantA, variantB] = seed.variants;
     const savedVariantA = await variantRepo.save({
@@ -481,7 +531,8 @@ describe('Methods (e2e)', () => {
 
     const server = app.getHttpServer() as unknown as Server;
     const res = await request(server)
-      .get('/methods?show_only_free_to_play=false&variants=all')
+      .post('/methods/search?show_only_free_to_play=false&variants=all')
+      .send({})
       .expect(200);
 
     const body = res.body as {
@@ -497,18 +548,20 @@ describe('Methods (e2e)', () => {
     });
   });
 
-  it('GET /methods?ignoredTags=safe&variants=all excludes variants that contain ignored tags', async () => {
+  it('POST /methods/search?ignoredTags=safe&variants=all excludes variants that contain ignored tags', async () => {
     const methodRepo = dataSource.getRepository(Method);
     const variantRepo = dataSource.getRepository(MethodVariant);
     const historyRepo = dataSource.getRepository(VariantHistory);
     const seed = buildMethodFixture();
 
-    const savedMethod = await methodRepo.save({
-      name: seed.name,
-      slug: seed.slug,
-      description: seed.description,
-      category: seed.category,
-    });
+    const savedMethod = await methodRepo.save(
+      buildStoredMethodPayload({
+        name: seed.name,
+        slug: seed.slug,
+        description: seed.description,
+        category: seed.category,
+      }),
+    );
 
     const [variantA, variantB] = seed.variants;
     const savedVariantA = await variantRepo.save({
@@ -560,7 +613,10 @@ describe('Methods (e2e)', () => {
     });
 
     const server = app.getHttpServer() as unknown as Server;
-    const res = await request(server).get('/methods?ignoredTags=safe&variants=all').expect(200);
+    const res = await request(server)
+      .post('/methods/search?ignoredTags=safe&variants=all')
+      .send({})
+      .expect(200);
 
     const body = res.body as {
       data: { methods: Array<{ variants: Array<{ id: string; tags: Array<{ label: string }> }> }> };
@@ -571,24 +627,28 @@ describe('Methods (e2e)', () => {
     expect(body.data.methods[0].variants[0].tags.map((tag) => tag.label)).not.toContain('Safe');
   });
 
-  it('GET /methods/trending-profit returns methods ordered by profit growth', async () => {
+  it('POST /methods/trending-profit returns methods ordered by profit growth', async () => {
     const methodRepo = dataSource.getRepository(Method);
     const variantRepo = dataSource.getRepository(MethodVariant);
     const historyRepo = dataSource.getRepository(VariantHistory);
     const seed = buildMethodFixture();
 
-    const smallMethod = await methodRepo.save({
-      name: 'Small mover',
-      slug: 'small-mover',
-      description: seed.description,
-      category: seed.category,
-    });
-    const bigMethod = await methodRepo.save({
-      name: 'Big mover',
-      slug: 'big-mover',
-      description: seed.description,
-      category: seed.category,
-    });
+    const smallMethod = await methodRepo.save(
+      buildStoredMethodPayload({
+        name: 'Small mover',
+        slug: 'small-mover',
+        description: seed.description,
+        category: seed.category,
+      }),
+    );
+    const bigMethod = await methodRepo.save(
+      buildStoredMethodPayload({
+        name: 'Big mover',
+        slug: 'big-mover',
+        description: seed.description,
+        category: seed.category,
+      }),
+    );
 
     const smallVariant = await variantRepo.save({
       label: 'Small variant',
@@ -659,7 +719,8 @@ describe('Methods (e2e)', () => {
 
     const server = app.getHttpServer() as unknown as Server;
     const res = await request(server)
-      .get('/methods/trending-profit?window=24h&mode=reliable&variants=all')
+      .post('/methods/trending-profit?window=24h&mode=reliable&variants=all')
+      .send({})
       .expect(200);
 
     const body = res.body as {
@@ -704,22 +765,24 @@ describe('Methods (e2e)', () => {
     expect(body.data.methods[0].variants[0].profitGrowth).not.toHaveProperty('lowGrowthAbs');
     expect(body.data.methods[1].variants[0].profitGrowth.growthPct).toBe(99_900);
 
-    await request(server).get('/methods/trending-profit?window=1h').expect(200);
-    await request(server).get('/methods/trending-profit?window=7d').expect(200);
+    await request(server).post('/methods/trending-profit?window=1h').send({}).expect(200);
+    await request(server).post('/methods/trending-profit?window=7d').send({}).expect(200);
   });
 
-  it('GET /methods with skill includes gpPerXpHigh and gpPerXpLow per variant', async () => {
+  it('POST /methods/search with skill includes gpPerXpHigh and gpPerXpLow per variant', async () => {
     const methodRepo = dataSource.getRepository(Method);
     const variantRepo = dataSource.getRepository(MethodVariant);
     const ioRepo = dataSource.getRepository(VariantIoItem);
     const seed = buildMethodFixture();
 
-    const savedMethod = await methodRepo.save({
-      name: seed.name,
-      slug: seed.slug,
-      description: seed.description,
-      category: seed.category,
-    });
+    const savedMethod = await methodRepo.save(
+      buildStoredMethodPayload({
+        name: seed.name,
+        slug: seed.slug,
+        description: seed.description,
+        category: seed.category,
+      }),
+    );
 
     const [variantA, variantB] = seed.variants;
     const savedVariantA = await variantRepo.save({
@@ -783,7 +846,10 @@ describe('Methods (e2e)', () => {
     });
 
     const server = app.getHttpServer() as unknown as Server;
-    const res = await request(server).get('/methods?skill=magic&variants=all').expect(200);
+    const res = await request(server)
+      .post('/methods/search?skill=magic&variants=all')
+      .send({})
+      .expect(200);
 
     const body = res.body as {
       status: string;
@@ -812,12 +878,12 @@ describe('Methods (e2e)', () => {
     });
   });
 
-  it('POST /methods stores icon_id and GET /methods/:id returns it for method and variant', async () => {
+  it('POST /methods/create stores icon_id and POST /methods/:id returns it for method and variant', async () => {
     await seedItems(100, 200, 4151, 4152);
 
     const server = app.getHttpServer() as unknown as Server;
     const createRes = await request(server)
-      .post('/methods')
+      .post('/methods/create')
       .send(buildValidCreateMethodPayload())
       .expect(201);
 
@@ -825,11 +891,13 @@ describe('Methods (e2e)', () => {
       data: {
         id: string;
         icon_id: number;
+        is_official: boolean;
         variants: Array<{ id: string; icon_id: number }>;
       };
     };
 
     expect(createdBody.data.icon_id).toBe(4151);
+    expect(createdBody.data.is_official).toBe(true);
     expect(createdBody.data.variants[0].icon_id).toBe(4152);
 
     mockRedisProfits({
@@ -838,13 +906,20 @@ describe('Methods (e2e)', () => {
       },
     });
 
-    const detailRes = await request(server).get(`/methods/${createdBody.data.id}`).expect(200);
+    const detailRes = await request(server)
+      .post(`/methods/${createdBody.data.id}`)
+      .send({})
+      .expect(200);
     const detailBody = detailRes.body as {
       status: string;
       data: {
         method: {
           id: string;
           icon_id: number;
+          is_official: boolean;
+          created_by: { id: string; username: string | null } | null;
+          created_at: string;
+          updated_at: string;
           variants: Array<{ id: string; icon_id: number }>;
         };
       };
@@ -854,34 +929,89 @@ describe('Methods (e2e)', () => {
     expect(detailBody.data.method).toMatchObject({
       id: createdBody.data.id,
       icon_id: 4151,
+      is_official: true,
+      created_by: {
+        id: TEST_AUTH_USER_ID,
+        username: 'admin_user',
+      },
     });
+    expect(new Date(detailBody.data.method.created_at).toString()).not.toBe('Invalid Date');
+    expect(new Date(detailBody.data.method.updated_at).toString()).not.toBe('Invalid Date');
     expect(detailBody.data.method.variants[0]).toMatchObject({
       id: createdBody.data.variants[0].id,
       icon_id: 4152,
     });
   });
 
-  it('POST /methods rejects icon_id values that do not exist in items', async () => {
+  it('validates and returns game icons using iconSource', async () => {
+    await seedItems(100, 200);
+    const gameIcon = await dataSource.getRepository(GameIcon).save({
+      name: 'Magic spellbook',
+      type: 'interface',
+      iconPath: 'Magic_spellbook.png',
+    });
+    const server = app.getHttpServer() as unknown as Server;
+    const payload = buildValidCreateMethodPayload();
+    payload.icon_id = Number(gameIcon.id);
+    payload.iconSource = IconSource.GAME_ICON;
+    payload.variants[0].icon_id = Number(gameIcon.id);
+    payload.variants[0].iconSource = IconSource.GAME_ICON;
+
+    const createResponse = await request(server).post('/methods/create').send(payload).expect(201);
+    const createBody = createResponse.body as {
+      data: {
+        icon_id: number;
+        iconSource: IconSource;
+        variants: Array<{ icon_id: number; iconSource: IconSource }>;
+      };
+    };
+
+    expect(createBody.data).toMatchObject({
+      icon_id: Number(gameIcon.id),
+      iconSource: IconSource.GAME_ICON,
+      variants: [
+        {
+          icon_id: Number(gameIcon.id),
+          iconSource: IconSource.GAME_ICON,
+        },
+      ],
+    });
+
+    const iconsResponse = await request(server).get('/icons?q=magic').expect(200);
+    const iconsBody = iconsResponse.body as {
+      data: Array<{ id: number; name: string; type: string; iconSource: IconSource }>;
+    };
+    expect(iconsBody.data).toEqual([
+      expect.objectContaining({
+        id: Number(gameIcon.id),
+        name: 'Magic spellbook',
+        type: 'interface',
+        iconSource: IconSource.GAME_ICON,
+      }),
+    ]);
+  });
+
+  it('POST /methods/create rejects icon_id values that do not exist in items', async () => {
     await seedItems(100, 200, 4151);
 
     const server = app.getHttpServer() as unknown as Server;
     const payload = buildValidCreateMethodPayload();
     payload.variants[0].icon_id = 999999;
 
-    const res = await request(server).post('/methods').send(payload).expect(400);
+    const res = await request(server).post('/methods/create').send(payload).expect(400);
     const body = res.body as { message?: unknown };
     expect(String(body.message)).toContain('icon_id must reference an existing item');
     expect(String(body.message)).toContain('999999');
   });
 
-  it('POST /methods requires actionsPerHour for each variant', async () => {
+  it('POST /methods/create requires actionsPerHour for each variant', async () => {
     await seedItems(100, 200, 4151, 4152);
 
     const server = app.getHttpServer() as unknown as Server;
     const payload = buildValidCreateMethodPayload();
     delete payload.variants[0].actionsPerHour;
 
-    const res = await request(server).post('/methods').send(payload).expect(400);
+    const res = await request(server).post('/methods/create').send(payload).expect(400);
     const body = res.body as { message?: unknown };
     const messages = Array.isArray(body.message)
       ? body.message.map(String)
@@ -892,7 +1022,7 @@ describe('Methods (e2e)', () => {
     ).toBe(true);
   });
 
-  it('POST /methods rejects free-to-play variants that include members-only items', async () => {
+  it('POST /methods/create rejects free-to-play variants that include members-only items', async () => {
     await seedItems(
       { id: 100, members: true, name: 'Abyssal whip' },
       { id: 200, members: false, name: 'Lobster' },
@@ -908,6 +1038,7 @@ describe('Methods (e2e)', () => {
         {
           label: 'F2P Cooking',
           icon_id: 4152,
+          iconSource: IconSource.ITEM,
           actionsPerHour: 100,
           actionType: ActionType.ITEMS,
           members: false,
@@ -917,6 +1048,7 @@ describe('Methods (e2e)', () => {
         {
           label: 'F2P Prayer',
           icon_id: 4152,
+          iconSource: IconSource.ITEM,
           actionsPerHour: 100,
           actionType: ActionType.ITEMS,
           members: false,
@@ -926,26 +1058,22 @@ describe('Methods (e2e)', () => {
       ],
     };
 
-    const res = await request(server).post('/methods').send(payload).expect(400);
+    const res = await request(server).post('/methods/create').send(payload).expect(400);
 
     const body = res.body as {
-      status: string;
-      error: {
-        code: string;
-        message: string;
-        details: {
-          variants: Array<{
-            variantTitle: string;
-            membersOnlyItems: Array<{ id: number; name: string }>;
-          }>;
-        };
+      code: string;
+      message: string;
+      details: {
+        variants: Array<{
+          variantTitle: string;
+          membersOnlyItems: Array<{ id: number; name: string }>;
+        }>;
       };
     };
 
-    expect(body.status).toBe('error');
-    expect(body.error.code).toBe('F2P_VARIANT_CONTAINS_MEMBERS_ITEMS');
-    expect(body.error.message).toContain('Free-to-play variants cannot include members-only items');
-    expect(body.error.details.variants).toEqual([
+    expect(body.code).toBe('F2P_VARIANT_CONTAINS_MEMBERS_ITEMS');
+    expect(body.message).toContain('Free-to-play variants cannot include members-only items');
+    expect(body.details.variants).toEqual([
       {
         variantTitle: 'F2P Cooking',
         membersOnlyItems: [{ id: 100, name: 'Abyssal whip' }],
@@ -963,14 +1091,16 @@ describe('Methods (e2e)', () => {
     const methodRepo = dataSource.getRepository(Method);
     const variantRepo = dataSource.getRepository(MethodVariant);
 
-    const savedMethod = await methodRepo.save({
-      name: 'Editable method',
-      slug: 'editable-method',
-      iconId: 4151,
-      description: 'Safe markdown',
-      category: 'Skilling',
-      enabled: true,
-    });
+    const savedMethod = await methodRepo.save(
+      buildStoredMethodPayload({
+        name: 'Editable method',
+        slug: 'editable-method',
+        iconId: 4151,
+        description: 'Safe markdown',
+        category: 'Skilling',
+        enabled: true,
+      }),
+    );
 
     const savedVariant = await variantRepo.save({
       label: 'Editable variant',
@@ -994,11 +1124,13 @@ describe('Methods (e2e)', () => {
       .put(`/methods/${savedMethod.id}`)
       .send({
         icon_id: 999999,
+        iconSource: IconSource.ITEM,
         variants: [
           {
             id: savedVariant.id,
             label: 'Editable variant',
             icon_id: 4152,
+            iconSource: IconSource.ITEM,
             actionsPerHour: 100,
             actionType: ActionType.ITEMS,
             inputs: [],
@@ -1019,14 +1151,16 @@ describe('Methods (e2e)', () => {
     const methodRepo = dataSource.getRepository(Method);
     const variantRepo = dataSource.getRepository(MethodVariant);
 
-    const savedMethod = await methodRepo.save({
-      name: 'Editable method',
-      slug: 'editable-method',
-      iconId: 4151,
-      description: 'Safe markdown',
-      category: 'Skilling',
-      enabled: true,
-    });
+    const savedMethod = await methodRepo.save(
+      buildStoredMethodPayload({
+        name: 'Editable method',
+        slug: 'editable-method',
+        iconId: 4151,
+        description: 'Safe markdown',
+        category: 'Skilling',
+        enabled: true,
+      }),
+    );
 
     const savedVariant = await variantRepo.save({
       label: 'Editable variant',
@@ -1054,6 +1188,7 @@ describe('Methods (e2e)', () => {
             id: savedVariant.id,
             label: 'Editable variant',
             icon_id: 4152,
+            iconSource: IconSource.ITEM,
             inputs: [],
             outputs: [],
           },
@@ -1082,14 +1217,16 @@ describe('Methods (e2e)', () => {
     const methodRepo = dataSource.getRepository(Method);
     const variantRepo = dataSource.getRepository(MethodVariant);
 
-    const savedMethod = await methodRepo.save({
-      name: 'Editable method',
-      slug: 'editable-method',
-      iconId: 4151,
-      description: 'Safe markdown',
-      category: 'Skilling',
-      enabled: true,
-    });
+    const savedMethod = await methodRepo.save(
+      buildStoredMethodPayload({
+        name: 'Editable method',
+        slug: 'editable-method',
+        iconId: 4151,
+        description: 'Safe markdown',
+        category: 'Skilling',
+        enabled: true,
+      }),
+    );
 
     const savedVariant = await variantRepo.save({
       label: 'Existing F2P variant',
@@ -1126,21 +1263,17 @@ describe('Methods (e2e)', () => {
       .expect(400);
 
     const body = res.body as {
-      status: string;
-      error: {
-        code: string;
-        details: {
-          variants: Array<{
-            variantTitle: string;
-            membersOnlyItems: Array<{ id: number; name: string }>;
-          }>;
-        };
+      code: string;
+      details: {
+        variants: Array<{
+          variantTitle: string;
+          membersOnlyItems: Array<{ id: number; name: string }>;
+        }>;
       };
     };
 
-    expect(body.status).toBe('error');
-    expect(body.error.code).toBe('F2P_VARIANT_CONTAINS_MEMBERS_ITEMS');
-    expect(body.error.details.variants).toEqual([
+    expect(body.code).toBe('F2P_VARIANT_CONTAINS_MEMBERS_ITEMS');
+    expect(body.details.variants).toEqual([
       {
         variantTitle: 'Existing F2P variant',
         membersOnlyItems: [{ id: 100, name: 'Abyssal whip' }],
@@ -1154,14 +1287,16 @@ describe('Methods (e2e)', () => {
     const methodRepo = dataSource.getRepository(Method);
     const variantRepo = dataSource.getRepository(MethodVariant);
 
-    const savedMethod = await methodRepo.save({
-      name: 'Variant edit method',
-      slug: 'variant-edit-method',
-      iconId: 4151,
-      description: 'Safe markdown',
-      category: 'Skilling',
-      enabled: true,
-    });
+    const savedMethod = await methodRepo.save(
+      buildStoredMethodPayload({
+        name: 'Variant edit method',
+        slug: 'variant-edit-method',
+        iconId: 4151,
+        description: 'Safe markdown',
+        category: 'Skilling',
+        enabled: true,
+      }),
+    );
 
     const savedVariant = await variantRepo.save({
       label: 'Variant edit variant',
@@ -1185,6 +1320,7 @@ describe('Methods (e2e)', () => {
       .put(`/methods/variant/${savedVariant.id}`)
       .send({
         icon_id: 999999,
+        iconSource: IconSource.ITEM,
         actionsPerHour: 100,
         actionType: ActionType.ITEMS,
         inputs: [],
@@ -1203,14 +1339,16 @@ describe('Methods (e2e)', () => {
     const methodRepo = dataSource.getRepository(Method);
     const variantRepo = dataSource.getRepository(MethodVariant);
 
-    const savedMethod = await methodRepo.save({
-      name: 'Variant edit method',
-      slug: 'variant-edit-method',
-      iconId: 4151,
-      description: 'Safe markdown',
-      category: 'Skilling',
-      enabled: true,
-    });
+    const savedMethod = await methodRepo.save(
+      buildStoredMethodPayload({
+        name: 'Variant edit method',
+        slug: 'variant-edit-method',
+        iconId: 4151,
+        description: 'Safe markdown',
+        category: 'Skilling',
+        enabled: true,
+      }),
+    );
 
     const savedVariant = await variantRepo.save({
       label: 'Variant edit variant',
@@ -1259,14 +1397,16 @@ describe('Methods (e2e)', () => {
     const methodRepo = dataSource.getRepository(Method);
     const variantRepo = dataSource.getRepository(MethodVariant);
 
-    const savedMethod = await methodRepo.save({
-      name: 'Variant edit method',
-      slug: 'variant-edit-method',
-      iconId: 4151,
-      description: 'Safe markdown',
-      category: 'Skilling',
-      enabled: true,
-    });
+    const savedMethod = await methodRepo.save(
+      buildStoredMethodPayload({
+        name: 'Variant edit method',
+        slug: 'variant-edit-method',
+        iconId: 4151,
+        description: 'Safe markdown',
+        category: 'Skilling',
+        enabled: true,
+      }),
+    );
 
     const savedVariant = await variantRepo.save({
       label: 'Variant edit variant',
@@ -1298,21 +1438,17 @@ describe('Methods (e2e)', () => {
       .expect(400);
 
     const body = res.body as {
-      status: string;
-      error: {
-        code: string;
-        details: {
-          variants: Array<{
-            variantTitle: string;
-            membersOnlyItems: Array<{ id: number; name: string }>;
-          }>;
-        };
+      code: string;
+      details: {
+        variants: Array<{
+          variantTitle: string;
+          membersOnlyItems: Array<{ id: number; name: string }>;
+        }>;
       };
     };
 
-    expect(body.status).toBe('error');
-    expect(body.error.code).toBe('F2P_VARIANT_CONTAINS_MEMBERS_ITEMS');
-    expect(body.error.details.variants).toEqual([
+    expect(body.code).toBe('F2P_VARIANT_CONTAINS_MEMBERS_ITEMS');
+    expect(body.details.variants).toEqual([
       {
         variantTitle: 'Variant edit variant',
         membersOnlyItems: [{ id: 100, name: 'Abyssal whip' }],
@@ -1320,29 +1456,29 @@ describe('Methods (e2e)', () => {
     ]);
   });
 
-  it('POST /methods rejects unsafe script content in method.description', async () => {
+  it('POST /methods/create rejects unsafe script content in method.description', async () => {
     await seedItems(100, 200, 4151, 4152);
 
     const server = app.getHttpServer() as unknown as Server;
     const payload = buildValidCreateMethodPayload();
     payload.description = '<script>alert(1)</script>';
 
-    const res = await request(server).post('/methods').send(payload).expect(400);
+    const res = await request(server).post('/methods/create').send(payload).expect(400);
     expectUnsafeMarkdownValidationMessage(res.body as { message?: unknown });
   });
 
-  it('POST /methods rejects unsafe event handler content in variant.description', async () => {
+  it('POST /methods/create rejects unsafe event handler content in variant.description', async () => {
     await seedItems(100, 200, 4151, 4152);
 
     const server = app.getHttpServer() as unknown as Server;
     const payload = buildValidCreateMethodPayload();
     payload.variants[0].description = '<img src=x onerror=alert(1)>';
 
-    const res = await request(server).post('/methods').send(payload).expect(400);
+    const res = await request(server).post('/methods/create').send(payload).expect(400);
     expectUnsafeMarkdownValidationMessage(res.body as { message?: unknown });
   });
 
-  it('POST /methods rejects io quantities with too many decimal places', async () => {
+  it('POST /methods/create rejects io quantities with too many decimal places', async () => {
     await seedItems(100, 200, 4151, 4152);
 
     const server = app.getHttpServer() as unknown as Server;
@@ -1351,7 +1487,7 @@ describe('Methods (e2e)', () => {
       { id: 100, quantity: 1.1234567, type: 'input', reason: 'Reason text' },
     ];
 
-    const res = await request(server).post('/methods').send(payload).expect(400);
+    const res = await request(server).post('/methods/create').send(payload).expect(400);
     const body = res.body as { message?: unknown };
     const messages = Array.isArray(body.message)
       ? body.message.map(String)
@@ -1364,7 +1500,7 @@ describe('Methods (e2e)', () => {
     ).toBe(true);
   });
 
-  it('POST /methods rejects variants with more than 200 inputs', async () => {
+  it('POST /methods/create rejects variants with more than 200 inputs', async () => {
     await seedItems(100, 200, 4151, 4152);
 
     const server = app.getHttpServer() as unknown as Server;
@@ -1375,7 +1511,7 @@ describe('Methods (e2e)', () => {
       type: 'input' as const,
     }));
 
-    const res = await request(server).post('/methods').send(payload).expect(400);
+    const res = await request(server).post('/methods/create').send(payload).expect(400);
     const body = res.body as { message?: unknown };
     const messages = Array.isArray(body.message)
       ? body.message.map(String)
@@ -1386,7 +1522,7 @@ describe('Methods (e2e)', () => {
     ).toBe(true);
   });
 
-  it('POST /methods rejects requirements with more than 100 total entries', async () => {
+  it('POST /methods/create rejects requirements with more than 100 total entries', async () => {
     await seedItems(100, 200, 4151, 4152);
 
     const server = app.getHttpServer() as unknown as Server;
@@ -1398,7 +1534,7 @@ describe('Methods (e2e)', () => {
       })),
     };
 
-    const res = await request(server).post('/methods').send(payload).expect(400);
+    const res = await request(server).post('/methods/create').send(payload).expect(400);
     const body = res.body as { message?: unknown };
     const messages = Array.isArray(body.message)
       ? body.message.map(String)
@@ -1415,13 +1551,15 @@ describe('Methods (e2e)', () => {
     const methodRepo = dataSource.getRepository(Method);
     const variantRepo = dataSource.getRepository(MethodVariant);
 
-    const savedMethod = await methodRepo.save({
-      name: 'Snapshot method',
-      slug: 'snapshot-method',
-      description: 'Safe markdown',
-      category: 'Skilling',
-      enabled: true,
-    });
+    const savedMethod = await methodRepo.save(
+      buildStoredMethodPayload({
+        name: 'Snapshot method',
+        slug: 'snapshot-method',
+        description: 'Safe markdown',
+        category: 'Skilling',
+        enabled: true,
+      }),
+    );
 
     const savedVariant = await variantRepo.save({
       label: 'Snapshot variant',

@@ -7,7 +7,9 @@ import {
   BadRequestException,
   UnauthorizedException,
   ForbiddenException,
+  ServiceUnavailableException,
 } from '@nestjs/common';
+import { createHash } from 'node:crypto';
 import { performance } from 'node:perf_hooks';
 import { InjectRepository } from '@nestjs/typeorm';
 import { Repository, In, LessThanOrEqual, Not } from 'typeorm';
@@ -24,13 +26,17 @@ import IORedis, { Redis } from 'ioredis';
 import { VariantSnapshotService } from '../variant-snapshots/variant-snapshot.service';
 import { slugify, fallbackSlug } from '../utils/slug';
 import { VariantRequirements, XpHour, UserInfo } from './types';
-import { RuneScapeApiService } from './RuneScapeApiService';
 import { computeMissingRequirements, filterMethodsByUserStats } from './helpers/requirements';
 import { ConfigService } from '@nestjs/config';
 import { createAccountUsernameRequiredException } from '../auth/account-username-required.exception';
+import { buildDeletedUserAuthKey } from '../auth/deleted-user-auth.util';
 import { User } from '../auth/entities/user.entity';
+import { AuthService } from '../auth/auth.service';
+import { createTermsAcceptanceRequiredException } from '../auth/terms-acceptance-required.exception';
 import { calculateMarketImpact, type MarketImpactResult } from './market-impact-calculator';
 import { Item } from '../items/entities/item.entity';
+import { IconResolverService, type IconReference } from '../icons/icon-resolver.service';
+import { IconSource } from '../icons/icon-source.enum';
 import { RedisService } from '../redis/redis.service';
 import { METHOD_CATEGORY_VALUES } from './dto/method-category.constants';
 import { SKILL_KEY_VALUES } from './dto/skill.constants';
@@ -39,7 +45,6 @@ import {
   MAX_CLICK_INTENSITY,
   MAX_RISK_LEVEL,
   QUERY_SEARCH_MAX_LENGTH,
-  USERNAME_MAX_LENGTH,
 } from './dto/validation.constants';
 import {
   buildVariantTags,
@@ -97,6 +102,7 @@ interface ListFilters {
   members?: boolean;
   ignoredTags?: Set<VariantTagQueryValue>;
   enabled: boolean;
+  isOfficial?: boolean;
 }
 
 interface SortOptions {
@@ -118,7 +124,7 @@ type TrendingProfitMode = 'reliable' | 'instant' | 'slow';
 interface ListQuery {
   page?: string;
   perPage?: string;
-  username?: string;
+  player?: UserInfo;
   name?: string;
   category?: string;
   clickIntensity?: string;
@@ -130,6 +136,7 @@ interface ListQuery {
   members?: string | boolean;
   show_only_free_to_play?: string | boolean;
   enabled?: string | boolean;
+  is_official?: string | boolean;
   likedByMe?: string | boolean;
   ignoredTags?: string | string[];
   variants?: string;
@@ -225,9 +232,17 @@ interface MethodDetailsWithProfit {
   name: string;
   slug: string;
   icon_id?: number | null;
+  iconSource: IconSource;
   description?: string;
   category?: string;
   enabled: boolean;
+  is_official?: boolean;
+  created_by?: {
+    id: string;
+    username: string | null;
+  } | null;
+  created_at?: Date;
+  updated_at?: Date;
   variants: Array<Record<string, unknown>>;
 }
 
@@ -235,6 +250,7 @@ interface SkillSummaryVariant {
   id: string;
   slug: string;
   icon_id?: number | null;
+  iconSource: IconSource;
   xpHour?: XpHour | null;
   label?: string;
   description?: string | null;
@@ -261,6 +277,7 @@ interface SkillSummaryMethod {
   name: string;
   slug: string;
   icon_id?: number | null;
+  iconSource: IconSource;
   category?: string;
   enabled: boolean;
   variants: SkillSummaryVariant[];
@@ -282,7 +299,7 @@ interface SkillSummaryBySkill {
 type RoadmapStrategy = 'fastest' | 'profitable' | 'most_afk';
 
 interface RoadmapQuery {
-  username?: string;
+  player?: UserInfo;
   skill?: string;
   strategy?: string;
   target_level?: string;
@@ -297,6 +314,7 @@ interface RoadmapVariant {
   id: string;
   slug: string;
   icon_id?: number | null;
+  iconSource: IconSource;
   label?: string;
   description?: string | null;
   xpPerHour: number;
@@ -329,6 +347,7 @@ interface RoadmapCandidate {
     name: string;
     slug: string;
     icon_id?: number | null;
+    iconSource: IconSource;
     category?: string;
     enabled: boolean;
   };
@@ -411,6 +430,8 @@ export class MethodsService implements OnModuleDestroy {
   private readonly methodsProfitsHashKey = 'methods:profits';
   private readonly itemPricesHashKey = 'items:prices';
   private readonly itemVolumes24hHashKey = 'items:vol24h';
+  private readonly methodsListCachePrefix = 'methods:list:v1';
+  private readonly methodsSafety24hCachePrefix = 'methods:safety24h:v1';
 
   constructor(
     @InjectRepository(Method)
@@ -433,11 +454,12 @@ export class MethodsService implements OnModuleDestroy {
     private readonly userRepo: Repository<User>,
 
     private readonly snapshotSvc: VariantSnapshotService,
-    private readonly runescapeApi: RuneScapeApiService,
     private readonly config: ConfigService,
     @InjectRepository(Item)
     private readonly itemRepo?: Repository<Item>,
     @Optional() redisService?: RedisService,
+    @Optional() private readonly authService?: AuthService,
+    @Optional() private readonly iconResolver?: IconResolverService,
   ) {
     const sharedRedis = redisService?.getClient();
     this.redis = sharedRedis ?? new IORedis((this.config.get<string>('REDIS_URL') as string) ?? '');
@@ -474,72 +496,80 @@ export class MethodsService implements OnModuleDestroy {
     }
   }
 
-  private async fetchUserInfo(username?: string): Promise<{
-    userInfo: UserInfo | null;
-    warnings: { code: string; message: string }[];
-  }> {
-    if (!username) return { userInfo: null, warnings: [] };
+  private isMethodsListPerfLogEnabled(): boolean {
+    const specific = this.config.get<string>('METHODS_LIST_PERF_LOGS');
+    const fallback = this.config.get<string>('PERF_LOGS');
+    const value = specific ?? fallback ?? '';
+    return ['1', 'true', 'yes', 'on'].includes(value.trim().toLowerCase());
+  }
+
+  private async timeMethodsListStep<T>(
+    enabled: boolean,
+    scope: string,
+    label: string,
+    operation: () => Promise<T>,
+  ): Promise<T> {
+    if (!enabled) return operation();
+
+    const startedAt = performance.now();
     try {
-      const userInfo = (await this.runescapeApi.fetchUserInfo(username)) as UserInfo;
-      return { userInfo, warnings: [] };
-    } catch (error: any) {
-      const message = `No se pudo obtener la informacion del usuario "${username}".`;
-      if (error instanceof Error && error.message.includes('status 404')) {
-        return { userInfo: null, warnings: [{ code: 'USER_NOT_FOUND', message }] };
-      }
-      return { userInfo: null, warnings: [{ code: 'USER_LOOKUP_FAILED', message }] };
+      return await operation();
+    } finally {
+      const elapsedMs = performance.now() - startedAt;
+      this.logger.log(`[perf] ${scope} ${label} ${elapsedMs.toFixed(1)}ms`);
     }
   }
 
-  private async fetchRequiredRoadmapUserInfo(username: string): Promise<UserInfo> {
-    const { userInfo, warnings } = await this.fetchUserInfo(username);
-    if (userInfo) {
-      return userInfo;
-    }
-
-    const warningMessage =
-      warnings[0]?.message ?? `No se pudo obtener la informacion del usuario "${username}".`;
-    throw new BadRequestException(warningMessage);
+  private getPositiveIntegerConfig(name: string, fallback: number, maximum: number): number {
+    const raw = this.config.get<string>(name);
+    const parsed = raw == null ? fallback : Number.parseInt(raw, 10);
+    if (!Number.isFinite(parsed) || parsed < 0) return fallback;
+    return Math.min(parsed, maximum);
   }
 
-  private async fetchRoadmapSkillProgress(
-    username: string,
-    skill: string,
-    fallbackLevel: number,
-  ): Promise<RoadmapSkillProgress> {
-    const fallbackExperience = this.getExperienceForLevel(fallbackLevel);
+  private getMethodsListCacheTtlSeconds(): number {
+    return this.getPositiveIntegerConfig('METHODS_LIST_CACHE_TTL_SECONDS', 15, 60);
+  }
 
+  private getMethodsSafety24hCacheTtlSeconds(): number {
+    return this.getPositiveIntegerConfig('METHODS_SAFETY_24H_CACHE_TTL_SECONDS', 60, 300);
+  }
+
+  private makeCacheKey(prefix: string, value: unknown): string {
+    const serialized = JSON.stringify(value);
+    const digest = createHash('sha256').update(serialized).digest('hex');
+    return `${prefix}:${digest}`;
+  }
+
+  private async getCachedJson<T>(key: string): Promise<T | null> {
     try {
-      const progress = await this.runescapeApi.fetchSkillProgress(username, skill);
-      if (!progress) {
-        return {
-          level: fallbackLevel,
-          experience: fallbackExperience,
-          usesExactExperience: false,
-        };
-      }
-
-      const effectiveLevel = Math.max(
-        1,
-        Math.min(
-          ROADMAP_TARGET_LEVEL,
-          Math.max(progress.level, this.getLevelForExperience(progress.experience)),
-        ),
-      );
-      const minimumExperience = this.getExperienceForLevel(effectiveLevel);
-
-      return {
-        level: effectiveLevel,
-        experience: Math.max(progress.experience, minimumExperience),
-        usesExactExperience: true,
-      };
+      const raw = await this.redis.call('GET', key);
+      const parsed = this.parseJsonValue(raw);
+      return parsed === null ? null : (parsed as T);
     } catch {
-      return {
-        level: fallbackLevel,
-        experience: fallbackExperience,
-        usesExactExperience: false,
-      };
+      return null;
     }
+  }
+
+  private async setCachedJson(key: string, value: unknown, ttlSeconds: number): Promise<void> {
+    if (ttlSeconds <= 0) return;
+
+    try {
+      await this.redis.call('SET', key, JSON.stringify(value), 'EX', ttlSeconds);
+    } catch {
+      // A cache failure must never make the methods listing unavailable.
+    }
+  }
+
+  private isProfitListResult(value: unknown): value is { data: any[]; total: number } {
+    if (!value || typeof value !== 'object' || Array.isArray(value)) return false;
+    const candidate = value as { data?: unknown; total?: unknown };
+    return (
+      Array.isArray(candidate.data) &&
+      typeof candidate.total === 'number' &&
+      Number.isInteger(candidate.total) &&
+      candidate.total >= 0
+    );
   }
 
   private buildListFilters(query: ListQuery): ListFilters {
@@ -585,6 +615,7 @@ export class MethodsService implements OnModuleDestroy {
       members: showOnlyFreeToPlayFilter === true ? false : membersFilter,
       ignoredTags: this.parseIgnoredTagsQueryParam(ignoredTags),
       enabled: enabledParsed ?? true,
+      isOfficial: this.parseBooleanQueryParam(query.is_official, 'is_official'),
     };
   }
 
@@ -840,6 +871,11 @@ export class MethodsService implements OnModuleDestroy {
       throw new UnauthorizedException('Authenticated token does not include user id');
     }
 
+    const deletedUserMarker = await this.redis.get(buildDeletedUserAuthKey(subject));
+    if (deletedUserMarker !== null) {
+      throw new UnauthorizedException('User account has been deleted');
+    }
+
     return subject;
   }
 
@@ -890,6 +926,26 @@ export class MethodsService implements OnModuleDestroy {
       throw createAccountUsernameRequiredException();
     }
 
+    return user;
+  }
+
+  private async assertAcceptedTerms(userId: string): Promise<void> {
+    if (!this.authService) {
+      throw new ServiceUnavailableException('Terms acceptance service is unavailable');
+    }
+
+    const termsStatus = await this.authService.getCurrentTermsStatusForUser(userId);
+    if (!termsStatus.accepted) {
+      throw createTermsAcceptanceRequiredException(termsStatus.currentVersion);
+    }
+  }
+
+  private async assertCompletedAccountProfileAndAcceptedTerms(
+    userId: string,
+    email?: string | null,
+  ): Promise<User> {
+    const user = await this.assertCompletedAccountProfile(userId, email);
+    await this.assertAcceptedTerms(user.id);
     return user;
   }
 
@@ -994,22 +1050,6 @@ export class MethodsService implements OnModuleDestroy {
     }
   }
 
-  private async assertCompletedProfileForUsernameQuery(
-    username?: string,
-    authorization?: string,
-    authenticatedUserId?: string | null,
-  ): Promise<void> {
-    const normalizedUsername = this.normalizeOptionalQueryString(
-      username,
-      'username',
-      USERNAME_MAX_LENGTH,
-    );
-    if (!normalizedUsername) return;
-
-    const userId = authenticatedUserId ?? (await this.verifySupabaseToken(authorization));
-    await this.assertCompletedAccountProfile(userId);
-  }
-
   private async assertCompletedProfileForLikedByMeFilter(
     likedByMeFilter: boolean | undefined,
     authenticatedUserId?: string | null,
@@ -1026,6 +1066,21 @@ export class MethodsService implements OnModuleDestroy {
     await this.assertCompletedAccountProfile(
       authenticatedUserId ?? (await this.verifySupabaseToken(authorization)),
     );
+  }
+
+  private async assertCanUseUnofficialMethodsFilter(
+    isOfficialFilter: boolean | undefined,
+    authenticatedUserId?: string | null,
+  ): Promise<void> {
+    if (isOfficialFilter !== false) {
+      return;
+    }
+
+    if (!authenticatedUserId) {
+      throw new UnauthorizedException('The is_official=false filter requires authentication');
+    }
+
+    await this.assertCompletedAccountProfileAndAcceptedTerms(authenticatedUserId);
   }
 
   private normalizeOptionalQueryString(
@@ -1194,13 +1249,9 @@ export class MethodsService implements OnModuleDestroy {
   }
 
   async listWithProfitResponse(query: ListQuery) {
-    const username = this.normalizeOptionalQueryString(
-      query.username,
-      'username',
-      USERNAME_MAX_LENGTH,
-    );
     const p = this.parsePositiveIntegerQueryParam(query.page, 'page', 100);
     const pp = this.parsePositiveIntegerQueryParam(query.perPage, 'perPage', 100);
+    const totalStartedAt = performance.now();
     const variantsMode = this.parseVariantsQueryParam(query.variants);
     const likedByMeFilter = this.parseBooleanQueryParam(query.likedByMe, 'likedByMe');
     const authenticatedUserId = await this.resolveAuthenticatedUserId(query.authorization);
@@ -1210,30 +1261,58 @@ export class MethodsService implements OnModuleDestroy {
       authenticatedUserId,
       query.authorization,
     );
-    await this.assertCompletedProfileForUsernameQuery(
-      username,
-      query.authorization,
-      authenticatedUserId,
-    );
-    const { userInfo, warnings } = await this.fetchUserInfo(username);
     const filters = this.buildListFilters(query);
+    filters.isOfficial ??= true;
+    await this.assertCanUseUnofficialMethodsFilter(filters.isOfficial, authenticatedUserId);
+    const userInfo = query.player;
     if (filters.enabled === false) {
       await this.assertSuperAdminForDisabledMethods(query.authorization);
     }
     const sortOptions = this.buildSortOptions(query);
-
-    const result = await this.findAllWithProfit(
-      p,
-      pp,
-      userInfo ?? undefined,
-      filters,
-      sortOptions,
-      {
-        likedByUserId: authenticatedUserId ?? undefined,
-        onlyLikedByMe: likedByMeFilter === true,
+    const likeOptions = {
+      likedByUserId: authenticatedUserId ?? undefined,
+      onlyLikedByMe: likedByMeFilter === true,
+    };
+    const cacheTtlSeconds = this.getMethodsListCacheTtlSeconds();
+    const cacheKey = this.makeCacheKey(this.methodsListCachePrefix, {
+      page: p,
+      perPage: pp,
+      userInfo: userInfo ?? null,
+      filters: {
+        ...filters,
+        // JSON.stringify serializes every Set as {}, which would otherwise make
+        // different ignored-tag selections share a cache entry.
+        ignoredTags: filters.ignoredTags ? [...filters.ignoredTags].sort() : undefined,
       },
+      sortOptions,
+      likeOptions,
       variantsMode,
-    );
+    });
+    const perfLogsEnabled = this.isMethodsListPerfLogEnabled();
+    const scope = `listWithProfit page=${p} perPage=${pp}`;
+    let result =
+      cacheTtlSeconds > 0
+        ? await this.timeMethodsListStep(perfLogsEnabled, scope, 'cacheRead', () =>
+            this.getCachedJson<{ data: any[]; total: number }>(cacheKey),
+          )
+        : null;
+
+    if (!this.isProfitListResult(result)) {
+      result = await this.findAllWithProfit(
+        p,
+        pp,
+        userInfo ?? undefined,
+        filters,
+        sortOptions,
+        likeOptions,
+        variantsMode,
+      );
+      await this.timeMethodsListStep(perfLogsEnabled, scope, 'cacheWrite', () =>
+        this.setCachedJson(cacheKey, result, cacheTtlSeconds),
+      );
+    } else if (perfLogsEnabled) {
+      this.logger.log(`[perf] ${scope} cacheHit`);
+    }
 
     const hasNext = p * pp < result.total;
 
@@ -1243,13 +1322,17 @@ export class MethodsService implements OnModuleDestroy {
       pageSize: pp,
       perPage: pp, // Backward-compatible alias for existing clients.
       hasNext,
-      ...(username ? { username } : {}),
     };
 
+    if (perfLogsEnabled) {
+      const totalElapsedMs = performance.now() - totalStartedAt;
+      this.logger.log(`[perf] ${scope} total ${totalElapsedMs.toFixed(1)}ms`);
+    }
+
     return {
-      status: warnings.length ? 'partial' : 'ok',
+      status: 'ok',
       data: { methods: result.data, user: userInfo },
-      warnings,
+      warnings: [],
       meta,
     };
   }
@@ -1263,11 +1346,6 @@ export class MethodsService implements OnModuleDestroy {
   }
 
   async listTrendingProfitResponse(query: TrendingProfitQuery) {
-    const username = this.normalizeOptionalQueryString(
-      query.username,
-      'username',
-      USERNAME_MAX_LENGTH,
-    );
     const p = this.parsePositiveIntegerQueryParam(query.page, 'page', 100);
     const pp = this.parsePositiveIntegerQueryParam(query.perPage, 'perPage', 100);
     const variantsMode = this.parseVariantsQueryParam(query.variants);
@@ -1279,13 +1357,10 @@ export class MethodsService implements OnModuleDestroy {
       authenticatedUserId,
       query.authorization,
     );
-    await this.assertCompletedProfileForUsernameQuery(
-      username,
-      query.authorization,
-      authenticatedUserId,
-    );
-    const { userInfo, warnings } = await this.fetchUserInfo(username);
+    const userInfo = query.player;
     const filters = this.buildListFilters(query);
+    filters.isOfficial ??= true;
+    await this.assertCanUseUnofficialMethodsFilter(filters.isOfficial, authenticatedUserId);
     if (filters.enabled === false) {
       await this.assertSuperAdminForDisabledMethods(query.authorization);
     }
@@ -1313,34 +1388,23 @@ export class MethodsService implements OnModuleDestroy {
       hasNext,
       window: trendingOptions.window,
       mode: trendingOptions.mode,
-      ...(username ? { username } : {}),
     };
 
     return {
-      status: warnings.length ? 'partial' : 'ok',
+      status: 'ok',
       data: { methods: result.data, user: userInfo },
-      warnings,
+      warnings: [],
       meta,
     };
   }
 
   async skillsSummaryWithProfitResponse(
-    username?: string,
+    player?: UserInfo,
     authorization?: string,
     enabledParam?: string | boolean,
   ) {
-    const normalizedUsername = this.normalizeOptionalQueryString(
-      username,
-      'username',
-      USERNAME_MAX_LENGTH,
-    );
     const authenticatedUserId = await this.resolveAuthenticatedUserId(authorization);
-    await this.assertCompletedProfileForUsernameQuery(
-      normalizedUsername,
-      authorization,
-      authenticatedUserId,
-    );
-    const { userInfo } = await this.fetchUserInfo(normalizedUsername);
+    const userInfo = player;
     if (enabledParam != null) {
       await this.assertSuperAdminForEnabledQueryParam(authorization);
     }
@@ -1409,20 +1473,15 @@ export class MethodsService implements OnModuleDestroy {
     return {
       data,
       meta: {
-        ...(username ? { username } : {}),
         computedAt: Math.floor(Date.now() / 1000),
       },
     };
   }
 
   async skillRoadmapResponse(query: RoadmapQuery) {
-    const username = this.normalizeOptionalQueryString(
-      query.username,
-      'username',
-      USERNAME_MAX_LENGTH,
-    );
-    if (!username) {
-      throw new BadRequestException('username is required');
+    const userInfo = query.player;
+    if (!userInfo) {
+      throw new BadRequestException('player is required');
     }
 
     const skill = this.parseRequiredSkillQueryParam(query.skill);
@@ -1431,11 +1490,6 @@ export class MethodsService implements OnModuleDestroy {
     const authenticatedUserId =
       query.authenticatedUserId ?? (await this.resolveAuthenticatedUserId(query.authorization));
 
-    await this.assertCompletedProfileForUsernameQuery(
-      username,
-      query.authorization,
-      authenticatedUserId,
-    );
     if (query.enabled != null) {
       await this.assertSuperAdminForEnabledQueryParam(query.authorization, authenticatedUserId);
     }
@@ -1445,12 +1499,21 @@ export class MethodsService implements OnModuleDestroy {
       this.parseBooleanQueryParam(query.show_only_free_to_play, 'show_only_free_to_play') ?? false;
     const ignoredTags = new Set(this.parseIgnoredTagsQueryParam(query.ignoredTags) ?? []);
 
-    const userInfo = await this.fetchRequiredRoadmapUserInfo(username);
-    const fallbackLevel = Math.max(
+    const currentLevel = Math.max(
       1,
       Math.min(ROADMAP_TARGET_LEVEL, this.normalizeUserLevels(userInfo.levels)[skill] ?? 1),
     );
-    const skillProgress = await this.fetchRoadmapSkillProgress(username, skill, fallbackLevel);
+    const exactExperience = this.normalizeUserLevels(userInfo.experience)[skill];
+    const minimumExperienceForCurrentLevel = this.getExperienceForLevel(currentLevel);
+    const skillProgress: RoadmapSkillProgress = {
+      level: currentLevel,
+      experience:
+        Number.isFinite(exactExperience) && exactExperience >= minimumExperienceForCurrentLevel
+          ? exactExperience
+          : minimumExperienceForCurrentLevel,
+      usesExactExperience:
+        Number.isFinite(exactExperience) && exactExperience >= minimumExperienceForCurrentLevel,
+    };
     if (targetLevel < skillProgress.level) {
       throw new BadRequestException(
         `target_level must be greater than or equal to the player's current ${skill} level (${skillProgress.level})`,
@@ -1486,7 +1549,6 @@ export class MethodsService implements OnModuleDestroy {
       },
       warnings: roadmap.warnings,
       meta: {
-        username,
         skill,
         strategy,
         target_level: targetLevel,
@@ -1590,6 +1652,7 @@ export class MethodsService implements OnModuleDestroy {
             id: variant.id,
             slug: variant.slug,
             icon_id: variant.icon_id,
+            iconSource: variant.iconSource,
             xpHour: variant.xpHour,
             label: variant.label,
             description: variant.description,
@@ -1696,6 +1759,7 @@ export class MethodsService implements OnModuleDestroy {
               name: method.name,
               slug: method.slug,
               icon_id: method.icon_id,
+              iconSource: method.iconSource,
               category: method.category,
               enabled: method.enabled,
             },
@@ -1703,6 +1767,7 @@ export class MethodsService implements OnModuleDestroy {
               id: variant.id,
               slug: variant.slug,
               icon_id: variant.icon_id,
+              iconSource: variant.iconSource,
               label: variant.label,
               description: variant.description,
               xpPerHour,
@@ -1730,6 +1795,7 @@ export class MethodsService implements OnModuleDestroy {
       id: variant.id,
       slug: variant.slug,
       icon_id: variant.icon_id,
+      iconSource: variant.iconSource,
       label: variant.label,
       description: variant.description,
       xpPerHour: variant.xpPerHour,
@@ -1977,15 +2043,10 @@ export class MethodsService implements OnModuleDestroy {
     };
   }
 
-  async methodDetailsWithProfitResponse(id: string, username?: string, authorization?: string) {
+  async methodDetailsWithProfitResponse(id: string, player?: UserInfo, authorization?: string) {
     const perfLogsEnabled = this.isMethodDetailsPerfLogEnabled();
     const scope = `methodDetails id=${id}`;
     const totalStartedAt = performance.now();
-    const normalizedUsername = this.normalizeOptionalQueryString(
-      username,
-      'username',
-      USERNAME_MAX_LENGTH,
-    );
 
     const authenticatedUserId = await this.timeMethodDetailsStep(
       perfLogsEnabled,
@@ -1996,23 +2057,7 @@ export class MethodsService implements OnModuleDestroy {
     await this.timeMethodDetailsStep(perfLogsEnabled, scope, 'assertCanAccessMethodDetails', () =>
       this.assertCanAccessMethodDetails(id, authorization, authenticatedUserId),
     );
-    await this.timeMethodDetailsStep(
-      perfLogsEnabled,
-      scope,
-      'assertCompletedProfileForUsernameQuery',
-      () =>
-        this.assertCompletedProfileForUsernameQuery(
-          normalizedUsername,
-          authorization,
-          authenticatedUserId,
-        ),
-    );
-    const { userInfo, warnings } = await this.timeMethodDetailsStep(
-      perfLogsEnabled,
-      scope,
-      'fetchUserInfo',
-      () => this.fetchUserInfo(normalizedUsername),
-    );
+    const userInfo = player;
     const method = await this.timeMethodDetailsStep(
       perfLogsEnabled,
       scope,
@@ -2032,18 +2077,16 @@ export class MethodsService implements OnModuleDestroy {
     }
 
     return {
-      status: warnings.length ? 'partial' : 'ok',
+      status: 'ok',
       data: { method, user: userInfo },
-      warnings,
-      meta: {
-        ...(normalizedUsername ? { username: normalizedUsername } : {}),
-      },
+      warnings: [],
+      meta: {},
     };
   }
 
   async methodDetailsWithProfitResponseBySlug(
     slug: string,
-    username?: string,
+    player?: UserInfo,
     authorization?: string,
   ) {
     const perfLogsEnabled = this.isMethodDetailsPerfLogEnabled();
@@ -2060,7 +2103,7 @@ export class MethodsService implements OnModuleDestroy {
       perfLogsEnabled,
       scope,
       'methodDetailsWithProfitResponse',
-      () => this.methodDetailsWithProfitResponse(method.id, username, authorization),
+      () => this.methodDetailsWithProfitResponse(method.id, player, authorization),
     );
 
     if (perfLogsEnabled) {
@@ -2126,62 +2169,84 @@ export class MethodsService implements OnModuleDestroy {
     return slug;
   }
 
-  private async assertIconItemIdsExist(iconIds: number[]): Promise<void> {
-    const uniqueIconIds = [...new Set(iconIds.filter((iconId) => Number.isInteger(iconId)))];
-    if (uniqueIconIds.length === 0) return;
-    if (!this.itemRepo) {
-      throw new Error('Item repository is not configured');
+  private async getMethodCreatorOrThrow(userId: string): Promise<User> {
+    const user = await this.userRepo.findOne({ where: { id: userId } });
+    if (!user) {
+      throw new UnauthorizedException('Authenticated user account was not found');
     }
 
-    const existingItems = await this.itemRepo.find({
-      select: { id: true },
-      where: { id: In(uniqueIconIds) },
-    });
-    const existingIds = new Set(existingItems.map((item) => item.id));
-    const missingIds = uniqueIconIds.filter((iconId) => !existingIds.has(iconId));
-
-    if (missingIds.length > 0) {
-      throw new BadRequestException(
-        `icon_id must reference an existing item. Missing ids: ${missingIds.join(', ')}`,
-      );
-    }
+    return user;
   }
 
-  private async validateCreateIconIds(createDto: CreateMethodDto): Promise<void> {
-    const methodIconId = createDto.icon_id;
-    const variantIconIds = createDto.variants.map((variant, index) => {
-      if (variant.icon_id == null) {
-        throw new BadRequestException(`variants[${index}].icon_id is required`);
+  private iconReferenceOrThrow(
+    iconId: number | null | undefined,
+    iconSource: IconSource | null | undefined,
+    fieldPath: string,
+    required = false,
+  ): IconReference | null {
+    if (iconId == null && iconSource == null) {
+      if (required) {
+        throw new BadRequestException(
+          `${fieldPath}.icon_id and ${fieldPath}.iconSource are required`,
+        );
       }
-      return variant.icon_id;
-    });
-
-    await this.assertIconItemIdsExist([methodIconId, ...variantIconIds]);
-  }
-
-  private async validateUpdateIconIds(method: Method, updateDto: UpdateMethodDto): Promise<void> {
-    const iconIds: number[] = [];
-    if (updateDto.icon_id != null) {
-      iconIds.push(updateDto.icon_id);
+      return null;
+    }
+    if (iconId == null) {
+      throw new BadRequestException(`${fieldPath}.icon_id is required when iconSource is provided`);
+    }
+    if (iconSource == null) {
+      throw new BadRequestException(`${fieldPath}.iconSource is required when icon_id is provided`);
     }
 
+    return { iconId, iconSource };
+  }
+
+  private async assertIconReferencesExist(references: Array<IconReference | null>): Promise<void> {
+    if (!this.iconResolver) {
+      throw new Error('Icon resolver is not configured');
+    }
+    await this.iconResolver.assertReferencesExist(
+      references.filter((reference): reference is IconReference => reference != null),
+    );
+  }
+
+  private async validateCreateIconReferences(createDto: CreateMethodDto): Promise<void> {
+    const references = [
+      this.iconReferenceOrThrow(createDto.icon_id, createDto.iconSource, 'method', true),
+      ...createDto.variants.map((variant, index) =>
+        this.iconReferenceOrThrow(variant.icon_id, variant.iconSource, `variants[${index}]`, true),
+      ),
+    ];
+    await this.assertIconReferencesExist(references);
+  }
+
+  private async validateUpdateIconReferences(
+    method: Method,
+    updateDto: UpdateMethodDto,
+  ): Promise<void> {
+    const references: Array<IconReference | null> = [
+      this.iconReferenceOrThrow(updateDto.icon_id, updateDto.iconSource, 'method'),
+    ];
     const existingVariants = new Map(method.variants.map((variant) => [variant.id, variant]));
     for (const [index, variant] of (updateDto.variants ?? []).entries()) {
       const isExistingVariant = variant.id != null && existingVariants.has(variant.id);
-      if (!isExistingVariant && variant.icon_id == null) {
-        throw new BadRequestException(`variants[${index}].icon_id is required for new variants`);
-      }
-      if (variant.icon_id != null) {
-        iconIds.push(variant.icon_id);
-      }
+      references.push(
+        this.iconReferenceOrThrow(
+          variant.icon_id,
+          variant.iconSource,
+          `variants[${index}]`,
+          !isExistingVariant,
+        ),
+      );
     }
-
-    await this.assertIconItemIdsExist(iconIds);
+    await this.assertIconReferencesExist(references);
   }
 
-  private async validateVariantIconId(updateDto: UpdateVariantDto): Promise<void> {
-    if (updateDto.icon_id == null) return;
-    await this.assertIconItemIdsExist([updateDto.icon_id]);
+  private async validateVariantIconReference(updateDto: UpdateVariantDto): Promise<void> {
+    await this.assertIconReferencesExist([
+      this.iconReferenceOrThrow(updateDto.icon_id, updateDto.iconSource, 'variant'),
+    ]);
   }
 
   private normalizeVariantTitle(title?: string | null): string {
@@ -2300,17 +2365,21 @@ export class MethodsService implements OnModuleDestroy {
     );
   }
 
-  async create(createDto: CreateMethodDto): Promise<MethodDto> {
-    await this.validateCreateIconIds(createDto);
+  async create(createDto: CreateMethodDto, authenticatedUserId: string): Promise<MethodDto> {
+    await this.validateCreateIconReferences(createDto);
     await this.validateCreateVariantMembership(createDto);
 
-    const { name, description, category, enabled, variants, icon_id } = createDto;
+    const creator = await this.getMethodCreatorOrThrow(authenticatedUserId);
+    const { name, description, category, enabled, variants, icon_id, iconSource } = createDto;
     const method = this.methodRepo.create({
       name,
       description,
       category,
       enabled,
       iconId: icon_id,
+      iconSource,
+      createdBy: creator.id,
+      isOfficial: creator.role === 'super_admin',
     });
     method.slug = await this.generateMethodSlug(name);
     await this.methodRepo.save(method);
@@ -2326,6 +2395,7 @@ export class MethodsService implements OnModuleDestroy {
         afkiness: v.afkiness,
         riskLevel: v.riskLevel,
         iconId: v.icon_id,
+        iconSource: v.iconSource,
         description: v.description ?? null,
         wilderness: v.wilderness ?? false,
         members: v.members ?? false,
@@ -2388,10 +2458,10 @@ export class MethodsService implements OnModuleDestroy {
       throw new NotFoundException(`Method ${id} not found`);
     }
 
-    await this.validateUpdateIconIds(method, updateDto);
+    await this.validateUpdateIconReferences(method, updateDto);
     await this.validateUpdateMethodVariantMembership(method, updateDto);
 
-    const { variants = [], name, description, category, enabled, icon_id } = updateDto;
+    const { variants = [], name, description, category, enabled, icon_id, iconSource } = updateDto;
 
     if (name !== undefined) {
       method.name = name;
@@ -2399,7 +2469,10 @@ export class MethodsService implements OnModuleDestroy {
     }
     if (description !== undefined) method.description = description;
     if (category !== undefined) method.category = category;
-    if (icon_id !== undefined) method.iconId = icon_id;
+    if (icon_id !== undefined) {
+      method.iconId = icon_id;
+      method.iconSource = iconSource!;
+    }
     if (enabled !== undefined) method.enabled = enabled;
 
     const existingVariants = new Map(method.variants.map((v) => [v.id, v]));
@@ -2415,11 +2488,13 @@ export class MethodsService implements OnModuleDestroy {
           snapshotDescription: _snapshotDescription,
           snapshotDate: _snapshotDate,
           icon_id: variantIconId,
+          iconSource: variantIconSource,
           ...rest
         } = v;
         Object.assign(variant, rest);
         if (variantIconId !== undefined) {
           variant.iconId = variantIconId;
+          variant.iconSource = variantIconSource!;
         }
 
         if (v.label) {
@@ -2461,12 +2536,14 @@ export class MethodsService implements OnModuleDestroy {
           snapshotDescription: _snapshotDescription,
           snapshotDate: _snapshotDate,
           icon_id: variantIconId,
+          iconSource: variantIconSource,
           ...rest
         } = v;
         const variant = this.variantRepo.create({
           method,
           label,
           iconId: variantIconId,
+          iconSource: variantIconSource!,
           ...rest,
         });
         variant.slug = await this.generateVariantSlug(method.id, label);
@@ -2547,7 +2624,7 @@ export class MethodsService implements OnModuleDestroy {
     });
     if (!variant) throw new NotFoundException(`Variant ${id} not found`);
 
-    await this.validateVariantIconId(dto);
+    await this.validateVariantIconReference(dto);
     await this.validateUpdateVariantMembership(variant, dto);
 
     const {
@@ -2557,11 +2634,13 @@ export class MethodsService implements OnModuleDestroy {
       snapshotDescription,
       snapshotDate,
       icon_id,
+      iconSource,
       ...rest
     } = dto;
     Object.assign(variant, rest);
     if (icon_id !== undefined) {
       variant.iconId = icon_id;
+      variant.iconSource = iconSource!;
     }
 
     if (dto.label) {
@@ -2820,8 +2899,23 @@ export class MethodsService implements OnModuleDestroy {
       return {};
     }
 
-    const placeholders = variantIds.map((_, index) => `$${index + 1}`).join(', ');
-    const sinceParam = variantIds.length + 1;
+    const cacheTtlSeconds = this.getMethodsSafety24hCacheTtlSeconds();
+    const normalizedVariantIds = [...new Set(variantIds)].sort();
+    const cacheKey = this.makeCacheKey(this.methodsSafety24hCachePrefix, {
+      // The result is valid for a rolling 24-hour range. Bucket the key to preserve
+      // that semantics while still sharing the aggregate between nearby requests.
+      minute: Math.floor(since.getTime() / 60_000),
+      variantIds: normalizedVariantIds,
+    });
+    if (cacheTtlSeconds > 0) {
+      const cached = await this.getCachedJson<Record<string, VariantSafety24hStats>>(cacheKey);
+      if (cached && typeof cached === 'object' && !Array.isArray(cached)) {
+        return cached;
+      }
+    }
+
+    const placeholders = normalizedVariantIds.map((_, index) => `$${index + 1}`).join(', ');
+    const sinceParam = normalizedVariantIds.length + 1;
     const rawRows = (await this.historyRepo.query(
       `
         SELECT
@@ -2834,11 +2928,11 @@ export class MethodsService implements OnModuleDestroy {
           AND "timestamp" >= $${sinceParam}
         GROUP BY variant_id
       `,
-      [...variantIds, since.toISOString()],
+      [...normalizedVariantIds, since.toISOString()],
     )) as unknown;
 
     const rows = Array.isArray(rawRows) ? (rawRows as VariantSafety24hRow[]) : [];
-    return rows.reduce<Record<string, VariantSafety24hStats>>((acc, row) => {
+    const stats = rows.reduce<Record<string, VariantSafety24hStats>>((acc, row) => {
       if (typeof row.variantId !== 'string' || row.variantId.length === 0) {
         return acc;
       }
@@ -2861,6 +2955,8 @@ export class MethodsService implements OnModuleDestroy {
       };
       return acc;
     }, {});
+    await this.setCachedJson(cacheKey, stats, cacheTtlSeconds);
+    return stats;
   }
 
   private collectItemIdsFromVariants(
@@ -3175,7 +3271,10 @@ export class MethodsService implements OnModuleDestroy {
     variantsMode: VariantsMode = 'best',
   ): Promise<{ data: any[]; total: number }> {
     const allEntities = await this.methodRepo.find({
-      where: { enabled: filters.enabled },
+      where: {
+        enabled: filters.enabled,
+        ...(filters.isOfficial != null ? { isOfficial: filters.isOfficial } : {}),
+      },
       relations: ['variants', 'variants.ioItems'],
     });
     const variantCounts = allEntities.reduce<Record<string, number>>((acc, method) => {
@@ -3236,6 +3335,8 @@ export class MethodsService implements OnModuleDestroy {
             id,
             slug,
             icon_id,
+            iconSource,
+            actionType,
             clickIntensity,
             afkiness,
             riskLevel,
@@ -3250,6 +3351,8 @@ export class MethodsService implements OnModuleDestroy {
             id,
             slug,
             icon_id,
+            iconSource,
+            actionType,
             xpHour,
             label,
             description,
@@ -3379,11 +3482,23 @@ export class MethodsService implements OnModuleDestroy {
     likeOptions: ListLikeOptions = {},
     variantsMode: VariantsMode = 'best',
   ): Promise<{ data: any[]; total: number }> {
+    const perfLogsEnabled = this.isMethodsListPerfLogEnabled();
+    const scope = `findAllWithProfit page=${page} perPage=${perPage}`;
+    const totalStartedAt = performance.now();
     // Load every method first so sorting can happen after profit enrichment.
-    const allEntities = await this.methodRepo.find({
-      where: { enabled: filters.enabled },
-      relations: ['variants', 'variants.ioItems'],
-    });
+    const allEntities = await this.timeMethodsListStep(
+      perfLogsEnabled,
+      scope,
+      'loadMethodsAndVariants',
+      () =>
+        this.methodRepo.find({
+          where: {
+            enabled: filters.enabled,
+            ...(filters.isOfficial != null ? { isOfficial: filters.isOfficial } : {}),
+          },
+          relations: ['variants', 'variants.ioItems'],
+        }),
+    );
     const variantCounts = allEntities.reduce<Record<string, number>>((acc, method) => {
       acc[method.id] = method.variants.length;
       return acc;
@@ -3402,12 +3517,33 @@ export class MethodsService implements OnModuleDestroy {
     );
     const [allProfits, pricesByItem, volumes24hByItem, itemMetadataById, safety24hByVariantId] =
       await Promise.all([
-        this.getAllMethodsProfits(),
-        this.getItemPrices(itemIds),
-        this.getItemVolumes24h(itemIds),
-        this.getItemMetadata(itemIds),
-        this.getVariantSafety24hStats(variantIds, new Date(Date.now() - 24 * 60 * 60 * 1000)),
+        this.timeMethodsListStep(perfLogsEnabled, scope, 'loadProfits', () =>
+          this.getAllMethodsProfits(),
+        ),
+        this.timeMethodsListStep(perfLogsEnabled, scope, `loadPrices items=${itemIds.length}`, () =>
+          this.getItemPrices(itemIds),
+        ),
+        this.timeMethodsListStep(
+          perfLogsEnabled,
+          scope,
+          `loadVolumes items=${itemIds.length}`,
+          () => this.getItemVolumes24h(itemIds),
+        ),
+        this.timeMethodsListStep(
+          perfLogsEnabled,
+          scope,
+          `loadItemMetadata items=${itemIds.length}`,
+          () => this.getItemMetadata(itemIds),
+        ),
+        this.timeMethodsListStep(
+          perfLogsEnabled,
+          scope,
+          `loadSafety24h variants=${variantIds.length}`,
+          () =>
+            this.getVariantSafety24hStats(variantIds, new Date(Date.now() - 24 * 60 * 60 * 1000)),
+        ),
       ]);
+    const enrichStartedAt = performance.now();
     const selectedSkill = filters.skill?.trim().toLowerCase() || undefined;
 
     let enrichedMethods = methodsToProcess
@@ -3425,6 +3561,8 @@ export class MethodsService implements OnModuleDestroy {
             id,
             slug,
             icon_id,
+            iconSource,
+            actionType,
             clickIntensity,
             afkiness,
             riskLevel,
@@ -3439,6 +3577,8 @@ export class MethodsService implements OnModuleDestroy {
             id,
             slug,
             icon_id,
+            iconSource,
+            actionType,
             xpHour,
             label,
             description,
@@ -3620,6 +3760,13 @@ export class MethodsService implements OnModuleDestroy {
     const start = (page - 1) * perPage;
     const paginated = enrichedMethods.slice(start, start + perPage);
 
+    if (perfLogsEnabled) {
+      const enrichElapsedMs = performance.now() - enrichStartedAt;
+      const totalElapsedMs = performance.now() - totalStartedAt;
+      this.logger.log(`[perf] ${scope} enrichFilterSort ${enrichElapsedMs.toFixed(1)}ms`);
+      this.logger.log(`[perf] ${scope} total ${totalElapsedMs.toFixed(1)}ms`);
+    }
+
     return { data: paginated, total };
   }
 
@@ -3676,9 +3823,17 @@ export class MethodsService implements OnModuleDestroy {
     const perfLogsEnabled = this.isMethodDetailsPerfLogEnabled();
     const scope = `findMethodDetailsWithProfit id=${id}`;
     const totalStartedAt = performance.now();
-    const methodDto = await this.timeMethodDetailsStep(perfLogsEnabled, scope, 'findOne', () =>
-      this.findOne(id),
+    const methodEntity = await this.timeMethodDetailsStep(perfLogsEnabled, scope, 'findOne', () =>
+      this.methodRepo.findOne({
+        where: { id },
+        relations: ['variants', 'variants.ioItems', 'createdByUser'],
+      }),
     );
+    if (!methodEntity) {
+      throw new NotFoundException(`Method ${id} not found`);
+    }
+
+    const methodDto = this.toDto(methodEntity);
     const itemIds = this.collectItemIdsFromVariants(methodDto.variants);
     const variantIds = methodDto.variants.map((variant) => variant.id);
     const [allProfits, pricesByItem, volumes24hByItem, itemMetadataById, safety24hByVariantId] =
@@ -3801,9 +3956,19 @@ export class MethodsService implements OnModuleDestroy {
       name: methodDto.name,
       slug: methodDto.slug,
       icon_id: methodDto.icon_id,
+      iconSource: methodDto.iconSource,
       description: methodDto.description,
       category: methodDto.category,
       enabled: methodDto.enabled,
+      is_official: methodDto.is_official,
+      created_by: methodEntity.createdBy
+        ? {
+            id: methodEntity.createdBy,
+            username: methodEntity.createdByUser?.accountUsername ?? null,
+          }
+        : null,
+      created_at: methodEntity.createdAt,
+      updated_at: methodEntity.updatedAt,
       variants: enrichedVariants,
     };
   }

@@ -1,10 +1,12 @@
 import { VariantRequirements, VariantRecommendations, XpHour } from '../types';
 import { ActionType } from '../action-type.enum';
+import { IconSource } from '../../icons/icon-source.enum';
 
 export interface VariantDto {
   id: string;
   slug: string;
   icon_id?: number | null;
+  iconSource: IconSource;
   inputs: { id: number; quantity: number; reason?: string | null }[];
   outputs: { id: number; quantity: number; reason?: string | null }[];
   actionsPerHour?: number;
@@ -28,9 +30,11 @@ export class MethodDto {
   name: string;
   slug: string;
   icon_id?: number | null;
+  iconSource: IconSource;
   description?: string;
   category?: string;
   enabled: boolean;
+  is_official: boolean;
   variants: VariantDto[];
 
   constructor(
@@ -41,15 +45,19 @@ export class MethodDto {
     description: string,
     category: string,
     enabled: boolean,
+    is_official: boolean,
     variants: VariantDto[],
+    iconSource: IconSource = IconSource.ITEM,
   ) {
     this.id = id;
     this.name = name;
     this.slug = slug;
     this.icon_id = icon_id;
+    this.iconSource = iconSource;
     this.description = description;
     this.category = category;
     this.enabled = enabled;
+    this.is_official = is_official;
     this.variants = variants;
   }
   static fromEntity(e: {
@@ -57,13 +65,16 @@ export class MethodDto {
     name: string;
     slug: string;
     iconId?: number | null;
+    iconSource: IconSource;
     description?: string;
     category?: string;
     enabled: boolean;
+    isOfficial?: boolean | null;
     variants: Array<{
       id: string;
       slug: string;
       iconId?: number | null;
+      iconSource: IconSource;
       label: string;
       description: string | null;
       actionsPerHour: number;
@@ -105,6 +116,7 @@ export class MethodDto {
         id: variant.id,
         slug: variant.slug,
         icon_id: variant.iconId,
+        iconSource: variant.iconSource,
         label: variant.label,
         description: variant.description,
         actionsPerHour: variant.actionsPerHour,
@@ -131,7 +143,9 @@ export class MethodDto {
       e.description || '',
       e.category || '',
       e.enabled,
+      e.isOfficial ?? false,
       variants,
+      e.iconSource,
     );
   }
 }

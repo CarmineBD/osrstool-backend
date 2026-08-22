@@ -3,6 +3,7 @@ import {
   ArrayMaxSize,
   IsBoolean,
   IsEnum,
+  IsIn,
   IsInt,
   IsOptional,
   Max,
@@ -34,6 +35,7 @@ import { VariantRequirementsDto } from './variant-requirements.dto';
 import { HasMaxRequirementEntries } from './validators/requirement-entry-count.validator';
 import { SKILL_KEY_VALUES } from './skill.constants';
 import { ActionType } from '../action-type.enum';
+import { IconSource, ICON_SOURCE_VALUES } from '../../icons/icon-source.enum';
 
 const RISK_LEVEL_PATTERN = /^(100|[1-9]?\d)$/;
 
@@ -49,6 +51,10 @@ export class UpdateVariantDto {
   @IsInt()
   @Min(1)
   icon_id?: number;
+
+  @IsOptional()
+  @IsIn(ICON_SOURCE_VALUES, { message: 'iconSource must be either "item" or "game_icon"' })
+  iconSource?: IconSource;
 
   @IsInt()
   @Min(0)

@@ -16,6 +16,7 @@ import { VariantHistoryDaily } from '../../src/methods/entities/variant-history-
 import { VariantSnapshot } from '../../src/methods/entities/variant-snapshot.entity';
 import { VariantIoItemSnapshot } from '../../src/methods/entities/io-item-snapshot.entity';
 import { User } from '../../src/auth/entities/user.entity';
+import { UserTermsAcceptance } from '../../src/auth/entities/user-terms-acceptance.entity';
 import { ItemVolumeBucket } from '../../src/item-volumes/entities/item-volume-bucket.entity';
 import { CatalogsModule } from '../../src/catalogs/catalogs.module';
 import { AchievementDiary } from '../../src/catalogs/entities/achievement-diary.entity';
@@ -24,6 +25,14 @@ import { Skill } from '../../src/catalogs/entities/skill.entity';
 import { SupabaseAuthGuard } from '../../src/auth/supabase-auth.guard';
 import { SuperAdminGuard } from '../../src/auth/super-admin.guard';
 import { ItemVolumesService } from '../../src/item-volumes/item-volumes.service';
+import { TermsAcceptanceGuard } from '../../src/auth/terms-acceptance.guard';
+import { CompleteProfileGuard } from '../../src/auth/complete-profile.guard';
+import { GameIcon } from '../../src/icons/entities/game-icon.entity';
+
+const TEST_AUTH_USER = {
+  id: '11111111-1111-1111-1111-111111111111',
+  email: 'admin@example.com',
+};
 
 export interface TestApp {
   app: INestApplication;
@@ -66,6 +75,7 @@ export const createTestApp = async (): Promise<TestApp> => {
         database: 'test',
         entities: [
           Item,
+          GameIcon,
           Method,
           MethodVariant,
           VariantIoItem,
@@ -75,6 +85,7 @@ export const createTestApp = async (): Promise<TestApp> => {
           VariantSnapshot,
           VariantIoItemSnapshot,
           User,
+          UserTermsAcceptance,
           ItemVolumeBucket,
           AchievementDiary,
           Quest,
@@ -93,6 +104,16 @@ export const createTestApp = async (): Promise<TestApp> => {
     .overrideProvider(ItemVolumesService)
     .useValue(itemVolumesService)
     .overrideGuard(SupabaseAuthGuard)
+    .useValue({
+      canActivate: (context: { switchToHttp: () => { getRequest: () => { user?: unknown } } }) => {
+        const req = context.switchToHttp().getRequest();
+        req.user = TEST_AUTH_USER;
+        return true;
+      },
+    })
+    .overrideGuard(TermsAcceptanceGuard)
+    .useValue({ canActivate: () => true })
+    .overrideGuard(CompleteProfileGuard)
     .useValue({ canActivate: () => true })
     .overrideGuard(SuperAdminGuard)
     .useValue({ canActivate: () => true })

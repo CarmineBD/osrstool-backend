@@ -3,8 +3,11 @@ import {
   Controller,
   ForbiddenException,
   Get,
+  HttpCode,
+  HttpStatus,
   Post,
   Put,
+  Patch,
   Delete,
   Param,
   Body,
@@ -14,6 +17,7 @@ import {
 } from '@nestjs/common';
 import {
   ApiBearerAuth,
+  ApiBody,
   ApiForbiddenResponse,
   ApiOkResponse,
   ApiOperation,
@@ -23,10 +27,17 @@ import {
 } from '@nestjs/swagger';
 import type { Request } from 'express';
 import { MethodsService } from './methods.service';
-import { CreateMethodDto, UpdateMethodDto, UpdateMethodBasicDto, UpdateVariantDto } from './dto';
+import {
+  CreateMethodDto,
+  PlayerContextDto,
+  UpdateMethodDto,
+  UpdateMethodBasicDto,
+  UpdateVariantDto,
+} from './dto';
 import { CompleteProfileGuard } from '../auth/complete-profile.guard';
 import { SupabaseAuthGuard } from '../auth/supabase-auth.guard';
 import { SuperAdminGuard } from '../auth/super-admin.guard';
+import { TermsAcceptanceGuard } from '../auth/terms-acceptance.guard';
 import type { AuthenticatedUser } from '../auth/auth.types';
 import { VARIANT_TAG_DEFINITIONS, VARIANT_TAG_QUERY_VALUES } from './variant-tags';
 
@@ -42,14 +53,17 @@ const METHOD_EXAMPLE = {
   name: 'Cooked karambwan',
   slug: 'cooked-karambwan',
   icon_id: 3145,
+  iconSource: 'item',
   description: 'Cook karambwans for profit.',
   category: 'Cooking',
   enabled: true,
+  is_official: true,
   variants: [
     {
       id: 'v_456',
       slug: 'karambwan-basic',
       icon_id: 3145,
+      iconSource: 'item',
       members: true,
       inputs: [{ id: 3144, quantity: 1, reason: null }],
       outputs: [{ id: 3145, quantity: 1, reason: null }],
@@ -78,6 +92,16 @@ const METHOD_EXAMPLE = {
       wilderness: false,
     },
   ],
+};
+
+const METHOD_DETAIL_EXAMPLE = {
+  ...METHOD_EXAMPLE,
+  created_by: {
+    id: 'e139f001-33bf-4a11-91da-e9952d3c8574',
+    username: 'carmi',
+  },
+  created_at: '2026-08-19T10:00:00.000Z',
+  updated_at: '2026-08-19T11:00:00.000Z',
 };
 
 const METHOD_TAGS_EXAMPLE = VARIANT_TAG_DEFINITIONS.map((tag) => ({
@@ -120,6 +144,7 @@ const ROADMAP_EXAMPLE = {
             name: 'Cooked shrimp',
             slug: 'cooked-shrimp',
             icon_id: 315,
+            iconSource: 'item',
             category: 'Cooking',
             enabled: true,
           },
@@ -127,6 +152,7 @@ const ROADMAP_EXAMPLE = {
             id: 'v_456',
             slug: 'shrimp-basic',
             icon_id: 315,
+            iconSource: 'item',
             label: 'Basic',
             xpPerHour: 5000,
             afkiness: null,
@@ -141,6 +167,7 @@ const ROADMAP_EXAMPLE = {
     },
     user: {
       levels: { Cooking: 1 },
+      experience: { cooking: 0 },
       quests: {},
       achievement_diaries: {},
     },
@@ -164,22 +191,28 @@ const ROADMAP_EXAMPLE = {
 export class MethodsController {
   constructor(private readonly svc: MethodsService) {}
 
-  @Post()
-  @UseGuards(SupabaseAuthGuard, SuperAdminGuard)
+  @Post('create')
+  @UseGuards(SupabaseAuthGuard, TermsAcceptanceGuard, CompleteProfileGuard, SuperAdminGuard)
   @ApiBearerAuth()
   @ApiOperation({ summary: 'Create method', description: 'Creates a new method.' })
   @ApiOkResponse({ description: 'Method created', schema: { example: { data: METHOD_EXAMPLE } } })
   @ApiUnauthorizedResponse({ description: 'Missing, invalid, or expired bearer token' })
   @ApiForbiddenResponse({ description: 'Only super_admin can perform this action' })
-  async create(@Body() dto: CreateMethodDto) {
-    const created = await this.svc.create(dto);
+  async create(@Body() dto: CreateMethodDto, @Req() req: RequestWithUser) {
+    if (!req.user?.id) {
+      throw new ForbiddenException('Authenticated user id is required');
+    }
+
+    const created = await this.svc.create(dto, req.user.id);
     return { data: created };
   }
 
-  @Get()
+  @Post('search')
+  @HttpCode(HttpStatus.OK)
   @ApiOperation({
     summary: 'List methods with profit',
-    description: 'Returns methods with profit data and optional user context.',
+    description:
+      'Returns methods with profit data and optional player context supplied in the request body.',
   })
   @ApiQuery({
     name: 'name',
@@ -188,11 +221,7 @@ export class MethodsController {
   })
   @ApiQuery({ name: 'page', required: false, description: 'Page number (default 1)' })
   @ApiQuery({ name: 'perPage', required: false, description: 'Items per page (default 10)' })
-  @ApiQuery({
-    name: 'username',
-    required: false,
-    description: 'RuneScape username for user context',
-  })
+  @ApiBody({ type: PlayerContextDto, required: false })
   @ApiQuery({
     name: 'category',
     required: false,
@@ -219,6 +248,12 @@ export class MethodsController {
     name: 'enabled',
     required: false,
     description: 'true or false (default true)',
+  })
+  @ApiQuery({
+    name: 'is_official',
+    required: false,
+    description:
+      'true or false (default true). is_official=false requires authentication, an account username, and accepted Terms of Service.',
   })
   @ApiQuery({
     name: 'sortBy',
@@ -256,11 +291,10 @@ export class MethodsController {
       },
     },
   })
-  async findAll(
+  async search(
     @Query('name') name?: string,
     @Query('page') page = '1',
     @Query('perPage') perPage = '10',
-    @Query('username') username?: string,
     @Query('category') category?: string,
     @Query('clickIntensity') clickIntensity?: string,
     @Query('afkiness') afkiness?: string,
@@ -270,17 +304,19 @@ export class MethodsController {
     @Query('showProfitables') showProfitables?: string,
     @Query('show_only_free_to_play') showOnlyFreeToPlay?: string | boolean,
     @Query('enabled') enabled?: string | boolean,
+    @Query('is_official') isOfficial?: string | boolean,
     @Query('likedByMe') likedByMe?: string | boolean,
     @Query('variants') variants?: string,
     @Query('ignoredTags') ignoredTags?: string | string[],
     @Query('sortBy') sortBy = 'highProfit',
     @Query('order') order = 'desc',
+    @Body() context: PlayerContextDto = {},
     @Req() req?: Request,
   ) {
     return this.svc.listWithProfitResponse({
       page,
       perPage,
-      username,
+      player: context.player,
       name,
       category,
       clickIntensity,
@@ -291,6 +327,7 @@ export class MethodsController {
       showProfitables,
       show_only_free_to_play: showOnlyFreeToPlay,
       enabled,
+      is_official: isOfficial,
       likedByMe,
       variants,
       ignoredTags,
@@ -319,17 +356,14 @@ export class MethodsController {
     return this.svc.listVariantTagsResponse();
   }
 
-  @Get('skills/summary')
+  @Post('skills/summary')
+  @HttpCode(HttpStatus.OK)
   @ApiOperation({
     summary: 'Get skill summaries',
     description:
-      'Returns bestProfit, bestAfk and bestXp methods per skill. Only username and enabled query parameters are allowed. username requires a registered user and enabled requires super_admin.',
+      'Returns bestProfit, bestAfk and bestXp methods per skill. An optional player context can be sent in the request body; enabled requires super_admin.',
   })
-  @ApiQuery({
-    name: 'username',
-    required: false,
-    description: 'RuneScape username for user context',
-  })
+  @ApiBody({ type: PlayerContextDto, required: false })
   @ApiQuery({
     name: 'enabled',
     required: false,
@@ -346,39 +380,38 @@ export class MethodsController {
             bestXp: METHOD_EXAMPLE,
           },
         },
-        meta: { username: 'zezima', computedAt: 1771459200 },
+        meta: { computedAt: 1771459200 },
       },
     },
   })
   async findSkillsSummary(
-    @Query('username') username?: string,
     @Query('enabled') enabled?: string | boolean,
     @Query() query?: Record<string, string | undefined>,
+    @Body() context: PlayerContextDto = {},
     @Req() req?: Request,
   ): Promise<unknown> {
-    const disallowedQueryParams = Object.keys(query ?? {}).filter(
-      (key) => key !== 'username' && key !== 'enabled',
-    );
+    const disallowedQueryParams = Object.keys(query ?? {}).filter((key) => key !== 'enabled');
     if (disallowedQueryParams.length > 0) {
-      throw new BadRequestException('Only username and enabled query parameters are allowed');
+      throw new BadRequestException('Only enabled query parameters are allowed');
     }
 
-    return this.svc.skillsSummaryWithProfitResponse(username, req?.headers.authorization, enabled);
+    return this.svc.skillsSummaryWithProfitResponse(
+      context.player,
+      req?.headers.authorization,
+      enabled,
+    );
   }
 
-  @Get('skills/roadmap')
-  @UseGuards(SupabaseAuthGuard, CompleteProfileGuard)
+  @Post('skills/roadmap')
+  @HttpCode(HttpStatus.OK)
+  @UseGuards(SupabaseAuthGuard, TermsAcceptanceGuard, CompleteProfileGuard)
   @ApiBearerAuth()
   @ApiOperation({
     summary: 'Get a skill roadmap',
     description:
-      'Returns a level-range roadmap to reach a target level in one skill using the current enabled method variants. Requires authentication, a completed account username, and a RuneScape username.',
+      'Returns a level-range roadmap to reach a target level in one skill using the current enabled method variants. Requires authentication, accepted Terms of Service, a completed account profile, and player context in the request body.',
   })
-  @ApiQuery({
-    name: 'username',
-    required: true,
-    description: 'RuneScape username used to load player stats',
-  })
+  @ApiBody({ type: PlayerContextDto, required: true })
   @ApiQuery({
     name: 'skill',
     required: true,
@@ -417,9 +450,11 @@ export class MethodsController {
     },
   })
   @ApiUnauthorizedResponse({ description: 'Missing, invalid, or expired bearer token' })
-  @ApiForbiddenResponse({ description: 'Complete your account username to use this endpoint' })
+  @ApiForbiddenResponse({
+    description:
+      'Accept the current Terms of Service and complete your account username to use this endpoint',
+  })
   async findSkillRoadmap(
-    @Query('username') username?: string,
     @Query('skill') skill?: string,
     @Query('strategy') strategy?: string,
     @Query('target_level') targetLevel?: string,
@@ -427,10 +462,10 @@ export class MethodsController {
     @Query('ignoredTags') ignoredTags?: string | string[],
     @Query('enabled') enabled?: string | boolean,
     @Query() query?: Record<string, string | string[] | undefined>,
+    @Body() context: PlayerContextDto = {},
     @Req() req?: RequestWithUser,
   ): Promise<unknown> {
     const allowedQueryParams = new Set([
-      'username',
       'skill',
       'strategy',
       'target_level',
@@ -443,12 +478,12 @@ export class MethodsController {
     );
     if (disallowedQueryParams.length > 0) {
       throw new BadRequestException(
-        'Only username, skill, strategy, target_level, show_only_free_to_play, ignoredTags and enabled query parameters are allowed',
+        'Only skill, strategy, target_level, show_only_free_to_play, ignoredTags and enabled query parameters are allowed',
       );
     }
 
     return this.svc.skillRoadmapResponse({
-      username,
+      player: context.player,
       skill,
       strategy,
       target_level: targetLevel,
@@ -460,7 +495,8 @@ export class MethodsController {
     });
   }
 
-  @Get('trending-profit')
+  @Post('trending-profit')
+  @HttpCode(HttpStatus.OK)
   @ApiOperation({
     summary: 'List methods by profit growth',
     description:
@@ -471,7 +507,7 @@ export class MethodsController {
   @ApiQuery({ name: 'page', required: false, description: 'Page number (default 1)' })
   @ApiQuery({ name: 'perPage', required: false, description: 'Items per page (default 10)' })
   @ApiQuery({ name: 'name', required: false, description: 'Search methods by name' })
-  @ApiQuery({ name: 'username', required: false, description: 'RuneScape username for context' })
+  @ApiBody({ type: PlayerContextDto, required: false })
   @ApiQuery({ name: 'category', required: false, description: 'Filter by a single category' })
   @ApiQuery({ name: 'skill', required: false, description: 'Filter by skill' })
   @ApiQuery({ name: 'givesExperience', required: false, description: 'true or false' })
@@ -539,7 +575,6 @@ export class MethodsController {
     @Query('mode') mode?: string,
     @Query('page') page = '1',
     @Query('perPage') perPage = '10',
-    @Query('username') username?: string,
     @Query('name') name?: string,
     @Query('category') category?: string,
     @Query('clickIntensity') clickIntensity?: string,
@@ -556,6 +591,7 @@ export class MethodsController {
     @Query('minGrowthPct') minGrowthPct?: string,
     @Query('minCurrentProfit') minCurrentProfit?: string,
     @Query('minProfit') minProfit?: string,
+    @Body() context: PlayerContextDto = {},
     @Req() req?: Request,
   ) {
     return this.svc.listTrendingProfitResponse({
@@ -563,7 +599,7 @@ export class MethodsController {
       mode,
       page,
       perPage,
-      username,
+      player: context.player,
       name,
       category,
       clickIntensity,
@@ -585,7 +621,7 @@ export class MethodsController {
   }
 
   @Post('variant/:variantId/like')
-  @UseGuards(SupabaseAuthGuard, CompleteProfileGuard)
+  @UseGuards(SupabaseAuthGuard, TermsAcceptanceGuard, CompleteProfileGuard)
   @ApiBearerAuth()
   @ApiOperation({
     summary: 'Like method variant',
@@ -604,7 +640,7 @@ export class MethodsController {
   }
 
   @Delete('variant/:variantId/like')
-  @UseGuards(SupabaseAuthGuard, CompleteProfileGuard)
+  @UseGuards(SupabaseAuthGuard, TermsAcceptanceGuard, CompleteProfileGuard)
   @ApiBearerAuth()
   @ApiOperation({
     summary: 'Unlike method variant',
@@ -653,22 +689,20 @@ export class MethodsController {
     };
   }
 
-  @Get('slug/:slug')
+  @Post('slug/:slug')
+  @HttpCode(HttpStatus.OK)
   @ApiOperation({
     summary: 'Get method detail by slug',
-    description: 'Returns a method with profit data and optional user context.',
+    description:
+      'Returns a method with profit data and optional player context supplied in the request body.',
   })
-  @ApiQuery({
-    name: 'username',
-    required: false,
-    description: 'RuneScape username for user context',
-  })
+  @ApiBody({ type: PlayerContextDto, required: false })
   @ApiOkResponse({
     description: 'Method detail',
     schema: {
       example: {
         status: 'ok',
-        data: { method: METHOD_EXAMPLE, user: null },
+        data: { method: METHOD_DETAIL_EXAMPLE, user: null },
         warnings: [],
         meta: {},
       },
@@ -676,32 +710,30 @@ export class MethodsController {
   })
   async findMethodDetailsWithProfitBySlug(
     @Param('slug') slug: string,
-    @Query('username') username?: string,
+    @Body() context: PlayerContextDto = {},
     @Req() req?: Request,
   ): Promise<unknown> {
     return this.svc.methodDetailsWithProfitResponseBySlug(
       slug,
-      username,
+      context.player,
       req?.headers.authorization,
     );
   }
 
-  @Get(':id')
+  @Post(':id')
+  @HttpCode(HttpStatus.OK)
   @ApiOperation({
     summary: 'Get method detail',
-    description: 'Returns a method with profit data and optional user context.',
+    description:
+      'Returns a method with profit data and optional player context supplied in the request body.',
   })
-  @ApiQuery({
-    name: 'username',
-    required: false,
-    description: 'RuneScape username for user context',
-  })
+  @ApiBody({ type: PlayerContextDto, required: false })
   @ApiOkResponse({
     description: 'Method detail',
     schema: {
       example: {
         status: 'ok',
-        data: { method: METHOD_EXAMPLE, user: null },
+        data: { method: METHOD_DETAIL_EXAMPLE, user: null },
         warnings: [],
         meta: {},
       },
@@ -709,14 +741,14 @@ export class MethodsController {
   })
   async findMethodDetailsWithProfit(
     @Param('id') id: string,
-    @Query('username') username?: string,
+    @Body() context: PlayerContextDto = {},
     @Req() req?: Request,
   ): Promise<unknown> {
-    return this.svc.methodDetailsWithProfitResponse(id, username, req?.headers.authorization);
+    return this.svc.methodDetailsWithProfitResponse(id, context.player, req?.headers.authorization);
   }
 
-  @Put(':id')
-  @UseGuards(SupabaseAuthGuard, SuperAdminGuard)
+  @Patch(':id')
+  @UseGuards(SupabaseAuthGuard, TermsAcceptanceGuard, CompleteProfileGuard, SuperAdminGuard)
   @ApiBearerAuth()
   @ApiOperation({ summary: 'Update method', description: 'Updates an existing method.' })
   @ApiOkResponse({ description: 'Method updated', schema: { example: { data: METHOD_EXAMPLE } } })
@@ -727,8 +759,19 @@ export class MethodsController {
     return { data: updated };
   }
 
+  @Put(':id')
+  @UseGuards(SupabaseAuthGuard, TermsAcceptanceGuard, CompleteProfileGuard, SuperAdminGuard)
+  @ApiBearerAuth()
+  @ApiOperation({ summary: 'Replace method', description: 'Replaces an existing method.' })
+  @ApiOkResponse({ description: 'Method updated', schema: { example: { data: METHOD_EXAMPLE } } })
+  @ApiUnauthorizedResponse({ description: 'Missing, invalid, or expired bearer token' })
+  @ApiForbiddenResponse({ description: 'Only super_admin can perform this action' })
+  async replace(@Param('id') id: string, @Body() dto: UpdateMethodDto) {
+    return this.update(id, dto);
+  }
+
   @Put(':id/basic')
-  @UseGuards(SupabaseAuthGuard, SuperAdminGuard)
+  @UseGuards(SupabaseAuthGuard, TermsAcceptanceGuard, CompleteProfileGuard, SuperAdminGuard)
   @ApiBearerAuth()
   @ApiOperation({
     summary: 'Update method (basic)',
@@ -743,7 +786,7 @@ export class MethodsController {
   }
 
   @Put('variant/:id')
-  @UseGuards(SupabaseAuthGuard, SuperAdminGuard)
+  @UseGuards(SupabaseAuthGuard, TermsAcceptanceGuard, CompleteProfileGuard, SuperAdminGuard)
   @ApiBearerAuth()
   @ApiOperation({
     summary: 'Update method variant',
@@ -764,7 +807,7 @@ export class MethodsController {
   }
 
   @Delete(':id')
-  @UseGuards(SupabaseAuthGuard, SuperAdminGuard)
+  @UseGuards(SupabaseAuthGuard, TermsAcceptanceGuard, CompleteProfileGuard, SuperAdminGuard)
   @ApiBearerAuth()
   @ApiOperation({ summary: 'Delete method', description: 'Removes a method by id.' })
   @ApiOkResponse({ description: 'Method removed', schema: { example: { data: null } } })

@@ -3,6 +3,7 @@ import { Method } from '../methods/entities/method.entity';
 import { MethodVariant } from '../methods/entities/variant.entity';
 import { VariantIoItem } from '../methods/entities/io-item.entity';
 import { ActionType } from '../methods/action-type.enum';
+import { IconSource } from '../icons/icon-source.enum';
 
 export const buildItemFixture = (overrides: Partial<Item> = {}): Item => {
   const base: Item = {
@@ -33,11 +34,17 @@ export const buildMethodFixture = (): Method => {
   method.slug = 'method-one';
   method.description = 'Test method';
   method.category = 'Skilling';
+  method.createdBy = '11111111-1111-1111-1111-111111111111';
+  method.isOfficial = true;
+  method.iconSource = IconSource.ITEM;
+  method.createdAt = new Date('2026-01-31T19:30:00.000Z');
+  method.updatedAt = new Date('2026-01-31T19:30:00.000Z');
 
   const variantA = new MethodVariant();
   variantA.label = 'Variant A';
   variantA.slug = 'variant-a';
   variantA.description = null;
+  variantA.iconSource = IconSource.ITEM;
   variantA.xpHour = null;
   variantA.clickIntensity = 2;
   variantA.afkiness = 3;
@@ -67,6 +74,7 @@ export const buildMethodFixture = (): Method => {
   variantB.label = 'Variant B';
   variantB.slug = 'variant-b';
   variantB.description = null;
+  variantB.iconSource = IconSource.ITEM;
   variantB.xpHour = [{ skill: 'Cooking', experience: 10000 }];
   variantB.clickIntensity = 1;
   variantB.afkiness = 4;
