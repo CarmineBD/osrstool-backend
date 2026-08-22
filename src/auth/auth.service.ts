@@ -177,6 +177,15 @@ export class AuthService {
 
     const adminConfig = this.getSupabaseAdminConfig();
 
+    await this.markDeletedUserAccess(userId, authUser.exp);
+
+    try {
+      await this.deleteUserFromSupabase(userId, adminConfig);
+    } catch (error) {
+      await this.clearDeletedUserAccess(userId);
+      throw error;
+    }
+
     await this.dataSource.transaction(async (manager) => {
       await manager.query(
         `
@@ -202,8 +211,6 @@ export class AuthService {
       await manager.query(`DELETE FROM public.users WHERE id = $1`, [userId]);
     });
 
-    await this.deleteUserFromSupabase(userId, adminConfig);
-    await this.markDeletedUserAccess(userId, authUser.exp);
     await this.clearPresenceMembership(userId);
   }
 
@@ -278,13 +285,17 @@ export class AuthService {
   }
 
   private async markDeletedUserAccess(userId: string, exp: unknown): Promise<void> {
+    await this.redisService
+      .getClient()
+      .set(buildDeletedUserAuthKey(userId), '1', 'EX', resolveDeletedUserAuthTtlSeconds(exp));
+  }
+
+  private async clearDeletedUserAccess(userId: string): Promise<void> {
     try {
-      await this.redisService
-        .getClient()
-        .set(buildDeletedUserAuthKey(userId), '1', 'EX', resolveDeletedUserAuthTtlSeconds(exp));
+      await this.redisService.getClient().del(buildDeletedUserAuthKey(userId));
     } catch (error) {
       this.logger.warn(
-        `Could not store deleted-user auth tombstone for ${userId}: ${this.stringifyError(error)}`,
+        `Could not remove deleted-user auth tombstone for ${userId}: ${this.stringifyError(error)}`,
       );
     }
   }
