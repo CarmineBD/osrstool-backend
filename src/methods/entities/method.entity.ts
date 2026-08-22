@@ -12,6 +12,7 @@ import {
 } from 'typeorm';
 import { MethodVariant } from './variant.entity';
 import { User } from '../../auth/entities/user.entity';
+import { IconSource } from '../../icons/icon-source.enum';
 
 @Entity('money_making_methods')
 export class Method {
@@ -31,8 +32,11 @@ export class Method {
   @Column({ nullable: true })
   category?: string;
 
-  @Column({ name: 'icon_id', type: 'int', nullable: true })
+  @Column({ name: 'icon_id', type: 'bigint', nullable: true })
   iconId?: number | null;
+
+  @Column({ name: 'icon_source', type: 'text', default: IconSource.ITEM })
+  iconSource: IconSource;
 
   @Column({ type: 'boolean', default: true })
   enabled: boolean;

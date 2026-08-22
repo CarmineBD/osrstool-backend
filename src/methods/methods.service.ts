@@ -34,6 +34,8 @@ import { AuthService } from '../auth/auth.service';
 import { createTermsAcceptanceRequiredException } from '../auth/terms-acceptance-required.exception';
 import { calculateMarketImpact, type MarketImpactResult } from './market-impact-calculator';
 import { Item } from '../items/entities/item.entity';
+import { IconResolverService, type IconReference } from '../icons/icon-resolver.service';
+import { IconSource } from '../icons/icon-source.enum';
 import { RedisService } from '../redis/redis.service';
 import { METHOD_CATEGORY_VALUES } from './dto/method-category.constants';
 import { SKILL_KEY_VALUES } from './dto/skill.constants';
@@ -229,6 +231,7 @@ interface MethodDetailsWithProfit {
   name: string;
   slug: string;
   icon_id?: number | null;
+  iconSource: IconSource;
   description?: string;
   category?: string;
   enabled: boolean;
@@ -246,6 +249,7 @@ interface SkillSummaryVariant {
   id: string;
   slug: string;
   icon_id?: number | null;
+  iconSource: IconSource;
   xpHour?: XpHour | null;
   label?: string;
   description?: string | null;
@@ -272,6 +276,7 @@ interface SkillSummaryMethod {
   name: string;
   slug: string;
   icon_id?: number | null;
+  iconSource: IconSource;
   category?: string;
   enabled: boolean;
   variants: SkillSummaryVariant[];
@@ -308,6 +313,7 @@ interface RoadmapVariant {
   id: string;
   slug: string;
   icon_id?: number | null;
+  iconSource: IconSource;
   label?: string;
   description?: string | null;
   xpPerHour: number;
@@ -340,6 +346,7 @@ interface RoadmapCandidate {
     name: string;
     slug: string;
     icon_id?: number | null;
+    iconSource: IconSource;
     category?: string;
     enabled: boolean;
   };
@@ -449,6 +456,7 @@ export class MethodsService implements OnModuleDestroy {
     private readonly itemRepo?: Repository<Item>,
     @Optional() redisService?: RedisService,
     @Optional() private readonly authService?: AuthService,
+    @Optional() private readonly iconResolver?: IconResolverService,
   ) {
     const sharedRedis = redisService?.getClient();
     this.redis = sharedRedis ?? new IORedis((this.config.get<string>('REDIS_URL') as string) ?? '');
@@ -1526,6 +1534,7 @@ export class MethodsService implements OnModuleDestroy {
             id: variant.id,
             slug: variant.slug,
             icon_id: variant.icon_id,
+            iconSource: variant.iconSource,
             xpHour: variant.xpHour,
             label: variant.label,
             description: variant.description,
@@ -1632,6 +1641,7 @@ export class MethodsService implements OnModuleDestroy {
               name: method.name,
               slug: method.slug,
               icon_id: method.icon_id,
+              iconSource: method.iconSource,
               category: method.category,
               enabled: method.enabled,
             },
@@ -1639,6 +1649,7 @@ export class MethodsService implements OnModuleDestroy {
               id: variant.id,
               slug: variant.slug,
               icon_id: variant.icon_id,
+              iconSource: variant.iconSource,
               label: variant.label,
               description: variant.description,
               xpPerHour,
@@ -1666,6 +1677,7 @@ export class MethodsService implements OnModuleDestroy {
       id: variant.id,
       slug: variant.slug,
       icon_id: variant.icon_id,
+      iconSource: variant.iconSource,
       label: variant.label,
       description: variant.description,
       xpPerHour: variant.xpPerHour,
@@ -2048,62 +2060,75 @@ export class MethodsService implements OnModuleDestroy {
     return user;
   }
 
-  private async assertIconItemIdsExist(iconIds: number[]): Promise<void> {
-    const uniqueIconIds = [...new Set(iconIds.filter((iconId) => Number.isInteger(iconId)))];
-    if (uniqueIconIds.length === 0) return;
-    if (!this.itemRepo) {
-      throw new Error('Item repository is not configured');
-    }
-
-    const existingItems = await this.itemRepo.find({
-      select: { id: true },
-      where: { id: In(uniqueIconIds) },
-    });
-    const existingIds = new Set(existingItems.map((item) => item.id));
-    const missingIds = uniqueIconIds.filter((iconId) => !existingIds.has(iconId));
-
-    if (missingIds.length > 0) {
-      throw new BadRequestException(
-        `icon_id must reference an existing item. Missing ids: ${missingIds.join(', ')}`,
-      );
-    }
-  }
-
-  private async validateCreateIconIds(createDto: CreateMethodDto): Promise<void> {
-    const methodIconId = createDto.icon_id;
-    const variantIconIds = createDto.variants.map((variant, index) => {
-      if (variant.icon_id == null) {
-        throw new BadRequestException(`variants[${index}].icon_id is required`);
+  private iconReferenceOrThrow(
+    iconId: number | null | undefined,
+    iconSource: IconSource | null | undefined,
+    fieldPath: string,
+    required = false,
+  ): IconReference | null {
+    if (iconId == null && iconSource == null) {
+      if (required) {
+        throw new BadRequestException(
+          `${fieldPath}.icon_id and ${fieldPath}.iconSource are required`,
+        );
       }
-      return variant.icon_id;
-    });
-
-    await this.assertIconItemIdsExist([methodIconId, ...variantIconIds]);
-  }
-
-  private async validateUpdateIconIds(method: Method, updateDto: UpdateMethodDto): Promise<void> {
-    const iconIds: number[] = [];
-    if (updateDto.icon_id != null) {
-      iconIds.push(updateDto.icon_id);
+      return null;
+    }
+    if (iconId == null) {
+      throw new BadRequestException(`${fieldPath}.icon_id is required when iconSource is provided`);
+    }
+    if (iconSource == null) {
+      throw new BadRequestException(`${fieldPath}.iconSource is required when icon_id is provided`);
     }
 
+    return { iconId, iconSource };
+  }
+
+  private async assertIconReferencesExist(references: Array<IconReference | null>): Promise<void> {
+    if (!this.iconResolver) {
+      throw new Error('Icon resolver is not configured');
+    }
+    await this.iconResolver.assertReferencesExist(
+      references.filter((reference): reference is IconReference => reference != null),
+    );
+  }
+
+  private async validateCreateIconReferences(createDto: CreateMethodDto): Promise<void> {
+    const references = [
+      this.iconReferenceOrThrow(createDto.icon_id, createDto.iconSource, 'method', true),
+      ...createDto.variants.map((variant, index) =>
+        this.iconReferenceOrThrow(variant.icon_id, variant.iconSource, `variants[${index}]`, true),
+      ),
+    ];
+    await this.assertIconReferencesExist(references);
+  }
+
+  private async validateUpdateIconReferences(
+    method: Method,
+    updateDto: UpdateMethodDto,
+  ): Promise<void> {
+    const references: Array<IconReference | null> = [
+      this.iconReferenceOrThrow(updateDto.icon_id, updateDto.iconSource, 'method'),
+    ];
     const existingVariants = new Map(method.variants.map((variant) => [variant.id, variant]));
     for (const [index, variant] of (updateDto.variants ?? []).entries()) {
       const isExistingVariant = variant.id != null && existingVariants.has(variant.id);
-      if (!isExistingVariant && variant.icon_id == null) {
-        throw new BadRequestException(`variants[${index}].icon_id is required for new variants`);
-      }
-      if (variant.icon_id != null) {
-        iconIds.push(variant.icon_id);
-      }
+      references.push(
+        this.iconReferenceOrThrow(
+          variant.icon_id,
+          variant.iconSource,
+          `variants[${index}]`,
+          !isExistingVariant,
+        ),
+      );
     }
-
-    await this.assertIconItemIdsExist(iconIds);
+    await this.assertIconReferencesExist(references);
   }
 
-  private async validateVariantIconId(updateDto: UpdateVariantDto): Promise<void> {
-    if (updateDto.icon_id == null) return;
-    await this.assertIconItemIdsExist([updateDto.icon_id]);
+  private async validateVariantIconReference(updateDto: UpdateVariantDto): Promise<void> {
+    await this.assertIconReferencesExist([
+      this.iconReferenceOrThrow(updateDto.icon_id, updateDto.iconSource, 'variant'),
+    ]);
   }
 
   private normalizeVariantTitle(title?: string | null): string {
@@ -2223,17 +2248,18 @@ export class MethodsService implements OnModuleDestroy {
   }
 
   async create(createDto: CreateMethodDto, authenticatedUserId: string): Promise<MethodDto> {
-    await this.validateCreateIconIds(createDto);
+    await this.validateCreateIconReferences(createDto);
     await this.validateCreateVariantMembership(createDto);
 
     const creator = await this.getMethodCreatorOrThrow(authenticatedUserId);
-    const { name, description, category, enabled, variants, icon_id } = createDto;
+    const { name, description, category, enabled, variants, icon_id, iconSource } = createDto;
     const method = this.methodRepo.create({
       name,
       description,
       category,
       enabled,
       iconId: icon_id,
+      iconSource,
       createdBy: creator.id,
       isOfficial: creator.role === 'super_admin',
     });
@@ -2251,6 +2277,7 @@ export class MethodsService implements OnModuleDestroy {
         afkiness: v.afkiness,
         riskLevel: v.riskLevel,
         iconId: v.icon_id,
+        iconSource: v.iconSource,
         description: v.description ?? null,
         wilderness: v.wilderness ?? false,
         members: v.members ?? false,
@@ -2313,10 +2340,10 @@ export class MethodsService implements OnModuleDestroy {
       throw new NotFoundException(`Method ${id} not found`);
     }
 
-    await this.validateUpdateIconIds(method, updateDto);
+    await this.validateUpdateIconReferences(method, updateDto);
     await this.validateUpdateMethodVariantMembership(method, updateDto);
 
-    const { variants = [], name, description, category, enabled, icon_id } = updateDto;
+    const { variants = [], name, description, category, enabled, icon_id, iconSource } = updateDto;
 
     if (name !== undefined) {
       method.name = name;
@@ -2324,7 +2351,10 @@ export class MethodsService implements OnModuleDestroy {
     }
     if (description !== undefined) method.description = description;
     if (category !== undefined) method.category = category;
-    if (icon_id !== undefined) method.iconId = icon_id;
+    if (icon_id !== undefined) {
+      method.iconId = icon_id;
+      method.iconSource = iconSource!;
+    }
     if (enabled !== undefined) method.enabled = enabled;
 
     const existingVariants = new Map(method.variants.map((v) => [v.id, v]));
@@ -2340,11 +2370,13 @@ export class MethodsService implements OnModuleDestroy {
           snapshotDescription: _snapshotDescription,
           snapshotDate: _snapshotDate,
           icon_id: variantIconId,
+          iconSource: variantIconSource,
           ...rest
         } = v;
         Object.assign(variant, rest);
         if (variantIconId !== undefined) {
           variant.iconId = variantIconId;
+          variant.iconSource = variantIconSource!;
         }
 
         if (v.label) {
@@ -2386,12 +2418,14 @@ export class MethodsService implements OnModuleDestroy {
           snapshotDescription: _snapshotDescription,
           snapshotDate: _snapshotDate,
           icon_id: variantIconId,
+          iconSource: variantIconSource,
           ...rest
         } = v;
         const variant = this.variantRepo.create({
           method,
           label,
           iconId: variantIconId,
+          iconSource: variantIconSource!,
           ...rest,
         });
         variant.slug = await this.generateVariantSlug(method.id, label);
@@ -2472,7 +2506,7 @@ export class MethodsService implements OnModuleDestroy {
     });
     if (!variant) throw new NotFoundException(`Variant ${id} not found`);
 
-    await this.validateVariantIconId(dto);
+    await this.validateVariantIconReference(dto);
     await this.validateUpdateVariantMembership(variant, dto);
 
     const {
@@ -2482,11 +2516,13 @@ export class MethodsService implements OnModuleDestroy {
       snapshotDescription,
       snapshotDate,
       icon_id,
+      iconSource,
       ...rest
     } = dto;
     Object.assign(variant, rest);
     if (icon_id !== undefined) {
       variant.iconId = icon_id;
+      variant.iconSource = iconSource!;
     }
 
     if (dto.label) {
@@ -3164,6 +3200,7 @@ export class MethodsService implements OnModuleDestroy {
             id,
             slug,
             icon_id,
+            iconSource,
             clickIntensity,
             afkiness,
             riskLevel,
@@ -3178,6 +3215,7 @@ export class MethodsService implements OnModuleDestroy {
             id,
             slug,
             icon_id,
+            iconSource,
             xpHour,
             label,
             description,
@@ -3356,6 +3394,7 @@ export class MethodsService implements OnModuleDestroy {
             id,
             slug,
             icon_id,
+            iconSource,
             clickIntensity,
             afkiness,
             riskLevel,
@@ -3370,6 +3409,7 @@ export class MethodsService implements OnModuleDestroy {
             id,
             slug,
             icon_id,
+            iconSource,
             xpHour,
             label,
             description,
@@ -3740,6 +3780,7 @@ export class MethodsService implements OnModuleDestroy {
       name: methodDto.name,
       slug: methodDto.slug,
       icon_id: methodDto.icon_id,
+      iconSource: methodDto.iconSource,
       description: methodDto.description,
       category: methodDto.category,
       enabled: methodDto.enabled,

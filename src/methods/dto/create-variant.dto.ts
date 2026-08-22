@@ -3,6 +3,7 @@ import {
   ArrayMaxSize,
   IsBoolean,
   IsEnum,
+  IsIn,
   IsInt,
   IsOptional,
   Max,
@@ -13,6 +14,7 @@ import {
   IsString,
   Matches,
   ValidateNested,
+  IsDefined,
 } from 'class-validator';
 import { Type } from 'class-transformer';
 import { IoItemDto } from './io-item.dto';
@@ -34,6 +36,7 @@ import { VariantRequirementsDto } from './variant-requirements.dto';
 import { HasMaxRequirementEntries } from './validators/requirement-entry-count.validator';
 import { SKILL_KEY_VALUES } from './skill.constants';
 import { ActionType } from '../action-type.enum';
+import { IconSource, ICON_SOURCE_VALUES } from '../../icons/icon-source.enum';
 
 const RISK_LEVEL_PATTERN = /^(100|[1-9]?\d)$/;
 
@@ -47,6 +50,10 @@ export class CreateVariantDto {
   @IsInt()
   @Min(1)
   icon_id: number;
+
+  @IsDefined({ message: 'iconSource is required and must be "item" or "game_icon"' })
+  @IsIn(ICON_SOURCE_VALUES, { message: 'iconSource must be either "item" or "game_icon"' })
+  iconSource: IconSource;
 
   @IsInt()
   @Min(0)
