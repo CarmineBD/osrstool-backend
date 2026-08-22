@@ -21,6 +21,8 @@ import { VariantHistory } from '../src/methods/entities/variant-history.entity';
 import { ActionType } from '../src/methods/action-type.enum';
 import { createPgMemAdapter } from './utils/pg-mem';
 import { User } from '../src/auth/entities/user.entity';
+import { IconSource } from '../src/icons/icon-source.enum';
+import { GameIcon } from '../src/icons/entities/game-icon.entity';
 
 jest.mock('pg', () => createPgMemAdapter());
 
@@ -33,12 +35,14 @@ describe('Methods (e2e)', () => {
   type CreateMethodPayload = {
     name: string;
     icon_id: number;
+    iconSource: IconSource;
     description: string;
     category: string;
     enabled: boolean;
     variants: Array<{
       label: string;
       icon_id: number;
+      iconSource: IconSource;
       actionsPerHour?: number;
       actionType?: ActionType;
       description?: string;
@@ -61,6 +65,7 @@ describe('Methods (e2e)', () => {
   const buildValidCreateMethodPayload = (): CreateMethodPayload => ({
     name: 'Validated method',
     icon_id: 4151,
+    iconSource: IconSource.ITEM,
     description: 'Texto **markdown** con [link](https://example.com)',
     category: 'Skilling',
     enabled: true,
@@ -68,6 +73,7 @@ describe('Methods (e2e)', () => {
       {
         label: 'Validated variant',
         icon_id: 4152,
+        iconSource: IconSource.ITEM,
         actionsPerHour: 2,
         actionType: ActionType.ITEMS,
         description: 'Lista:\n- item 1\n- item 2',
@@ -145,6 +151,7 @@ describe('Methods (e2e)', () => {
     await dataSource.query('DELETE FROM "variant_io_items"');
     await dataSource.query('DELETE FROM "method_variants"');
     await dataSource.query('DELETE FROM "money_making_methods"');
+    await dataSource.query('DELETE FROM "icons"');
     await dataSource.query('DELETE FROM "users"');
     await dataSource.query('DELETE FROM "items"');
     await dataSource.getRepository(User).save({
@@ -936,6 +943,54 @@ describe('Methods (e2e)', () => {
     });
   });
 
+  it('validates and returns game icons using iconSource', async () => {
+    await seedItems(100, 200);
+    const gameIcon = await dataSource.getRepository(GameIcon).save({
+      name: 'Magic spellbook',
+      type: 'interface',
+      iconPath: 'Magic_spellbook.png',
+    });
+    const server = app.getHttpServer() as unknown as Server;
+    const payload = buildValidCreateMethodPayload();
+    payload.icon_id = Number(gameIcon.id);
+    payload.iconSource = IconSource.GAME_ICON;
+    payload.variants[0].icon_id = Number(gameIcon.id);
+    payload.variants[0].iconSource = IconSource.GAME_ICON;
+
+    const createResponse = await request(server).post('/methods/create').send(payload).expect(201);
+    const createBody = createResponse.body as {
+      data: {
+        icon_id: number;
+        iconSource: IconSource;
+        variants: Array<{ icon_id: number; iconSource: IconSource }>;
+      };
+    };
+
+    expect(createBody.data).toMatchObject({
+      icon_id: Number(gameIcon.id),
+      iconSource: IconSource.GAME_ICON,
+      variants: [
+        {
+          icon_id: Number(gameIcon.id),
+          iconSource: IconSource.GAME_ICON,
+        },
+      ],
+    });
+
+    const iconsResponse = await request(server).get('/icons?q=magic').expect(200);
+    const iconsBody = iconsResponse.body as {
+      data: Array<{ id: number; name: string; type: string; iconSource: IconSource }>;
+    };
+    expect(iconsBody.data).toEqual([
+      expect.objectContaining({
+        id: Number(gameIcon.id),
+        name: 'Magic spellbook',
+        type: 'interface',
+        iconSource: IconSource.GAME_ICON,
+      }),
+    ]);
+  });
+
   it('POST /methods/create rejects icon_id values that do not exist in items', async () => {
     await seedItems(100, 200, 4151);
 
@@ -983,6 +1038,7 @@ describe('Methods (e2e)', () => {
         {
           label: 'F2P Cooking',
           icon_id: 4152,
+          iconSource: IconSource.ITEM,
           actionsPerHour: 100,
           actionType: ActionType.ITEMS,
           members: false,
@@ -992,6 +1048,7 @@ describe('Methods (e2e)', () => {
         {
           label: 'F2P Prayer',
           icon_id: 4152,
+          iconSource: IconSource.ITEM,
           actionsPerHour: 100,
           actionType: ActionType.ITEMS,
           members: false,
@@ -1067,11 +1124,13 @@ describe('Methods (e2e)', () => {
       .put(`/methods/${savedMethod.id}`)
       .send({
         icon_id: 999999,
+        iconSource: IconSource.ITEM,
         variants: [
           {
             id: savedVariant.id,
             label: 'Editable variant',
             icon_id: 4152,
+            iconSource: IconSource.ITEM,
             actionsPerHour: 100,
             actionType: ActionType.ITEMS,
             inputs: [],
@@ -1129,6 +1188,7 @@ describe('Methods (e2e)', () => {
             id: savedVariant.id,
             label: 'Editable variant',
             icon_id: 4152,
+            iconSource: IconSource.ITEM,
             inputs: [],
             outputs: [],
           },
@@ -1260,6 +1320,7 @@ describe('Methods (e2e)', () => {
       .put(`/methods/variant/${savedVariant.id}`)
       .send({
         icon_id: 999999,
+        iconSource: IconSource.ITEM,
         actionsPerHour: 100,
         actionType: ActionType.ITEMS,
         inputs: [],

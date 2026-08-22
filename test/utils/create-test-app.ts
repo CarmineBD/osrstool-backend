@@ -27,6 +27,7 @@ import { SuperAdminGuard } from '../../src/auth/super-admin.guard';
 import { ItemVolumesService } from '../../src/item-volumes/item-volumes.service';
 import { TermsAcceptanceGuard } from '../../src/auth/terms-acceptance.guard';
 import { CompleteProfileGuard } from '../../src/auth/complete-profile.guard';
+import { GameIcon } from '../../src/icons/entities/game-icon.entity';
 
 const TEST_AUTH_USER = {
   id: '11111111-1111-1111-1111-111111111111',
@@ -74,6 +75,7 @@ export const createTestApp = async (): Promise<TestApp> => {
         database: 'test',
         entities: [
           Item,
+          GameIcon,
           Method,
           MethodVariant,
           VariantIoItem,

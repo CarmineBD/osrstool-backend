@@ -14,12 +14,14 @@ import { VariantSnapshotModule } from '../variant-snapshots/variant-snapshot.mod
 import { User } from '../auth/entities/user.entity';
 import { AuthModule } from '../auth/auth.module';
 import { Item } from '../items/entities/item.entity';
+import { IconsModule } from '../icons/icons.module';
 
 @Module({
   imports: [
     TypeOrmModule.forFeature([Method, MethodVariant, VariantIoItem, VariantHistory, User, Item]),
     VariantSnapshotModule,
     AuthModule,
+    IconsModule,
   ],
   providers: [MethodsService, RuneScapeApiService, PlayerInfoRateLimitGuard],
   controllers: [MethodsController, PlayerController],

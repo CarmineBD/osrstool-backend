@@ -1,6 +1,7 @@
 import { MethodDto } from '../dto/method.dto';
 import { computeMissingRequirements, filterMethodsByUserStats } from './requirements';
 import { ActionType } from '../action-type.enum';
+import { IconSource } from '../../icons/icon-source.enum';
 
 describe('requirements helpers', () => {
   const userInfo = {
@@ -21,6 +22,7 @@ describe('requirements helpers', () => {
         {
           id: 'v1',
           slug: 'v1',
+          iconSource: IconSource.ITEM,
           label: 'Lowercase requirement',
           inputs: [],
           outputs: [],

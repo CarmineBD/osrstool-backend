@@ -10,6 +10,7 @@ import {
   ValidateNested,
   IsArray,
   IsString,
+  IsDefined,
 } from 'class-validator';
 import { Type } from 'class-transformer';
 import { CreateVariantDto } from './create-variant.dto';
@@ -17,6 +18,7 @@ import { IsSafeMarkdown } from '../../common/validators/is-safe-markdown.validat
 import { DESCRIPTION_MAX_LENGTH, METHOD_NAME_MAX_LENGTH } from './validation.constants';
 import { METHOD_CATEGORY_VALUES } from './method-category.constants';
 import { TrimLowercaseString, TrimString } from './transforms';
+import { IconSource, ICON_SOURCE_VALUES } from '../../icons/icon-source.enum';
 
 export class CreateMethodDto {
   @TrimString()
@@ -28,6 +30,10 @@ export class CreateMethodDto {
   @IsInt()
   @Min(1)
   icon_id: number;
+
+  @IsDefined({ message: 'iconSource is required and must be "item" or "game_icon"' })
+  @IsIn(ICON_SOURCE_VALUES, { message: 'iconSource must be either "item" or "game_icon"' })
+  iconSource: IconSource;
 
   @IsOptional()
   @TrimString()
