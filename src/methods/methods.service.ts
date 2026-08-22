@@ -1278,7 +1278,12 @@ export class MethodsService implements OnModuleDestroy {
       page: p,
       perPage: pp,
       userInfo: userInfo ?? null,
-      filters,
+      filters: {
+        ...filters,
+        // JSON.stringify serializes every Set as {}, which would otherwise make
+        // different ignored-tag selections share a cache entry.
+        ignoredTags: filters.ignoredTags ? [...filters.ignoredTags].sort() : undefined,
+      },
       sortOptions,
       likeOptions,
       variantsMode,
