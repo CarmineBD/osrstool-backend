@@ -81,6 +81,10 @@ describe('AuthService', () => {
     global.fetch = originalFetch;
   });
 
+  afterEach(() => {
+    jest.useRealTimers();
+  });
+
   it('creates a new user when it does not exist', async () => {
     repo.findOne.mockResolvedValue(null);
     repo.create.mockReturnValue({
@@ -399,6 +403,8 @@ describe('AuthService', () => {
     const manager: QueryManager = {
       query: jest.fn().mockResolvedValue(undefined),
     };
+    jest.useFakeTimers();
+    jest.setSystemTime(new Date('2026-08-22T12:00:00.000Z'));
     const exp = Math.floor(Date.now() / 1000) + 7200;
     configService.get.mockImplementation((key: string) => {
       switch (key) {
