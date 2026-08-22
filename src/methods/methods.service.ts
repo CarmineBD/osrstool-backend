@@ -9,6 +9,7 @@ import {
   ForbiddenException,
   ServiceUnavailableException,
 } from '@nestjs/common';
+import { createHash } from 'node:crypto';
 import { performance } from 'node:perf_hooks';
 import { InjectRepository } from '@nestjs/typeorm';
 import { Repository, In, LessThanOrEqual, Not } from 'typeorm';
@@ -429,6 +430,8 @@ export class MethodsService implements OnModuleDestroy {
   private readonly methodsProfitsHashKey = 'methods:profits';
   private readonly itemPricesHashKey = 'items:prices';
   private readonly itemVolumes24hHashKey = 'items:vol24h';
+  private readonly methodsListCachePrefix = 'methods:list:v1';
+  private readonly methodsSafety24hCachePrefix = 'methods:safety24h:v1';
 
   constructor(
     @InjectRepository(Method)
@@ -491,6 +494,82 @@ export class MethodsService implements OnModuleDestroy {
       const elapsedMs = performance.now() - startedAt;
       this.logger.log(`[perf] ${scope} ${label} ${elapsedMs.toFixed(1)}ms`);
     }
+  }
+
+  private isMethodsListPerfLogEnabled(): boolean {
+    const specific = this.config.get<string>('METHODS_LIST_PERF_LOGS');
+    const fallback = this.config.get<string>('PERF_LOGS');
+    const value = specific ?? fallback ?? '';
+    return ['1', 'true', 'yes', 'on'].includes(value.trim().toLowerCase());
+  }
+
+  private async timeMethodsListStep<T>(
+    enabled: boolean,
+    scope: string,
+    label: string,
+    operation: () => Promise<T>,
+  ): Promise<T> {
+    if (!enabled) return operation();
+
+    const startedAt = performance.now();
+    try {
+      return await operation();
+    } finally {
+      const elapsedMs = performance.now() - startedAt;
+      this.logger.log(`[perf] ${scope} ${label} ${elapsedMs.toFixed(1)}ms`);
+    }
+  }
+
+  private getPositiveIntegerConfig(name: string, fallback: number, maximum: number): number {
+    const raw = this.config.get<string>(name);
+    const parsed = raw == null ? fallback : Number.parseInt(raw, 10);
+    if (!Number.isFinite(parsed) || parsed < 0) return fallback;
+    return Math.min(parsed, maximum);
+  }
+
+  private getMethodsListCacheTtlSeconds(): number {
+    return this.getPositiveIntegerConfig('METHODS_LIST_CACHE_TTL_SECONDS', 15, 60);
+  }
+
+  private getMethodsSafety24hCacheTtlSeconds(): number {
+    return this.getPositiveIntegerConfig('METHODS_SAFETY_24H_CACHE_TTL_SECONDS', 60, 300);
+  }
+
+  private makeCacheKey(prefix: string, value: unknown): string {
+    const serialized = JSON.stringify(value);
+    const digest = createHash('sha256').update(serialized).digest('hex');
+    return `${prefix}:${digest}`;
+  }
+
+  private async getCachedJson<T>(key: string): Promise<T | null> {
+    try {
+      const raw = await this.redis.call('GET', key);
+      const parsed = this.parseJsonValue(raw);
+      return parsed === null ? null : (parsed as T);
+    } catch {
+      return null;
+    }
+  }
+
+  private async setCachedJson(key: string, value: unknown, ttlSeconds: number): Promise<void> {
+    if (ttlSeconds <= 0) return;
+
+    try {
+      await this.redis.call('SET', key, JSON.stringify(value), 'EX', ttlSeconds);
+    } catch {
+      // A cache failure must never make the methods listing unavailable.
+    }
+  }
+
+  private isProfitListResult(value: unknown): value is { data: any[]; total: number } {
+    if (!value || typeof value !== 'object' || Array.isArray(value)) return false;
+    const candidate = value as { data?: unknown; total?: unknown };
+    return (
+      Array.isArray(candidate.data) &&
+      typeof candidate.total === 'number' &&
+      Number.isInteger(candidate.total) &&
+      candidate.total >= 0
+    );
   }
 
   private buildListFilters(query: ListQuery): ListFilters {
@@ -1172,6 +1251,7 @@ export class MethodsService implements OnModuleDestroy {
   async listWithProfitResponse(query: ListQuery) {
     const p = this.parsePositiveIntegerQueryParam(query.page, 'page', 100);
     const pp = this.parsePositiveIntegerQueryParam(query.perPage, 'perPage', 100);
+    const totalStartedAt = performance.now();
     const variantsMode = this.parseVariantsQueryParam(query.variants);
     const likedByMeFilter = this.parseBooleanQueryParam(query.likedByMe, 'likedByMe');
     const authenticatedUserId = await this.resolveAuthenticatedUserId(query.authorization);
@@ -1189,19 +1269,50 @@ export class MethodsService implements OnModuleDestroy {
       await this.assertSuperAdminForDisabledMethods(query.authorization);
     }
     const sortOptions = this.buildSortOptions(query);
-
-    const result = await this.findAllWithProfit(
-      p,
-      pp,
-      userInfo ?? undefined,
-      filters,
-      sortOptions,
-      {
-        likedByUserId: authenticatedUserId ?? undefined,
-        onlyLikedByMe: likedByMeFilter === true,
+    const likeOptions = {
+      likedByUserId: authenticatedUserId ?? undefined,
+      onlyLikedByMe: likedByMeFilter === true,
+    };
+    const cacheTtlSeconds = this.getMethodsListCacheTtlSeconds();
+    const cacheKey = this.makeCacheKey(this.methodsListCachePrefix, {
+      page: p,
+      perPage: pp,
+      userInfo: userInfo ?? null,
+      filters: {
+        ...filters,
+        // JSON.stringify serializes every Set as {}, which would otherwise make
+        // different ignored-tag selections share a cache entry.
+        ignoredTags: filters.ignoredTags ? [...filters.ignoredTags].sort() : undefined,
       },
+      sortOptions,
+      likeOptions,
       variantsMode,
-    );
+    });
+    const perfLogsEnabled = this.isMethodsListPerfLogEnabled();
+    const scope = `listWithProfit page=${p} perPage=${pp}`;
+    let result =
+      cacheTtlSeconds > 0
+        ? await this.timeMethodsListStep(perfLogsEnabled, scope, 'cacheRead', () =>
+            this.getCachedJson<{ data: any[]; total: number }>(cacheKey),
+          )
+        : null;
+
+    if (!this.isProfitListResult(result)) {
+      result = await this.findAllWithProfit(
+        p,
+        pp,
+        userInfo ?? undefined,
+        filters,
+        sortOptions,
+        likeOptions,
+        variantsMode,
+      );
+      await this.timeMethodsListStep(perfLogsEnabled, scope, 'cacheWrite', () =>
+        this.setCachedJson(cacheKey, result, cacheTtlSeconds),
+      );
+    } else if (perfLogsEnabled) {
+      this.logger.log(`[perf] ${scope} cacheHit`);
+    }
 
     const hasNext = p * pp < result.total;
 
@@ -1212,6 +1323,11 @@ export class MethodsService implements OnModuleDestroy {
       perPage: pp, // Backward-compatible alias for existing clients.
       hasNext,
     };
+
+    if (perfLogsEnabled) {
+      const totalElapsedMs = performance.now() - totalStartedAt;
+      this.logger.log(`[perf] ${scope} total ${totalElapsedMs.toFixed(1)}ms`);
+    }
 
     return {
       status: 'ok',
@@ -2781,8 +2897,23 @@ export class MethodsService implements OnModuleDestroy {
       return {};
     }
 
-    const placeholders = variantIds.map((_, index) => `$${index + 1}`).join(', ');
-    const sinceParam = variantIds.length + 1;
+    const cacheTtlSeconds = this.getMethodsSafety24hCacheTtlSeconds();
+    const normalizedVariantIds = [...new Set(variantIds)].sort();
+    const cacheKey = this.makeCacheKey(this.methodsSafety24hCachePrefix, {
+      // The result is valid for a rolling 24-hour range. Bucket the key to preserve
+      // that semantics while still sharing the aggregate between nearby requests.
+      minute: Math.floor(since.getTime() / 60_000),
+      variantIds: normalizedVariantIds,
+    });
+    if (cacheTtlSeconds > 0) {
+      const cached = await this.getCachedJson<Record<string, VariantSafety24hStats>>(cacheKey);
+      if (cached && typeof cached === 'object' && !Array.isArray(cached)) {
+        return cached;
+      }
+    }
+
+    const placeholders = normalizedVariantIds.map((_, index) => `$${index + 1}`).join(', ');
+    const sinceParam = normalizedVariantIds.length + 1;
     const rawRows = (await this.historyRepo.query(
       `
         SELECT
@@ -2795,11 +2926,11 @@ export class MethodsService implements OnModuleDestroy {
           AND "timestamp" >= $${sinceParam}
         GROUP BY variant_id
       `,
-      [...variantIds, since.toISOString()],
+      [...normalizedVariantIds, since.toISOString()],
     )) as unknown;
 
     const rows = Array.isArray(rawRows) ? (rawRows as VariantSafety24hRow[]) : [];
-    return rows.reduce<Record<string, VariantSafety24hStats>>((acc, row) => {
+    const stats = rows.reduce<Record<string, VariantSafety24hStats>>((acc, row) => {
       if (typeof row.variantId !== 'string' || row.variantId.length === 0) {
         return acc;
       }
@@ -2822,6 +2953,8 @@ export class MethodsService implements OnModuleDestroy {
       };
       return acc;
     }, {});
+    await this.setCachedJson(cacheKey, stats, cacheTtlSeconds);
+    return stats;
   }
 
   private collectItemIdsFromVariants(
@@ -3345,14 +3478,23 @@ export class MethodsService implements OnModuleDestroy {
     likeOptions: ListLikeOptions = {},
     variantsMode: VariantsMode = 'best',
   ): Promise<{ data: any[]; total: number }> {
+    const perfLogsEnabled = this.isMethodsListPerfLogEnabled();
+    const scope = `findAllWithProfit page=${page} perPage=${perPage}`;
+    const totalStartedAt = performance.now();
     // Load every method first so sorting can happen after profit enrichment.
-    const allEntities = await this.methodRepo.find({
-      where: {
-        enabled: filters.enabled,
-        ...(filters.isOfficial != null ? { isOfficial: filters.isOfficial } : {}),
-      },
-      relations: ['variants', 'variants.ioItems'],
-    });
+    const allEntities = await this.timeMethodsListStep(
+      perfLogsEnabled,
+      scope,
+      'loadMethodsAndVariants',
+      () =>
+        this.methodRepo.find({
+          where: {
+            enabled: filters.enabled,
+            ...(filters.isOfficial != null ? { isOfficial: filters.isOfficial } : {}),
+          },
+          relations: ['variants', 'variants.ioItems'],
+        }),
+    );
     const variantCounts = allEntities.reduce<Record<string, number>>((acc, method) => {
       acc[method.id] = method.variants.length;
       return acc;
@@ -3371,12 +3513,33 @@ export class MethodsService implements OnModuleDestroy {
     );
     const [allProfits, pricesByItem, volumes24hByItem, itemMetadataById, safety24hByVariantId] =
       await Promise.all([
-        this.getAllMethodsProfits(),
-        this.getItemPrices(itemIds),
-        this.getItemVolumes24h(itemIds),
-        this.getItemMetadata(itemIds),
-        this.getVariantSafety24hStats(variantIds, new Date(Date.now() - 24 * 60 * 60 * 1000)),
+        this.timeMethodsListStep(perfLogsEnabled, scope, 'loadProfits', () =>
+          this.getAllMethodsProfits(),
+        ),
+        this.timeMethodsListStep(perfLogsEnabled, scope, `loadPrices items=${itemIds.length}`, () =>
+          this.getItemPrices(itemIds),
+        ),
+        this.timeMethodsListStep(
+          perfLogsEnabled,
+          scope,
+          `loadVolumes items=${itemIds.length}`,
+          () => this.getItemVolumes24h(itemIds),
+        ),
+        this.timeMethodsListStep(
+          perfLogsEnabled,
+          scope,
+          `loadItemMetadata items=${itemIds.length}`,
+          () => this.getItemMetadata(itemIds),
+        ),
+        this.timeMethodsListStep(
+          perfLogsEnabled,
+          scope,
+          `loadSafety24h variants=${variantIds.length}`,
+          () =>
+            this.getVariantSafety24hStats(variantIds, new Date(Date.now() - 24 * 60 * 60 * 1000)),
+        ),
       ]);
+    const enrichStartedAt = performance.now();
     const selectedSkill = filters.skill?.trim().toLowerCase() || undefined;
 
     let enrichedMethods = methodsToProcess
@@ -3590,6 +3753,13 @@ export class MethodsService implements OnModuleDestroy {
     const total = enrichedMethods.length;
     const start = (page - 1) * perPage;
     const paginated = enrichedMethods.slice(start, start + perPage);
+
+    if (perfLogsEnabled) {
+      const enrichElapsedMs = performance.now() - enrichStartedAt;
+      const totalElapsedMs = performance.now() - totalStartedAt;
+      this.logger.log(`[perf] ${scope} enrichFilterSort ${enrichElapsedMs.toFixed(1)}ms`);
+      this.logger.log(`[perf] ${scope} total ${totalElapsedMs.toFixed(1)}ms`);
+    }
 
     return { data: paginated, total };
   }
