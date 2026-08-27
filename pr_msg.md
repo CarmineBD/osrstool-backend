@@ -1,23 +1,21 @@
 ## Summary
 
-- Add authenticated feedback submission with validation, rate limiting, and email notifications.
-- Add super-admin feedback listing, detail retrieval, and status updates.
-- Add the feedback database schema and document the required SMTP configuration.
+- Send the configured OSRS Wiki user agent when refreshing the latest item prices, with a descriptive fallback.
+- Replace verbose Axios error-object logging with compact HTTP error details.
+- Add coverage for configured and fallback request headers plus HTTP error logging.
 
 ## User-facing changelog
 
-- Signed-in users can now submit feature requests, bug reports, and other feedback directly from RS Methods.
+- Fixed an issue that could prevent item prices and method profits from refreshing.
 
 ## How to test
 
 - `npm run lint`
 - `npm test`
 - `npm run build`
-- Apply `sql/2026-08-25-create-feedback.sql` to the TST database.
-- Configure the SMTP variables from `.env.example`, then submit `POST /feedback` as a signed-in user with accepted terms and an account username.
-- As a `super_admin`, verify `GET /feedback`, `GET /feedback/:id`, and `PATCH /feedback/:id` return and update submitted feedback.
 
 ## Notes
 
 - Base branch: `develop`
 - Target environment: `TST`
+- No cache, profit calculation, or scheduled job logic changes.
