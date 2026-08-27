@@ -10,6 +10,9 @@ import { ItemPriceRule, ItemPriceRuleType } from './entities/item-price-rule.ent
 import { parseBooleanEnv } from '../common/utils/parse-boolean-env';
 import { RedisService } from '../redis/redis.service';
 
+const DEFAULT_USER_AGENT = 'RSMethods/1.0 (contact: contact@rsmethods.com)';
+const MAX_LOGGED_RESPONSE_DATA_LENGTH = 500;
+
 interface Price {
   high?: number;
   highTime?: number;
@@ -80,8 +83,12 @@ export class PricesService implements OnModuleInit {
 
   async fetchPrices(forceFull = false) {
     try {
+      const userAgent =
+        this.config.get<string>('OSRS_WIKI_USER_AGENT')?.trim() || DEFAULT_USER_AGENT;
       const { data } = await firstValueFrom(
-        this.http.get<{ data: Record<string, Price> }>(this.api),
+        this.http.get<{ data: Record<string, Price> }>(this.api, {
+          headers: { 'User-Agent': userAgent },
+        }),
       );
 
       const changedEntries: Array<[string, Price]> = [];
@@ -139,8 +146,64 @@ export class PricesService implements OnModuleInit {
 
       this.isFirstFetch = false;
     } catch (error) {
-      this.logger.error('Error fetching prices', error);
+      this.logger.error(this.formatFetchError(error));
     }
+  }
+
+  private formatFetchError(error: unknown): string {
+    const message = error instanceof Error ? error.message : String(error);
+    const response = this.getHttpErrorResponse(error);
+    const details = [`message=${message}`];
+
+    if (response) {
+      details.unshift(`status=${response.status}`);
+      const responseData = this.summarizeResponseData(response.data);
+      if (responseData) {
+        details.push(`responseData=${responseData}`);
+      }
+    }
+
+    return `Error fetching prices: ${details.join(' ')}`;
+  }
+
+  private getHttpErrorResponse(
+    error: unknown,
+  ): { status: number | undefined; data: unknown } | undefined {
+    if (!error || typeof error !== 'object' || !('response' in error)) {
+      return undefined;
+    }
+
+    const response = error.response;
+    if (!response || typeof response !== 'object') {
+      return undefined;
+    }
+
+    const { status, data } = response as { status?: unknown; data?: unknown };
+    return {
+      status: typeof status === 'number' ? status : undefined,
+      data,
+    };
+  }
+
+  private summarizeResponseData(data: unknown): string | undefined {
+    if (data === undefined || data === null || data === '') {
+      return undefined;
+    }
+
+    let serialized: string;
+    if (typeof data === 'string') {
+      serialized = data;
+    } else {
+      try {
+        serialized = JSON.stringify(data);
+      } catch {
+        return '[unserializable]';
+      }
+    }
+
+    return serialized.length > MAX_LOGGED_RESPONSE_DATA_LENGTH
+      ? `${serialized.slice(0, MAX_LOGGED_RESPONSE_DATA_LENGTH)}…`
+      : serialized;
   }
 
   async getMany(ids: number[]) {
