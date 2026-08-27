@@ -1,5 +1,5 @@
 import { Body, Controller, Get, Param, Patch, Post, Query, Req, UseGuards } from '@nestjs/common';
-import { Throttle } from '@nestjs/throttler';
+import { hours, Throttle } from '@nestjs/throttler';
 import {
   ApiBearerAuth,
   ApiForbiddenResponse,
@@ -28,7 +28,7 @@ export class FeedbackController {
 
   @Post()
   @UseGuards(SupabaseAuthGuard, TermsAcceptanceGuard, CompleteProfileGuard)
-  @Throttle({ default: { limit: 5, ttl: 3600 } })
+  @Throttle({ default: { limit: 5, ttl: hours(1) } })
   @ApiBearerAuth()
   @ApiOperation({
     summary: 'Create feedback',

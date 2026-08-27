@@ -1,4 +1,4 @@
-import { Injectable, NotFoundException } from '@nestjs/common';
+import { Injectable, Logger, NotFoundException } from '@nestjs/common';
 import { InjectRepository } from '@nestjs/typeorm';
 import { Repository } from 'typeorm';
 import { User } from '../auth/entities/user.entity';
@@ -23,6 +23,8 @@ export interface FeedbackResponse {
 
 @Injectable()
 export class FeedbackService {
+  private readonly logger = new Logger(FeedbackService.name);
+
   constructor(
     @InjectRepository(Feedback)
     private readonly feedbackRepo: Repository<Feedback>,
@@ -49,17 +51,25 @@ export class FeedbackService {
     );
     const response = this.toResponse({ ...feedback, user }, true);
 
-    await this.notificationService.sendNewFeedback({
-      id: feedback.id,
-      type: feedback.type,
-      content: feedback.content,
-      status: feedback.status,
-      createdAt: feedback.createdAt,
-      createdBy: {
-        id: user.id,
-        username: user.accountUsername,
-      },
-    });
+    void this.notificationService
+      .sendNewFeedback({
+        id: feedback.id,
+        type: feedback.type,
+        content: feedback.content,
+        status: feedback.status,
+        createdAt: feedback.createdAt,
+        createdBy: {
+          id: user.id,
+          username: user.accountUsername,
+        },
+      })
+      .catch((error: unknown) => {
+        const stack = error instanceof Error ? error.stack : undefined;
+        this.logger.error(
+          `Failed to send feedback notification for feedback=${feedback.id}`,
+          stack,
+        );
+      });
 
     return response;
   }

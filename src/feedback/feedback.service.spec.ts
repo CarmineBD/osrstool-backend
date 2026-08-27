@@ -1,4 +1,4 @@
-import { NotFoundException } from '@nestjs/common';
+import { Logger, NotFoundException } from '@nestjs/common';
 import type { Repository } from 'typeorm';
 import { FeedbackStatus, FeedbackType } from './feedback.enums';
 import { FeedbackNotificationService } from './feedback-notification.service';
@@ -75,6 +75,31 @@ describe('FeedbackService', () => {
         createdBy: { id: user.id, username: 'Carmine' },
       }),
     );
+  });
+
+  it('persists feedback when notification delivery fails', async () => {
+    const { service, feedbackRepoMock, notificationServiceMock } = createService();
+    const error = new Error('SMTP unavailable');
+    const loggerError = jest.spyOn(Logger.prototype, 'error').mockImplementation();
+    notificationServiceMock.sendNewFeedback.mockRejectedValueOnce(error);
+
+    try {
+      await expect(
+        service.create(user.id, {
+          type: FeedbackType.FEATURE,
+          content: feedback.content,
+        }),
+      ).resolves.toEqual(expect.objectContaining({ id: feedback.id }));
+      await Promise.resolve();
+
+      expect(feedbackRepoMock.save).toHaveBeenCalledTimes(1);
+      expect(loggerError).toHaveBeenCalledWith(
+        `Failed to send feedback notification for feedback=${feedback.id}`,
+        error.stack,
+      );
+    } finally {
+      loggerError.mockRestore();
+    }
   });
 
   it('paginates feedback without content in the list', async () => {
