@@ -1522,14 +1522,12 @@ export class MethodsService implements OnModuleDestroy {
         `target_level must be greater than or equal to the player's current ${skill} level (${skillProgress.level})`,
       );
     }
-    const roadmapCandidates = await this.findRoadmapCandidates(
-      skill,
-      enabled,
-      ignoredTags,
-      showOnlyFreeToPlay,
-    );
+    const goalReached = skillProgress.experience >= this.getExperienceForLevel(targetLevel);
+    const roadmapCandidates = goalReached
+      ? []
+      : await this.findRoadmapCandidates(skill, enabled, ignoredTags, showOnlyFreeToPlay);
 
-    if (roadmapCandidates.length === 0) {
+    if (!goalReached && roadmapCandidates.length === 0) {
       throw new NotFoundException(
         `No roadmap variants are available for skill ${skill} with the selected filters`,
       );

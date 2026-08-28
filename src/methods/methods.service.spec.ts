@@ -34,6 +34,48 @@ describe('MethodsService player context', () => {
     ).rejects.toEqual(new BadRequestException('player is required'));
   });
 
+  it('returns a completed roadmap before discovering candidates', async () => {
+    const redisService = {
+      getClient: jest.fn().mockReturnValue({}),
+    } as unknown as RedisService;
+    const service = new MethodsService(
+      {} as Repository<Method>,
+      {} as Repository<MethodVariant>,
+      {} as Repository<VariantIoItem>,
+      {} as Repository<VariantHistory>,
+      {} as Repository<MethodVariant>,
+      {} as Repository<User>,
+      {} as VariantSnapshotService,
+      { get: jest.fn() } as unknown as ConfigService,
+      {} as Repository<Item>,
+      redisService,
+    );
+    const internals = service as unknown as {
+      findRoadmapCandidates: jest.Mock;
+    };
+    internals.findRoadmapCandidates = jest.fn();
+
+    const response = await service.skillRoadmapResponse({
+      skill: 'fletching',
+      strategy: 'profitable',
+      show_only_free_to_play: true,
+      player: {
+        levels: { fletching: 99 },
+        experience: { fletching: 13043265 },
+        quests: {},
+        achievement_diaries: {},
+      },
+    });
+
+    expect(internals.findRoadmapCandidates).not.toHaveBeenCalled();
+    expect(response.data.roadmap).toMatchObject({
+      experienceRemaining: 0,
+      goalReached: true,
+      message: 'Target level 99 has already been reached.',
+      ranges: [],
+    });
+  });
+
   it('counts only enabled official variants for each skill summary', async () => {
     const find = jest.fn().mockResolvedValue([
       {
