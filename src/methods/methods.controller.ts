@@ -121,6 +121,9 @@ const ROADMAP_EXAMPLE = {
       currentExperience: 0,
       targetLevel: 99,
       targetExperience: 13034431,
+      experienceRemaining: 13034431,
+      goalReached: false,
+      message: null,
       totalHours: 42.5,
       averageAfkPercent: 76.2,
       totalProfit: {

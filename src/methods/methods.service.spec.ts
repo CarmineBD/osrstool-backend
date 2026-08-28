@@ -105,4 +105,125 @@ describe('MethodsService player context', () => {
       relations: ['variants'],
     });
   });
+
+  it('scales roadmap material totals by hours instead of actions per hour', () => {
+    const redisService = {
+      getClient: jest.fn().mockReturnValue({}),
+    } as unknown as RedisService;
+    const service = new MethodsService(
+      {} as Repository<Method>,
+      {} as Repository<MethodVariant>,
+      {} as Repository<VariantIoItem>,
+      {} as Repository<VariantHistory>,
+      {} as Repository<MethodVariant>,
+      {} as Repository<User>,
+      {} as VariantSnapshotService,
+      { get: jest.fn() } as unknown as ConfigService,
+      {} as Repository<Item>,
+      redisService,
+    );
+    const internals = service as unknown as {
+      buildSkillRoadmap: (
+        candidates: unknown[],
+        userInfo: unknown,
+        skill: string,
+        strategy: 'fastest' | 'profitable' | 'most_afk',
+        skillProgress: { level: number; experience: number; usesExactExperience: boolean },
+        targetLevel: number,
+      ) => {
+        totalInputs: Array<{ id: number; quantity: number }>;
+        totalOutputs: Array<{ id: number; quantity: number }>;
+      };
+    };
+    const candidate = {
+      method: {
+        id: 'method-1',
+        name: 'Prayer regeneration method',
+        slug: 'prayer-regeneration-method',
+        iconSource: 'item',
+        enabled: true,
+      },
+      variant: {
+        id: 'variant-1',
+        slug: 'prayer-regeneration',
+        iconSource: 'item',
+        xpPerHour: 258720,
+        actionsPerHour: 1960,
+        lowProfit: 0,
+        highProfit: 0,
+        tags: [],
+        inputs: [
+          { id: 21163, quantity: 30 },
+          { id: 29993, quantity: 1764 },
+          { id: 30100, quantity: 1960 },
+        ],
+        outputs: [{ id: 30125, quantity: 1544 }],
+      },
+    };
+
+    const roadmap = internals.buildSkillRoadmap(
+      [candidate],
+      {},
+      'herblore',
+      'fastest',
+      { level: 91, experience: 5910436, usesExactExperience: true },
+      99,
+    );
+
+    expect(roadmap.totalInputs).toEqual([
+      { id: 21163, quantity: 827 },
+      { id: 29993, quantity: 48573 },
+      { id: 30100, quantity: 53970 },
+    ]);
+    expect(roadmap.totalOutputs).toEqual([{ id: 30125, quantity: 42515 }]);
+  });
+
+  it('marks a roadmap as complete when the player already has the target experience', () => {
+    const redisService = {
+      getClient: jest.fn().mockReturnValue({}),
+    } as unknown as RedisService;
+    const service = new MethodsService(
+      {} as Repository<Method>,
+      {} as Repository<MethodVariant>,
+      {} as Repository<VariantIoItem>,
+      {} as Repository<VariantHistory>,
+      {} as Repository<MethodVariant>,
+      {} as Repository<User>,
+      {} as VariantSnapshotService,
+      { get: jest.fn() } as unknown as ConfigService,
+      {} as Repository<Item>,
+      redisService,
+    );
+    const internals = service as unknown as {
+      buildSkillRoadmap: (
+        candidates: unknown[],
+        userInfo: unknown,
+        skill: string,
+        strategy: 'fastest' | 'profitable' | 'most_afk',
+        skillProgress: { level: number; experience: number; usesExactExperience: boolean },
+        targetLevel: number,
+      ) => {
+        experienceRemaining: number;
+        goalReached: boolean;
+        message: string | null;
+        ranges: unknown[];
+      };
+    };
+
+    const roadmap = internals.buildSkillRoadmap(
+      [],
+      {},
+      'fletching',
+      'profitable',
+      { level: 99, experience: 13043265, usesExactExperience: true },
+      99,
+    );
+
+    expect(roadmap).toMatchObject({
+      experienceRemaining: 0,
+      goalReached: true,
+      message: 'Target level 99 has already been reached.',
+      ranges: [],
+    });
+  });
 });
