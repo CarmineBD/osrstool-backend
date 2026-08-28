@@ -1522,14 +1522,12 @@ export class MethodsService implements OnModuleDestroy {
         `target_level must be greater than or equal to the player's current ${skill} level (${skillProgress.level})`,
       );
     }
-    const roadmapCandidates = await this.findRoadmapCandidates(
-      skill,
-      enabled,
-      ignoredTags,
-      showOnlyFreeToPlay,
-    );
+    const goalReached = skillProgress.experience >= this.getExperienceForLevel(targetLevel);
+    const roadmapCandidates = goalReached
+      ? []
+      : await this.findRoadmapCandidates(skill, enabled, ignoredTags, showOnlyFreeToPlay);
 
-    if (roadmapCandidates.length === 0) {
+    if (!goalReached && roadmapCandidates.length === 0) {
       throw new NotFoundException(
         `No roadmap variants are available for skill ${skill} with the selected filters`,
       );
@@ -1843,10 +1841,13 @@ export class MethodsService implements OnModuleDestroy {
   private accumulateRoadmapMaterialTotals(
     totals: Map<number, number>,
     items: RoadmapMaterialItem[],
-    actionsNeeded: number,
+    hours: number,
   ): void {
     for (const item of items) {
-      const nextQuantity = (totals.get(item.id) ?? 0) + actionsNeeded * item.quantity;
+      // Variant IO quantities represent the amount produced or consumed per hour.
+      // Do not multiply them by actionsPerHour: that would apply the hourly action
+      // rate twice and inflate totals by that rate.
+      const nextQuantity = (totals.get(item.id) ?? 0) + hours * item.quantity;
       totals.set(item.id, nextQuantity);
     }
   }
@@ -1950,6 +1951,9 @@ export class MethodsService implements OnModuleDestroy {
         currentExperience: skillProgress.experience,
         targetLevel,
         targetExperience,
+        experienceRemaining: 0,
+        goalReached: true,
+        message: `Target level ${targetLevel} has already been reached.`,
         totalHours: 0,
         averageAfkPercent: 0,
         totalProfit: { low: 0, high: 0 },
@@ -2008,23 +2012,8 @@ export class MethodsService implements OnModuleDestroy {
       const experienceNeeded = Math.max(0, experienceEnd - experienceStart);
       const hours = experienceNeeded / candidate.variant.xpPerHour;
       const afkPercent = this.getRoadmapAfkPercent(candidate.variant.afkiness);
-      const actionsPerHour = Number(candidate.variant.actionsPerHour);
-      const canComputeMaterials = Number.isFinite(actionsPerHour) && actionsPerHour > 0;
-
-      if (canComputeMaterials) {
-        const actionsNeeded = (experienceNeeded * actionsPerHour) / candidate.variant.xpPerHour;
-        this.accumulateRoadmapMaterialTotals(totalInputs, candidate.variant.inputs, actionsNeeded);
-        this.accumulateRoadmapMaterialTotals(
-          totalOutputs,
-          candidate.variant.outputs,
-          actionsNeeded,
-        );
-      } else {
-        const variantTitle = candidate.variant.label?.trim() || candidate.method.name;
-        warnings.push(
-          `Roadmap material totals are unavailable because actionsPerHour is missing for ${variantTitle} (levels ${level}-${levelEnd}).`,
-        );
-      }
+      this.accumulateRoadmapMaterialTotals(totalInputs, candidate.variant.inputs, hours);
+      this.accumulateRoadmapMaterialTotals(totalOutputs, candidate.variant.outputs, hours);
 
       ranges.push({
         levelStart: level,
@@ -2062,6 +2051,9 @@ export class MethodsService implements OnModuleDestroy {
       currentExperience: skillProgress.experience,
       targetLevel,
       targetExperience,
+      experienceRemaining: Math.max(0, targetExperience - skillProgress.experience),
+      goalReached: false,
+      message: null,
       totalHours,
       averageAfkPercent: totalHours > 0 ? weightedAfkSum / totalHours : 0,
       totalProfit,
