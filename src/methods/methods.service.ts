@@ -294,6 +294,7 @@ interface SkillSummaryBySkill {
   bestProfit: SkillSummaryMethod | null;
   bestAfk: SkillSummaryMethod | null;
   bestXp: SkillSummaryMethod | null;
+  officialVariantCount: number;
 }
 
 type RoadmapStrategy = 'fastest' | 'profitable' | 'most_afk';

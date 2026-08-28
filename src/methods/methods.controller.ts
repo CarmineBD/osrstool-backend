@@ -361,7 +361,7 @@ export class MethodsController {
   @ApiOperation({
     summary: 'Get skill summaries',
     description:
-      'Returns bestProfit, bestAfk and bestXp methods per skill. An optional player context can be sent in the request body; enabled requires super_admin.',
+      'Returns bestProfit, bestAfk, bestXp, and the total number of enabled official variants per skill. An optional player context can be sent in the request body; enabled requires super_admin.',
   })
   @ApiBody({ type: PlayerContextDto, required: false })
   @ApiQuery({
