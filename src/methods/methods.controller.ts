@@ -378,6 +378,7 @@ export class MethodsController {
             bestProfit: METHOD_EXAMPLE,
             bestAfk: METHOD_EXAMPLE,
             bestXp: METHOD_EXAMPLE,
+            officialVariantCount: 12,
           },
         },
         meta: { computedAt: 1771459200 },

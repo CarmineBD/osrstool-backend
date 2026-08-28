@@ -1416,6 +1416,7 @@ export class MethodsService implements OnModuleDestroy {
       authenticatedUserId ?? undefined,
       enabled,
     );
+    const officialVariantCountsBySkill = await this.findOfficialEnabledVariantCountsBySkill();
 
     const candidatesBySkill = new Map<string, SkillSummaryCandidate[]>();
     for (const method of methods) {
@@ -1468,6 +1469,7 @@ export class MethodsService implements OnModuleDestroy {
         bestXp: bestXpCandidate
           ? this.toSingleVariantSkillMethod(bestXpCandidate.method, bestXpCandidate.variant)
           : null,
+        officialVariantCount: officialVariantCountsBySkill.get(skill) ?? 0,
       };
     }
 
@@ -1566,6 +1568,32 @@ export class MethodsService implements OnModuleDestroy {
     if (typeof skillName !== 'string') return '';
     const normalized = skillName.trim().toLowerCase();
     return normalized.length > 0 ? normalized : '';
+  }
+
+  private async findOfficialEnabledVariantCountsBySkill(): Promise<Map<string, number>> {
+    const methods = await this.methodRepo.find({
+      where: { enabled: true, isOfficial: true },
+      relations: ['variants'],
+    });
+    const countsBySkill = new Map<string, number>();
+
+    for (const method of methods) {
+      for (const variant of method.variants) {
+        const xpEntries = Array.isArray(variant.xpHour) ? variant.xpHour : [];
+        for (const entry of xpEntries) {
+          const skillKey = this.toSkillSummaryKey(entry.skill);
+          const experience = Number(entry.experience);
+
+          if (!skillKey || !Number.isFinite(experience) || experience <= 0) {
+            continue;
+          }
+
+          countsBySkill.set(skillKey, (countsBySkill.get(skillKey) ?? 0) + 1);
+        }
+      }
+    }
+
+    return countsBySkill;
   }
 
   private pickBestSkillCandidate(
