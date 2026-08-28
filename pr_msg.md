@@ -1,12 +1,12 @@
 ## Summary
 
-- Send the configured OSRS Wiki user agent when refreshing the latest item prices, with a descriptive fallback.
-- Replace verbose Axios error-object logging with compact HTTP error details.
-- Add coverage for configured and fallback request headers plus HTTP error logging.
+- Add `officialVariantCount` to each skill summary response and document it in the API example.
+- Calculate counts from enabled official variants with positive experience for each skill.
+- Add coverage for official-variant filtering and skill-key normalization.
 
 ## User-facing changelog
 
-- Fixed an issue that could prevent item prices and method profits from refreshing.
+- Skill summaries now include the number of enabled official variants available for each skill.
 
 ## How to test
 
@@ -18,4 +18,3 @@
 
 - Base branch: `develop`
 - Target environment: `TST`
-- No cache, profit calculation, or scheduled job logic changes.
