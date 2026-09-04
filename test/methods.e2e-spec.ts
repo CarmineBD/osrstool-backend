@@ -15,6 +15,7 @@ import { createTestApp } from './utils/create-test-app';
 import { buildItemFixture, buildMethodFixture } from '../src/testing/fixtures';
 import { Item } from '../src/items/entities/item.entity';
 import { Method } from '../src/methods/entities/method.entity';
+import { METHODS_PROFITS_HASH_KEY } from '../src/methods/profit-cache.constants';
 import { MethodVariant } from '../src/methods/entities/variant.entity';
 import { VariantIoItem } from '../src/methods/entities/io-item.entity';
 import { VariantHistory } from '../src/methods/entities/variant-history.entity';
@@ -114,7 +115,7 @@ describe('Methods (e2e)', () => {
     profits: Record<string, Record<string, { low: number; high: number }>>,
   ) => {
     redisCall.mockImplementation((command: string, key: string, field?: string) => {
-      if (command === 'HGETALL' && key === 'methods:profits') {
+      if (command === 'HGETALL' && key === METHODS_PROFITS_HASH_KEY) {
         return Promise.resolve(
           Object.fromEntries(
             Object.entries(profits).map(([methodId, methodProfits]) => [
@@ -125,7 +126,7 @@ describe('Methods (e2e)', () => {
         );
       }
 
-      if (command === 'HGET' && key === 'methods:profits' && field) {
+      if (command === 'HGET' && key === METHODS_PROFITS_HASH_KEY && field) {
         return Promise.resolve(JSON.stringify(profits[field] ?? {}));
       }
 

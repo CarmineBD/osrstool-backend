@@ -1,12 +1,16 @@
 const redisCall = jest.fn();
+const redisMulti = jest.fn();
+const redisTransactionCall = jest.fn();
+const redisTransactionExec = jest.fn();
 
 jest.mock('ioredis', () => ({
   __esModule: true,
-  default: jest.fn().mockImplementation(() => ({ call: redisCall })),
+  default: jest.fn().mockImplementation(() => ({ call: redisCall, multi: redisMulti })),
   __call: redisCall,
 }));
 
 import { MethodProfitRefresherService } from './method-profit-refresher.service';
+import { METHODS_PROFITS_HASH_KEY } from '../methods/profit-cache.constants';
 import type { MethodsService } from '../methods/methods.service';
 import type { PricesService } from '../prices/prices.service';
 import type { ConfigService } from '@nestjs/config';
@@ -14,6 +18,11 @@ import type { ConfigService } from '@nestjs/config';
 describe('MethodProfitRefresherService', () => {
   beforeEach(() => {
     redisCall.mockReset();
+    redisMulti.mockReset();
+    redisTransactionCall.mockReset();
+    redisTransactionExec.mockReset();
+    redisTransactionExec.mockResolvedValue([]);
+    redisMulti.mockReturnValue({ call: redisTransactionCall, exec: redisTransactionExec });
   });
 
   it('computes and stores profits per variant', async () => {
@@ -52,12 +61,12 @@ describe('MethodProfitRefresherService', () => {
 
     await service.refresh();
 
-    expect(redisCall).toHaveBeenCalledTimes(2);
-    const calls = redisCall.mock.calls as unknown[][];
-    expect(calls[0]).toEqual(['DEL', 'methods:profits']);
+    expect(redisMulti).toHaveBeenCalledTimes(1);
+    expect(redisTransactionCall).toHaveBeenCalledTimes(3);
+    const calls = redisTransactionCall.mock.calls as unknown[][];
     const hsetCall = calls[1] ?? [];
     expect(hsetCall[0]).toBe('HSET');
-    expect(hsetCall[1]).toBe('methods:profits');
+    expect(hsetCall[1]).toMatch(new RegExp(`^${METHODS_PROFITS_HASH_KEY}:refresh:`));
     expect(hsetCall[2]).toBe('m1');
     const payload = typeof hsetCall[3] === 'string' ? hsetCall[3] : '{}';
     const parsed = JSON.parse(payload) as unknown as {
@@ -65,6 +74,8 @@ describe('MethodProfitRefresherService', () => {
     };
     expect(parsed.v1.low).toBe(36);
     expect(parsed.v1.high).toBe(55);
+    expect(calls[2]).toEqual(['RENAME', hsetCall[1], METHODS_PROFITS_HASH_KEY]);
+    expect(redisTransactionExec).toHaveBeenCalledTimes(1);
   });
 
   it('skips scheduled refresh when SCHEDULED_JOBS_ENABLED is false', async () => {

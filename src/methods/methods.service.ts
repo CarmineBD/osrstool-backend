@@ -41,6 +41,7 @@ import { Item } from '../items/entities/item.entity';
 import { IconResolverService, type IconReference } from '../icons/icon-resolver.service';
 import { IconSource } from '../icons/icon-source.enum';
 import { CalculationMode } from './calculation-mode.enum';
+import { METHODS_PROFITS_HASH_KEY } from './profit-cache.constants';
 import { RedisService } from '../redis/redis.service';
 import { METHOD_CATEGORY_VALUES } from './dto/method-category.constants';
 import { SKILL_KEY_VALUES } from './dto/skill.constants';
@@ -446,7 +447,7 @@ export class MethodsService implements OnModuleDestroy {
   private readonly logger = new Logger(MethodsService.name);
   private readonly redis: Redis;
   private readonly ownsRedisClient: boolean;
-  private readonly methodsProfitsHashKey = 'methods:profits';
+  private readonly methodsProfitsHashKey = METHODS_PROFITS_HASH_KEY;
   private readonly itemPricesHashKey = 'items:prices';
   private readonly itemVolumes24hHashKey = 'items:vol24h';
   private readonly methodsListCachePrefix = 'methods:list:v1';
