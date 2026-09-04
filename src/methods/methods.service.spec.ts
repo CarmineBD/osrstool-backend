@@ -10,6 +10,8 @@ import type { VariantSnapshotService } from '../variant-snapshots/variant-snapsh
 import type { User } from '../auth/entities/user.entity';
 import type { Item } from '../items/entities/item.entity';
 import type { RedisService } from '../redis/redis.service';
+import { CalculationMode } from './calculation-mode.enum';
+import { IconSource } from '../icons/icon-source.enum';
 
 describe('MethodsService player context', () => {
   it('requires a frontend-supplied player object for roadmaps', async () => {
@@ -155,7 +157,91 @@ describe('MethodsService player context', () => {
         'variants.dynamicCycle',
         'variants.dynamicCycle.steps',
       ],
+      relationLoadStrategy: 'query',
     });
+  });
+
+  it('persists a new dynamic variant inside the method update transaction', async () => {
+    const transactionMethodRepo = { save: jest.fn() };
+    const transactionVariantRepo = {
+      create: jest.fn((data: Partial<MethodVariant>) => ({ id: 'new-variant', ...data })),
+      save: jest.fn().mockResolvedValue(undefined),
+      delete: jest.fn(),
+    };
+    const transactionManager = {
+      getRepository: jest.fn((entity: unknown) => {
+        if (entity === Method) return transactionMethodRepo;
+        if (entity === MethodVariant) return transactionVariantRepo;
+        throw new Error(`Unexpected transactional repository: ${String(entity)}`);
+      }),
+    };
+    const transaction = jest.fn(
+      async (callback: (manager: typeof transactionManager) => Promise<unknown>) =>
+        callback(transactionManager),
+    );
+    const methodRepo = {
+      findOne: jest.fn().mockResolvedValue({ id: 'method-1', variants: [] }),
+      count: jest.fn().mockResolvedValue(0),
+      manager: { transaction },
+    } as unknown as Repository<Method>;
+    const globalVariantCreate = jest.fn();
+    const globalVariantSave = jest.fn();
+    const variantRepo = {
+      count: jest.fn().mockResolvedValue(0),
+      create: globalVariantCreate,
+      save: globalVariantSave,
+    } as unknown as Repository<MethodVariant>;
+    const redisService = {
+      getClient: jest.fn().mockReturnValue({}),
+    } as unknown as RedisService;
+    const service = new MethodsService(
+      methodRepo,
+      variantRepo,
+      {} as Repository<VariantIoItem>,
+      {} as Repository<VariantHistory>,
+      {} as Repository<MethodVariant>,
+      {} as Repository<User>,
+      {} as VariantSnapshotService,
+      { get: jest.fn() } as unknown as ConfigService,
+      {} as Repository<Item>,
+      redisService,
+      undefined,
+      { assertReferencesExist: jest.fn().mockResolvedValue(undefined) } as never,
+    );
+    const internals = service as unknown as {
+      replaceDynamicConfiguration: jest.Mock;
+    };
+    const persistenceError = new Error('dynamic configuration persistence failed');
+    internals.replaceDynamicConfiguration = jest.fn().mockRejectedValue(persistenceError);
+
+    await expect(
+      service.update('method-1', {
+        variants: [
+          {
+            label: 'New dynamic variant',
+            icon_id: 4152,
+            iconSource: IconSource.ITEM,
+            calculationMode: CalculationMode.DYNAMIC,
+            dynamicAction: { name: 'Action', rollIntervalTicks: 4 },
+            cycleSteps: [
+              {
+                name: 'Wait',
+                stepOrderPosition: 1,
+                durationTicks: 4,
+                clicksMade: 0,
+                isAfk: false,
+              },
+            ],
+          },
+        ],
+      }),
+    ).rejects.toThrow(persistenceError);
+
+    expect(transaction).toHaveBeenCalledTimes(1);
+    expect(transactionVariantRepo.create).toHaveBeenCalledTimes(1);
+    expect(transactionVariantRepo.save).toHaveBeenCalledTimes(1);
+    expect(globalVariantCreate).not.toHaveBeenCalled();
+    expect(globalVariantSave).not.toHaveBeenCalled();
   });
 
   it('scales roadmap material totals by hours instead of actions per hour', () => {

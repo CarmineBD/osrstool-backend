@@ -1185,6 +1185,42 @@ describe('Methods (e2e)', () => {
     expect(String(body.message)).toContain('actionsPerHour');
   });
 
+  it('rejects dynamic cycle steps whose order starts at zero', async () => {
+    await seedItems(4151, 4152);
+
+    const server = app.getHttpServer() as unknown as Server;
+    const response = await request(server)
+      .post('/methods/create')
+      .send({
+        name: 'Invalid dynamic step order',
+        icon_id: 4151,
+        iconSource: IconSource.ITEM,
+        category: 'Skilling',
+        variants: [
+          {
+            label: 'Invalid step order variant',
+            icon_id: 4152,
+            iconSource: IconSource.ITEM,
+            calculationMode: CalculationMode.DYNAMIC,
+            dynamicAction: { name: 'Action', rollIntervalTicks: 4 },
+            cycleSteps: [
+              {
+                name: 'Wait',
+                stepOrderPosition: 0,
+                durationTicks: 4,
+                clicksMade: 0,
+                isAfk: false,
+              },
+            ],
+          },
+        ],
+      })
+      .expect(400);
+
+    const body = response.body as { message?: unknown };
+    expect(String(body.message)).toContain('stepOrderPosition must not be less than 1');
+  });
+
   it('validates and returns game icons using iconSource', async () => {
     await seedItems(100, 200);
     const gameIcon = await dataSource.getRepository(GameIcon).save({

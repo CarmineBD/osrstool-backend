@@ -19,7 +19,7 @@ export class DynamicCycleStepDto {
   name: string;
 
   @IsInt()
-  @Min(0)
+  @Min(1)
   stepOrderPosition: number;
 
   @IsOptional()
