@@ -1,4 +1,4 @@
-import { Injectable, Logger, Optional } from '@nestjs/common';
+import { Injectable, Logger, OnModuleInit, Optional } from '@nestjs/common';
 import { Cron } from '@nestjs/schedule';
 import IORedis, { Redis } from 'ioredis';
 import { MethodsService } from '../methods/methods.service';
@@ -6,12 +6,13 @@ import { PricesService } from '../prices/prices.service';
 import { ConfigService } from '@nestjs/config';
 import { parseBooleanEnv } from '../common/utils/parse-boolean-env';
 import { RedisService } from '../redis/redis.service';
+import { METHODS_PROFITS_HASH_KEY } from '../methods/profit-cache.constants';
 
 @Injectable()
-export class MethodProfitRefresherService {
+export class MethodProfitRefresherService implements OnModuleInit {
   private readonly logger = new Logger(MethodProfitRefresherService.name);
   private readonly redis: Redis;
-  private readonly methodsProfitsHashKey = 'methods:profits';
+  private readonly methodsProfitsHashKey = METHODS_PROFITS_HASH_KEY;
   private readonly jobsEnabled: boolean;
 
   constructor(
@@ -23,7 +24,19 @@ export class MethodProfitRefresherService {
     this.redis =
       redisService?.getClient() ??
       new IORedis((this.config.get<string>('REDIS_URL') as string) ?? '');
-    this.jobsEnabled = parseBooleanEnv(this.config.get<string>('SCHEDULED_JOBS_ENABLED'), true);
+    this.jobsEnabled = parseBooleanEnv(
+      this.config.get<string>('METHOD_PROFIT_REFRESHER_ENABLED'),
+      parseBooleanEnv(this.config.get<string>('SCHEDULED_JOBS_ENABLED'), true),
+    );
+  }
+
+  async onModuleInit(): Promise<void> {
+    if (!this.jobsEnabled) {
+      this.logger.log('Skipping initial profit refresh (METHOD_PROFIT_REFRESHER_ENABLED=false).');
+      return;
+    }
+
+    await this.refresh();
   }
 
   @Cron('*/1 * * * *') // cada minuto
@@ -81,16 +94,20 @@ export class MethodProfitRefresherService {
       });
     }
 
-    // 4) Guardar resultado en Redis en un hash por metodo
+    // 4) Publicar un snapshot completo de forma atómica. Los lectores nunca
+    // observan el hash vacío entre un DEL y el HSET, algo importante para el
+    // capturador de histórico que puede ejecutarse a la vez.
     const entries: string[] = [];
     for (const [methodId, methodProfits] of Object.entries(profits)) {
       entries.push(methodId, JSON.stringify(methodProfits));
     }
 
-    await this.redis.call('DEL', this.methodsProfitsHashKey);
-    if (entries.length > 0) {
-      await this.redis.call('HSET', this.methodsProfitsHashKey, ...entries);
-    }
+    const temporaryKey = `${this.methodsProfitsHashKey}:refresh:${Date.now()}`;
+    const transaction = this.redis.multi();
+    transaction.call('DEL', temporaryKey);
+    transaction.call('HSET', temporaryKey, ...entries);
+    transaction.call('RENAME', temporaryKey, this.methodsProfitsHashKey);
+    await transaction.exec();
 
     this.logger.log(`Actualizado ${this.methodsProfitsHashKey} (${methods.length} metodos)`);
   }

@@ -11,6 +11,7 @@ import { VariantSnapshot } from '../methods/entities/variant-snapshot.entity';
 import { MethodVariant } from '../methods/entities/variant.entity';
 import { parseBooleanEnv } from '../common/utils/parse-boolean-env';
 import { RedisService } from '../redis/redis.service';
+import { METHODS_PROFITS_HASH_KEY } from '../methods/profit-cache.constants';
 import {
   HistoryAgg,
   HistoryGranularity,
@@ -27,7 +28,7 @@ interface RollupWriteStats {
 export class VariantHistoryService {
   private readonly logger = new Logger(VariantHistoryService.name);
   private readonly redis: Redis;
-  private readonly methodsProfitsHashKey = 'methods:profits';
+  private readonly methodsProfitsHashKey = METHODS_PROFITS_HASH_KEY;
   private readonly jobsEnabled: boolean;
   private readonly pruneEnabled: boolean;
   private readonly rawRetentionHours: number;

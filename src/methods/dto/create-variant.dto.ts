@@ -15,6 +15,7 @@ import {
   Matches,
   ValidateNested,
   IsDefined,
+  ValidateIf,
 } from 'class-validator';
 import { Type } from 'class-transformer';
 import { IoItemDto } from './io-item.dto';
@@ -22,6 +23,7 @@ import { XpHourEntryDto } from './xp-hour-entry.dto';
 import { VariantRecommendations, VariantRequirements, XpHour } from '../types';
 import { IsSafeMarkdown } from '../../common/validators/is-safe-markdown.validator';
 import {
+  CYCLE_STEPS_MAX_COUNT,
   DESCRIPTION_MAX_LENGTH,
   INPUTS_MAX_COUNT,
   MAX_AFKINESS,
@@ -37,6 +39,9 @@ import { HasMaxRequirementEntries } from './validators/requirement-entry-count.v
 import { SKILL_KEY_VALUES } from './skill.constants';
 import { ActionType } from '../action-type.enum';
 import { IconSource, ICON_SOURCE_VALUES } from '../../icons/icon-source.enum';
+import { CalculationMode } from '../calculation-mode.enum';
+import { DynamicActionDto } from './dynamic-action.dto';
+import { DynamicCycleStepDto } from './dynamic-cycle-step.dto';
 
 const RISK_LEVEL_PATTERN = /^(100|[1-9]?\d)$/;
 
@@ -55,13 +60,23 @@ export class CreateVariantDto {
   @IsIn(ICON_SOURCE_VALUES, { message: 'iconSource must be either "item" or "game_icon"' })
   iconSource: IconSource;
 
+  @IsOptional()
+  @IsEnum(CalculationMode)
+  calculationMode?: CalculationMode;
+
+  @ValidateIf(
+    ({ calculationMode }: CreateVariantDto) => calculationMode !== CalculationMode.DYNAMIC,
+  )
   @IsInt()
   @Min(0)
   @Max(MAX_CLICK_INTENSITY)
-  actionsPerHour: number;
+  actionsPerHour?: number;
 
+  @ValidateIf(
+    ({ calculationMode }: CreateVariantDto) => calculationMode !== CalculationMode.DYNAMIC,
+  )
   @IsEnum(ActionType)
-  actionType: ActionType;
+  actionType?: ActionType;
 
   @IsOptional()
   @IsArray()
@@ -117,15 +132,29 @@ export class CreateVariantDto {
   @HasMaxRequirementEntries(REQUIREMENT_ENTRIES_MAX_COUNT)
   recommendations?: VariantRecommendations;
 
+  @IsOptional()
   @IsArray()
   @ArrayMaxSize(INPUTS_MAX_COUNT)
   @ValidateNested({ each: true })
   @Type(() => IoItemDto)
-  inputs: IoItemDto[];
+  inputs?: IoItemDto[];
 
+  @IsOptional()
   @IsArray()
   @ArrayMaxSize(OUTPUTS_MAX_COUNT)
   @ValidateNested({ each: true })
   @Type(() => IoItemDto)
-  outputs: IoItemDto[];
+  outputs?: IoItemDto[];
+
+  @IsOptional()
+  @ValidateNested()
+  @Type(() => DynamicActionDto)
+  dynamicAction?: DynamicActionDto;
+
+  @IsOptional()
+  @IsArray()
+  @ArrayMaxSize(CYCLE_STEPS_MAX_COUNT)
+  @ValidateNested({ each: true })
+  @Type(() => DynamicCycleStepDto)
+  cycleSteps?: DynamicCycleStepDto[];
 }

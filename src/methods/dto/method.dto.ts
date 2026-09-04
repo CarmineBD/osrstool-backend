@@ -1,6 +1,8 @@
 import { VariantRequirements, VariantRecommendations, XpHour } from '../types';
 import { ActionType } from '../action-type.enum';
 import { IconSource } from '../../icons/icon-source.enum';
+import { CalculationMode } from '../calculation-mode.enum';
+import { calculateDynamicVariant } from '../dynamic-variant-calculator';
 
 export interface VariantDto {
   id: string;
@@ -13,8 +15,8 @@ export interface VariantDto {
   actionType?: ActionType;
   label?: string;
   description?: string | null;
-  clickIntensity?: number;
-  afkiness?: number;
+  clickIntensity?: number | null;
+  afkiness?: number | null;
   riskLevel?: string;
   requirements?: VariantRequirements | null;
   recommendations?: VariantRecommendations | null;
@@ -23,6 +25,25 @@ export interface VariantDto {
   members?: boolean;
   likesCount?: number;
   likedUserIds?: string[];
+  calculationMode?: CalculationMode;
+  cycleTotalDurationTicks?: number;
+  cyclesPerHour?: number;
+  action?: {
+    id: string;
+    name: string;
+    rollIntervalTicks: number;
+    xpGained: Array<{ skillId: number; skill: string; experience: number }>;
+    inputs: { id: number; quantity: number }[];
+    outputs: { id: number; quantity: number }[];
+  };
+  cycleSteps?: Array<{
+    name: string;
+    stepOrderPosition: number;
+    durationTicks: number;
+    clicksMade: number;
+    isAfk: boolean;
+    actionsMade: number | null;
+  }>;
 }
 
 export class MethodDto {
@@ -77,14 +98,14 @@ export class MethodDto {
       iconSource: IconSource;
       label: string;
       description: string | null;
-      actionsPerHour: number;
-      actionType: ActionType;
-      clickIntensity: number;
-      afkiness: number;
+      actionsPerHour: number | null;
+      actionType: ActionType | null;
+      clickIntensity: number | null;
+      afkiness: number | null;
       riskLevel: string;
       requirements: VariantRequirements | null;
       xpHour: XpHour | null;
-      ioItems: Array<{
+      ioItems?: Array<{
         itemId: number;
         quantity: number;
         type: 'input' | 'output';
@@ -95,23 +116,58 @@ export class MethodDto {
       members?: boolean;
       likesCount?: number;
       likedUserIds?: string[];
+      calculationMode?: CalculationMode;
+      dynamicAction?: {
+        id: string;
+        name: string;
+        rollIntervalTicks: number;
+        inputs?: Array<{ itemId: number; quantity: number | string }>;
+        outputs?: Array<{ itemId: number; quantity: number | string }>;
+        skillXp?: Array<{
+          skillId: number;
+          experience: number | string;
+          skill?: { key?: string | null } | null;
+        }>;
+      } | null;
+      dynamicCycle?: {
+        steps?: Array<{
+          name: string;
+          stepOrderPosition: number;
+          durationTicks: number | null;
+          clicksMade: number;
+          isAfk: boolean;
+          actionsMade: number | null;
+        }>;
+      } | null;
     }>;
   }): MethodDto {
     const variants = e.variants.map((variant) => {
-      const inputs = variant.ioItems
+      const fixedInputs = (variant.ioItems ?? [])
         .filter((item) => item.type === 'input')
         .map((item) => ({
           id: item.itemId,
           quantity: Number(item.quantity),
           reason: item.reason ?? null,
         }));
-      const outputs = variant.ioItems
+      const fixedOutputs = (variant.ioItems ?? [])
         .filter((item) => item.type === 'output')
         .map((item) => ({
           id: item.itemId,
           quantity: Number(item.quantity),
           reason: item.reason ?? null,
         }));
+      const calculationMode = variant.calculationMode ?? CalculationMode.FIXED;
+      const dynamicCalculation =
+        calculationMode === CalculationMode.DYNAMIC && variant.dynamicAction && variant.dynamicCycle
+          ? calculateDynamicVariant(variant.dynamicAction, variant.dynamicCycle.steps ?? [])
+          : null;
+
+      if (calculationMode === CalculationMode.DYNAMIC && !dynamicCalculation) {
+        throw new Error(
+          `Dynamic variant ${variant.id} is missing its action or cycle configuration`,
+        );
+      }
+
       return {
         id: variant.id,
         slug: variant.slug,
@@ -119,20 +175,31 @@ export class MethodDto {
         iconSource: variant.iconSource,
         label: variant.label,
         description: variant.description,
-        actionsPerHour: variant.actionsPerHour,
-        actionType: variant.actionType,
-        clickIntensity: variant.clickIntensity,
-        afkiness: variant.afkiness,
+        calculationMode,
+        actionsPerHour: dynamicCalculation?.actionsPerHour ?? variant.actionsPerHour ?? undefined,
+        ...(calculationMode === CalculationMode.FIXED
+          ? { actionType: variant.actionType ?? undefined }
+          : {}),
+        clickIntensity: dynamicCalculation?.clickIntensity ?? variant.clickIntensity,
+        afkiness: dynamicCalculation?.afkiness ?? variant.afkiness,
         riskLevel: variant.riskLevel,
         requirements: variant.requirements,
-        xpHour: variant.xpHour,
-        inputs,
-        outputs,
+        xpHour: dynamicCalculation?.xpHour ?? variant.xpHour,
+        inputs: dynamicCalculation?.inputs ?? fixedInputs,
+        outputs: dynamicCalculation?.outputs ?? fixedOutputs,
         recommendations: variant.recommendations,
         wilderness: variant.wilderness,
         members: variant.members ?? false,
         likesCount: variant.likesCount ?? 0,
         likedUserIds: variant.likedUserIds ?? [],
+        ...(dynamicCalculation
+          ? {
+              cycleTotalDurationTicks: dynamicCalculation.cycleTotalDurationTicks,
+              cyclesPerHour: dynamicCalculation.cyclesPerHour,
+              action: dynamicCalculation.action,
+              cycleSteps: dynamicCalculation.cycleSteps,
+            }
+          : {}),
       };
     });
     return new MethodDto(

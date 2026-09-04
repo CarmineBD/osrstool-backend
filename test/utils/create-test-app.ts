@@ -10,6 +10,12 @@ import { Item } from '../../src/items/entities/item.entity';
 import { Method } from '../../src/methods/entities/method.entity';
 import { MethodVariant } from '../../src/methods/entities/variant.entity';
 import { VariantIoItem } from '../../src/methods/entities/io-item.entity';
+import { VariantAction } from '../../src/methods/entities/variant-action.entity';
+import { VariantActionInput } from '../../src/methods/entities/variant-action-input.entity';
+import { VariantActionOutput } from '../../src/methods/entities/variant-action-output.entity';
+import { VariantActionSkillXp } from '../../src/methods/entities/variant-action-skill-xp.entity';
+import { VariantCycle } from '../../src/methods/entities/variant-cycle.entity';
+import { VariantCycleStep } from '../../src/methods/entities/variant-cycle-step.entity';
 import { VariantHistory15m } from '../../src/methods/entities/variant-history-15m.entity';
 import { VariantHistory } from '../../src/methods/entities/variant-history.entity';
 import { VariantHistoryDaily } from '../../src/methods/entities/variant-history-daily.entity';
@@ -79,6 +85,12 @@ export const createTestApp = async (): Promise<TestApp> => {
           Method,
           MethodVariant,
           VariantIoItem,
+          VariantAction,
+          VariantActionInput,
+          VariantActionOutput,
+          VariantActionSkillXp,
+          VariantCycle,
+          VariantCycleStep,
           VariantHistory,
           VariantHistory15m,
           VariantHistoryDaily,

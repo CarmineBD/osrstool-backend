@@ -6,6 +6,7 @@ import {
   CreateDateColumn,
   ManyToOne,
   OneToMany,
+  OneToOne,
   JoinColumn,
   Unique,
   Check,
@@ -15,6 +16,9 @@ import { VariantIoItem } from './io-item.entity';
 import { XpHour, VariantRequirements, VariantRecommendations } from '../types';
 import { ActionType } from '../action-type.enum';
 import { IconSource } from '../../icons/icon-source.enum';
+import { CalculationMode } from '../calculation-mode.enum';
+import { VariantAction } from './variant-action.entity';
+import { VariantCycle } from './variant-cycle.entity';
 
 @Entity('method_variants')
 @Unique('UQ_variant_method_slug', ['method', 'slug'])
@@ -42,6 +46,9 @@ export class MethodVariant {
   @Column({ name: 'icon_source', type: 'text', default: IconSource.ITEM })
   iconSource: IconSource;
 
+  @Column({ name: 'calculation_mode', type: 'varchar', length: 16, default: CalculationMode.FIXED })
+  calculationMode: CalculationMode;
+
   // AquÃƒÂ­ forzamos que xpHour se guarde/lea de la columna xp_hour
   @Column({
     name: 'xp_hour',
@@ -52,10 +59,10 @@ export class MethodVariant {
 
   // Nuevos campos con tipos y nombres de columna actualizados:
   @Column({ name: 'click_intensity', type: 'int', nullable: true })
-  clickIntensity: number;
+  clickIntensity: number | null;
 
   @Column({ name: 'afkiness', type: 'int', nullable: true })
-  afkiness: number;
+  afkiness: number | null;
 
   @Column({ name: 'risk_level', nullable: true })
   riskLevel: string;
@@ -75,15 +82,17 @@ export class MethodVariant {
   @Column({
     name: 'actions_per_hour',
     type: 'int',
+    nullable: true,
   })
-  actionsPerHour: number;
+  actionsPerHour: number | null;
 
   @Column({
     name: 'action_type',
     type: 'varchar',
     length: 32,
+    nullable: true,
   })
-  actionType: ActionType;
+  actionType: ActionType | null;
 
   @Column({ name: 'likes_count', type: 'int', default: 0 })
   likesCount?: number;
@@ -102,4 +111,10 @@ export class MethodVariant {
   @OneToMany(() => VariantIoItem, (i) => i.variant, { cascade: true })
   @JoinColumn({ name: 'variant_id' })
   ioItems: VariantIoItem[];
+
+  @OneToOne(() => VariantAction, (action) => action.variant)
+  dynamicAction?: VariantAction | null;
+
+  @OneToOne(() => VariantCycle, (cycle) => cycle.variant)
+  dynamicCycle?: VariantCycle | null;
 }

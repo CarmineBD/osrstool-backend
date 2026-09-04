@@ -55,6 +55,7 @@ Available variables:
 - `RATE_LIMIT_TTL_SECONDS`: Rate limit window in seconds (default `60`).
 - `RATE_LIMIT_LIMIT`: Max requests per window (default `60`).
 - `SCHEDULED_JOBS_ENABLED`: Set to `false` to disable startup jobs and cron jobs in this instance while keeping the API available (default `true`). For the shared-remote local safety case, prefer `.env.local.example`.
+- `METHOD_PROFIT_REFRESHER_ENABLED`: Optional override for the method-profit refresher. Set it to `true` on a dedicated worker when `SCHEDULED_JOBS_ENABLED=false` there; otherwise it inherits `SCHEDULED_JOBS_ENABLED`.
 - `PRICE_CHANGE_WINDOW_SECONDS`: Price-change window in seconds for incremental refresh in `items:prices` (default `120`).
 - `ITEM_VOLUMES_INIT_ENABLED`: Set to `false` to skip item-volumes init backfill on startup (default `true`).
 - `VARIANT_HISTORY_PRUNE_ENABLED`: Enables hourly pruning of raw and 15m history according to the retention variables.
@@ -85,6 +86,7 @@ Recommended local defaults:
 ```env
 NODE_ENV=development
 SCHEDULED_JOBS_ENABLED=false
+METHOD_PROFIT_REFRESHER_ENABLED=false
 ITEM_VOLUMES_INIT_ENABLED=false
 VARIANT_HISTORY_PRUNE_ENABLED=false
 CORS_ORIGINS=http://localhost:5173

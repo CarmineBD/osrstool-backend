@@ -15,6 +15,7 @@ import { createTestApp } from './utils/create-test-app';
 import { buildItemFixture, buildMethodFixture } from '../src/testing/fixtures';
 import { Item } from '../src/items/entities/item.entity';
 import { Method } from '../src/methods/entities/method.entity';
+import { METHODS_PROFITS_HASH_KEY } from '../src/methods/profit-cache.constants';
 import { MethodVariant } from '../src/methods/entities/variant.entity';
 import { VariantIoItem } from '../src/methods/entities/io-item.entity';
 import { VariantHistory } from '../src/methods/entities/variant-history.entity';
@@ -23,6 +24,8 @@ import { createPgMemAdapter } from './utils/pg-mem';
 import { User } from '../src/auth/entities/user.entity';
 import { IconSource } from '../src/icons/icon-source.enum';
 import { GameIcon } from '../src/icons/entities/game-icon.entity';
+import { Skill } from '../src/catalogs/entities/skill.entity';
+import { CalculationMode } from '../src/methods/calculation-mode.enum';
 
 jest.mock('pg', () => createPgMemAdapter());
 
@@ -112,7 +115,7 @@ describe('Methods (e2e)', () => {
     profits: Record<string, Record<string, { low: number; high: number }>>,
   ) => {
     redisCall.mockImplementation((command: string, key: string, field?: string) => {
-      if (command === 'HGETALL' && key === 'methods:profits') {
+      if (command === 'HGETALL' && key === METHODS_PROFITS_HASH_KEY) {
         return Promise.resolve(
           Object.fromEntries(
             Object.entries(profits).map(([methodId, methodProfits]) => [
@@ -123,7 +126,7 @@ describe('Methods (e2e)', () => {
         );
       }
 
-      if (command === 'HGET' && key === 'methods:profits' && field) {
+      if (command === 'HGET' && key === METHODS_PROFITS_HASH_KEY && field) {
         return Promise.resolve(JSON.stringify(profits[field] ?? {}));
       }
 
@@ -153,6 +156,7 @@ describe('Methods (e2e)', () => {
     await dataSource.query('DELETE FROM "money_making_methods"');
     await dataSource.query('DELETE FROM "icons"');
     await dataSource.query('DELETE FROM "users"');
+    await dataSource.query('DELETE FROM "skills"');
     await dataSource.query('DELETE FROM "items"');
     await dataSource.getRepository(User).save({
       id: TEST_AUTH_USER_ID,
@@ -941,6 +945,280 @@ describe('Methods (e2e)', () => {
       id: createdBody.data.variants[0].id,
       icon_id: 4152,
     });
+  });
+
+  it('creates dynamic variants and returns their hourly calculations in detail and list responses', async () => {
+    await seedItems(100, 200, 4151, 4152);
+    await dataSource.getRepository(Skill).save({ id: 1, name: 'Cooking', key: 'cooking' });
+
+    const payload = {
+      name: 'Dynamic cooking method',
+      icon_id: 4151,
+      iconSource: IconSource.ITEM,
+      description: 'A method calculated from a repeatable action cycle.',
+      category: 'Skilling',
+      enabled: true,
+      variants: [
+        {
+          label: 'Dynamic cycle',
+          icon_id: 4152,
+          iconSource: IconSource.ITEM,
+          calculationMode: CalculationMode.DYNAMIC,
+          dynamicAction: {
+            name: 'Cook karambwan',
+            rollIntervalTicks: 4,
+            inputs: [{ id: 100, quantity: 0.5 }],
+            outputs: [{ id: 200, quantity: 1.25 }],
+            xpGained: [{ skillId: 1, experience: 10 }],
+          },
+          cycleSteps: [
+            {
+              name: 'Wait for bank',
+              stepOrderPosition: 1,
+              durationTicks: 2,
+              clicksMade: 1,
+              isAfk: true,
+            },
+            {
+              name: 'Cook karambwan',
+              stepOrderPosition: 2,
+              actionsMade: 3,
+              clicksMade: 2,
+              isAfk: false,
+            },
+          ],
+        },
+      ],
+    };
+
+    const server = app.getHttpServer() as unknown as Server;
+    const createResponse = await request(server).post('/methods/create').send(payload).expect(201);
+    const created = createResponse.body as {
+      data: { id: string; variants: Array<{ id: string }> };
+    };
+
+    mockRedisProfits({
+      [created.data.id]: {
+        [created.data.variants[0].id]: { low: 100, high: 200 },
+      },
+    });
+
+    const detailResponse = await request(server)
+      .post(`/methods/${created.data.id}`)
+      .send({})
+      .expect(200);
+    const detail = detailResponse.body as {
+      data: {
+        method: {
+          variants: Array<Record<string, unknown>>;
+        };
+      };
+    };
+
+    expect(detail.data.method.variants[0]).toMatchObject({
+      calculationMode: CalculationMode.DYNAMIC,
+      actionsPerHour: 1285,
+      xpHour: [{ skill: 'cooking', experience: 12857 }],
+      inputs: [{ id: 100, quantity: 642.86 }],
+      outputs: [{ id: 200, quantity: 1607.14 }],
+      clickIntensity: 1285,
+      afkiness: 14,
+      cycleTotalDurationTicks: 14,
+      cyclesPerHour: 428.6,
+      action: {
+        name: 'Cook karambwan',
+        rollIntervalTicks: 4,
+        xpGained: [{ skillId: 1, skill: 'cooking', experience: 10 }],
+        inputs: [{ id: 100, quantity: 0.5 }],
+        outputs: [{ id: 200, quantity: 1.25 }],
+      },
+      cycleSteps: [
+        {
+          name: 'Wait for bank',
+          stepOrderPosition: 1,
+          durationTicks: 2,
+          clicksMade: 1,
+          isAfk: true,
+          actionsMade: null,
+        },
+        {
+          stepOrderPosition: 2,
+          durationTicks: 12,
+          clicksMade: 2,
+          isAfk: false,
+          actionsMade: 3,
+        },
+      ],
+    });
+    expect(detail.data.method.variants[0]).not.toHaveProperty('actionType');
+
+    const listResponse = await request(server).post('/methods/search').send({}).expect(200);
+    const listedVariant = (
+      listResponse.body as {
+        data: { methods: Array<{ variants: Array<Record<string, unknown>> }> };
+      }
+    ).data.methods[0].variants[0];
+    expect(listedVariant).toMatchObject({
+      calculationMode: CalculationMode.DYNAMIC,
+      actionsPerHour: 1285,
+      xpHour: [{ skill: 'cooking', experience: 12857 }],
+      clickIntensity: 1285,
+      afkiness: 14,
+    });
+
+    const updateResponse = await request(server)
+      .put(`/methods/variant/${created.data.variants[0].id}`)
+      .send({
+        calculationMode: CalculationMode.DYNAMIC,
+        dynamicAction: {
+          name: 'Cook karambwan faster',
+          rollIntervalTicks: 5,
+          inputs: [{ id: 100, quantity: 1 }],
+          outputs: [{ id: 200, quantity: 2 }],
+          xpGained: [{ skillId: 1, experience: 5 }],
+        },
+        cycleSteps: [
+          {
+            name: 'Cook karambwan',
+            stepOrderPosition: 1,
+            actionsMade: 2,
+            clicksMade: 1,
+            isAfk: false,
+          },
+        ],
+      })
+      .expect(200);
+    const updated = updateResponse.body as {
+      data: { variants: Array<Record<string, unknown>> };
+    };
+    expect(updated.data.variants[0]).toMatchObject({
+      calculationMode: CalculationMode.DYNAMIC,
+      actionsPerHour: 1200,
+      xpHour: [{ skill: 'cooking', experience: 6000 }],
+      inputs: [{ id: 100, quantity: 1200 }],
+      outputs: [{ id: 200, quantity: 2400 }],
+      clickIntensity: 600,
+      afkiness: 0,
+      cycleTotalDurationTicks: 10,
+      cyclesPerHour: 600,
+      action: { name: 'Cook karambwan faster', rollIntervalTicks: 5 },
+    });
+
+    const methodUpdateResponse = await request(server)
+      .put(`/methods/${created.data.id}`)
+      .send({
+        variants: [
+          {
+            id: created.data.variants[0].id,
+            calculationMode: CalculationMode.DYNAMIC,
+            dynamicAction: {
+              name: 'Cook karambwan latest',
+              rollIntervalTicks: 6,
+              inputs: [{ id: 100, quantity: 1 }],
+              outputs: [{ id: 200, quantity: 1.5 }],
+              xpGained: [{ skillId: 1, experience: 3 }],
+            },
+            cycleSteps: [
+              {
+                name: 'Cook karambwan',
+                stepOrderPosition: 1,
+                actionsMade: 1,
+                clicksMade: 1,
+                isAfk: false,
+              },
+            ],
+          },
+        ],
+      })
+      .expect(200);
+    const methodUpdated = methodUpdateResponse.body as {
+      data: { variants: Array<Record<string, unknown>> };
+    };
+    expect(methodUpdated.data.variants[0]).toMatchObject({
+      calculationMode: CalculationMode.DYNAMIC,
+      actionsPerHour: 1000,
+      xpHour: [{ skill: 'cooking', experience: 3000 }],
+      inputs: [{ id: 100, quantity: 1000 }],
+      outputs: [{ id: 200, quantity: 1500 }],
+      clickIntensity: 1000,
+      afkiness: 0,
+      cycleTotalDurationTicks: 6,
+      cyclesPerHour: 1000,
+      action: { name: 'Cook karambwan latest', rollIntervalTicks: 6 },
+    });
+  });
+
+  it('rejects fixed hourly values in a dynamic variant payload', async () => {
+    await seedItems(4151, 4152);
+
+    const server = app.getHttpServer() as unknown as Server;
+    const response = await request(server)
+      .post('/methods/create')
+      .send({
+        name: 'Invalid dynamic method',
+        icon_id: 4151,
+        iconSource: IconSource.ITEM,
+        category: 'Skilling',
+        variants: [
+          {
+            label: 'Invalid dynamic variant',
+            icon_id: 4152,
+            iconSource: IconSource.ITEM,
+            calculationMode: CalculationMode.DYNAMIC,
+            actionsPerHour: 100,
+            dynamicAction: { name: 'Action', rollIntervalTicks: 4 },
+            cycleSteps: [
+              {
+                name: 'Wait',
+                stepOrderPosition: 1,
+                durationTicks: 4,
+                clicksMade: 0,
+                isAfk: false,
+              },
+            ],
+          },
+        ],
+      })
+      .expect(400);
+
+    const body = response.body as { message?: unknown };
+    expect(String(body.message)).toContain('actionsPerHour');
+  });
+
+  it('rejects dynamic cycle steps whose order starts at zero', async () => {
+    await seedItems(4151, 4152);
+
+    const server = app.getHttpServer() as unknown as Server;
+    const response = await request(server)
+      .post('/methods/create')
+      .send({
+        name: 'Invalid dynamic step order',
+        icon_id: 4151,
+        iconSource: IconSource.ITEM,
+        category: 'Skilling',
+        variants: [
+          {
+            label: 'Invalid step order variant',
+            icon_id: 4152,
+            iconSource: IconSource.ITEM,
+            calculationMode: CalculationMode.DYNAMIC,
+            dynamicAction: { name: 'Action', rollIntervalTicks: 4 },
+            cycleSteps: [
+              {
+                name: 'Wait',
+                stepOrderPosition: 0,
+                durationTicks: 4,
+                clicksMade: 0,
+                isAfk: false,
+              },
+            ],
+          },
+        ],
+      })
+      .expect(400);
+
+    const body = response.body as { message?: unknown };
+    expect(String(body.message)).toContain('stepOrderPosition must not be less than 1');
   });
 
   it('validates and returns game icons using iconSource', async () => {
