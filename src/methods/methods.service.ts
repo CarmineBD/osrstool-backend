@@ -12,15 +12,18 @@ import {
 import { createHash } from 'node:crypto';
 import { performance } from 'node:perf_hooks';
 import { InjectRepository } from '@nestjs/typeorm';
-import { Repository, In, LessThanOrEqual, Not } from 'typeorm';
+import { EntityManager, Repository, In, LessThanOrEqual, Not } from 'typeorm';
 import { Method } from './entities/method.entity';
 import { MethodVariant } from './entities/variant.entity';
 import { VariantIoItem } from './entities/io-item.entity';
+import { VariantAction } from './entities/variant-action.entity';
+import { VariantCycle } from './entities/variant-cycle.entity';
 import { VariantHistory } from './entities/variant-history.entity';
 import { CreateMethodDto } from './dto/create-method.dto';
 import { UpdateMethodDto } from './dto/update-method.dto';
 import { UpdateMethodBasicDto } from './dto/update-method-basic.dto';
 import { UpdateVariantDto } from './dto/update-variant.dto';
+import { CreateVariantDto } from './dto/create-variant.dto';
 import { MethodDto } from './dto/method.dto';
 import IORedis, { Redis } from 'ioredis';
 import { VariantSnapshotService } from '../variant-snapshots/variant-snapshot.service';
@@ -37,6 +40,7 @@ import { calculateMarketImpact, type MarketImpactResult } from './market-impact-
 import { Item } from '../items/entities/item.entity';
 import { IconResolverService, type IconReference } from '../icons/icon-resolver.service';
 import { IconSource } from '../icons/icon-source.enum';
+import { CalculationMode } from './calculation-mode.enum';
 import { RedisService } from '../redis/redis.service';
 import { METHOD_CATEGORY_VALUES } from './dto/method-category.constants';
 import { SKILL_KEY_VALUES } from './dto/skill.constants';
@@ -89,6 +93,20 @@ interface VariantIoQuantity {
 interface VariantItemPayload {
   id: number;
 }
+
+type VariantConfigurationDto = CreateVariantDto | UpdateVariantDto;
+
+const DYNAMIC_VARIANT_RELATIONS = [
+  'variants',
+  'variants.ioItems',
+  'variants.dynamicAction',
+  'variants.dynamicAction.inputs',
+  'variants.dynamicAction.outputs',
+  'variants.dynamicAction.skillXp',
+  'variants.dynamicAction.skillXp.skill',
+  'variants.dynamicCycle',
+  'variants.dynamicCycle.steps',
+] as const;
 
 interface ListFilters {
   name?: string;
@@ -461,6 +479,12 @@ export class MethodsService implements OnModuleDestroy {
     @Optional() redisService?: RedisService,
     @Optional() private readonly authService?: AuthService,
     @Optional() private readonly iconResolver?: IconResolverService,
+    @Optional()
+    @InjectRepository(VariantAction)
+    private readonly dynamicActionRepo?: Repository<VariantAction>,
+    @Optional()
+    @InjectRepository(VariantCycle)
+    private readonly dynamicCycleRepo?: Repository<VariantCycle>,
   ) {
     const sharedRedis = redisService?.getClient();
     this.redis = sharedRedis ?? new IORedis((this.config.get<string>('REDIS_URL') as string) ?? '');
@@ -1571,12 +1595,12 @@ export class MethodsService implements OnModuleDestroy {
   private async findOfficialEnabledVariantCountsBySkill(): Promise<Map<string, number>> {
     const methods = await this.methodRepo.find({
       where: { enabled: true, isOfficial: true },
-      relations: ['variants'],
+      relations: [...DYNAMIC_VARIANT_RELATIONS],
     });
     const countsBySkill = new Map<string, number>();
 
     for (const method of methods) {
-      for (const variant of method.variants) {
+      for (const variant of this.toDto(method).variants) {
         const xpEntries = Array.isArray(variant.xpHour) ? variant.xpHour : [];
         for (const entry of xpEntries) {
           const skillKey = this.toSkillSummaryKey(entry.skill);
@@ -1644,7 +1668,7 @@ export class MethodsService implements OnModuleDestroy {
   ): Promise<SkillSummaryMethod[]> {
     const allEntities = await this.methodRepo.find({
       where: { enabled },
-      relations: ['variants', 'variants.ioItems'],
+      relations: [...DYNAMIC_VARIANT_RELATIONS],
     });
 
     const variantCounts = allEntities.reduce<Record<string, number>>((acc, method) => {
@@ -1724,7 +1748,7 @@ export class MethodsService implements OnModuleDestroy {
   ): Promise<RoadmapCandidate[]> {
     const allEntities = await this.methodRepo.find({
       where: { enabled },
-      relations: ['variants', 'variants.ioItems'],
+      relations: [...DYNAMIC_VARIANT_RELATIONS],
     });
 
     const methodsToProcess = allEntities.map((method) => this.toDto(method));
@@ -2275,6 +2299,249 @@ export class MethodsService implements OnModuleDestroy {
     return normalized && normalized.length > 0 ? normalized : 'Untitled variant';
   }
 
+  private resolveCalculationMode(
+    dto: VariantConfigurationDto,
+    existingMode?: CalculationMode | null,
+  ): CalculationMode {
+    return dto.calculationMode ?? existingMode ?? CalculationMode.FIXED;
+  }
+
+  private assertUniqueDynamicValues(values: number[], fieldName: string): void {
+    if (new Set(values).size !== values.length) {
+      throw new BadRequestException(`${fieldName} must not contain duplicate values`);
+    }
+  }
+
+  private validateVariantConfiguration(
+    dto: VariantConfigurationDto,
+    existingMode?: CalculationMode | null,
+  ): CalculationMode {
+    const calculationMode = this.resolveCalculationMode(dto, existingMode);
+
+    if (calculationMode === CalculationMode.FIXED) {
+      if (!Number.isInteger(dto.actionsPerHour) || dto.actionsPerHour == null) {
+        throw new BadRequestException('actionsPerHour must be an integer number');
+      }
+      if (!Array.isArray(dto.inputs)) {
+        throw new BadRequestException('inputs must be an array for fixed variants');
+      }
+      if (!Array.isArray(dto.outputs)) {
+        throw new BadRequestException('outputs must be an array for fixed variants');
+      }
+      if (dto.dynamicAction !== undefined || dto.cycleSteps !== undefined) {
+        throw new BadRequestException(
+          'dynamicAction and cycleSteps are only valid when calculationMode is dynamic',
+        );
+      }
+      return calculationMode;
+    }
+
+    if (
+      dto.actionsPerHour !== undefined ||
+      dto.xpHour !== undefined ||
+      dto.clickIntensity !== undefined
+    ) {
+      throw new BadRequestException(
+        'actionsPerHour, xpHour and clickIntensity are calculated and must not be provided for dynamic variants',
+      );
+    }
+    if (dto.afkiness !== undefined || dto.inputs !== undefined || dto.outputs !== undefined) {
+      throw new BadRequestException(
+        'afkiness, inputs and outputs are calculated and must not be provided for dynamic variants',
+      );
+    }
+    if (!dto.dynamicAction) {
+      throw new BadRequestException('dynamicAction is required for dynamic variants');
+    }
+    if (!Array.isArray(dto.cycleSteps) || dto.cycleSteps.length === 0) {
+      throw new BadRequestException('At least one cycle step is required for dynamic variants');
+    }
+
+    const { dynamicAction, cycleSteps } = dto;
+    this.assertUniqueDynamicValues(
+      (dynamicAction.inputs ?? []).map((item) => item.id),
+      'dynamicAction.inputs item id',
+    );
+    this.assertUniqueDynamicValues(
+      (dynamicAction.outputs ?? []).map((item) => item.id),
+      'dynamicAction.outputs item id',
+    );
+    this.assertUniqueDynamicValues(
+      (dynamicAction.xpGained ?? []).map((entry) => entry.skillId),
+      'dynamicAction.xpGained skillId',
+    );
+    this.assertUniqueDynamicValues(
+      cycleSteps.map((step) => step.stepOrderPosition),
+      'cycleSteps stepOrderPosition',
+    );
+
+    for (const [index, step] of cycleSteps.entries()) {
+      const actionStep = step.actionsMade != null;
+      if (actionStep) {
+        if (step.durationTicks !== undefined) {
+          throw new BadRequestException(
+            `cycleSteps[${index}] durationTicks is calculated for action steps`,
+          );
+        }
+      } else if (step.durationTicks == null) {
+        throw new BadRequestException(
+          `cycleSteps[${index}] durationTicks is required for non-action steps`,
+        );
+      }
+
+      if (step.isAfk == null) {
+        throw new BadRequestException(`cycleSteps[${index}] isAfk is required`);
+      }
+    }
+
+    const cycleTotalDurationTicks = cycleSteps.reduce(
+      (total, step) =>
+        total +
+        (step.actionsMade != null
+          ? step.actionsMade * dynamicAction.rollIntervalTicks
+          : (step.durationTicks ?? 0)),
+      0,
+    );
+    if (cycleTotalDurationTicks <= 0) {
+      throw new BadRequestException('Dynamic cycle duration must be greater than zero');
+    }
+
+    return calculationMode;
+  }
+
+  private dynamicRepositoriesOrThrow(manager?: EntityManager): {
+    actionRepo: Repository<VariantAction>;
+    cycleRepo: Repository<VariantCycle>;
+  } {
+    if (manager) {
+      return {
+        actionRepo: manager.getRepository(VariantAction),
+        cycleRepo: manager.getRepository(VariantCycle),
+      };
+    }
+    if (!this.dynamicActionRepo || !this.dynamicCycleRepo) {
+      throw new Error('Dynamic variant repositories are not configured');
+    }
+    return { actionRepo: this.dynamicActionRepo, cycleRepo: this.dynamicCycleRepo };
+  }
+
+  private async removeDynamicConfiguration(
+    variantId: string,
+    manager?: EntityManager,
+  ): Promise<void> {
+    const { actionRepo, cycleRepo } = this.dynamicRepositoriesOrThrow(manager);
+    await cycleRepo.delete({ variant: { id: variantId } });
+    await actionRepo.delete({ variant: { id: variantId } });
+  }
+
+  private async replaceDynamicConfiguration(
+    variant: MethodVariant,
+    dto: VariantConfigurationDto,
+    manager?: EntityManager,
+  ): Promise<void> {
+    if (!dto.dynamicAction || !dto.cycleSteps) {
+      throw new Error('Dynamic variant configuration was not validated before persistence');
+    }
+
+    const { actionRepo, cycleRepo } = this.dynamicRepositoriesOrThrow(manager);
+    await this.removeDynamicConfiguration(variant.id, manager);
+
+    const action = actionRepo.create({
+      variant,
+      name: dto.dynamicAction.name,
+      rollIntervalTicks: dto.dynamicAction.rollIntervalTicks,
+      inputs: (dto.dynamicAction.inputs ?? []).map((input) => ({
+        itemId: input.id,
+        quantity: input.quantity,
+      })),
+      outputs: (dto.dynamicAction.outputs ?? []).map((output) => ({
+        itemId: output.id,
+        quantity: output.quantity,
+      })),
+      skillXp: (dto.dynamicAction.xpGained ?? []).map((entry) => ({
+        skillId: entry.skillId,
+        experience: entry.experience,
+      })),
+    });
+    const savedAction = await actionRepo.save(action);
+
+    await cycleRepo.save(
+      cycleRepo.create({
+        variant,
+        steps: dto.cycleSteps.map((step) => ({
+          stepOrderPosition: step.stepOrderPosition,
+          name: step.name,
+          durationTicks: step.actionsMade == null ? step.durationTicks! : null,
+          clicksMade: step.clicksMade,
+          isAfk: step.isAfk!,
+          actionMade: step.actionsMade == null ? null : savedAction,
+          actionsMade: step.actionsMade ?? null,
+        })),
+      }),
+    );
+  }
+
+  private async replaceFixedIoItems(
+    variant: MethodVariant,
+    dto: VariantConfigurationDto,
+    manager?: EntityManager,
+  ): Promise<void> {
+    const ioRepo = manager?.getRepository(VariantIoItem) ?? this.ioRepo;
+    await ioRepo.delete({ variant: { id: variant.id } });
+    const newItems = [
+      ...(dto.inputs ?? []).map((input) =>
+        ioRepo.create({
+          variant,
+          itemId: input.id,
+          type: 'input',
+          quantity: input.quantity,
+          reason: input.reason ?? null,
+        }),
+      ),
+      ...(dto.outputs ?? []).map((output) =>
+        ioRepo.create({
+          variant,
+          itemId: output.id,
+          type: 'output',
+          quantity: output.quantity,
+          reason: output.reason ?? null,
+        }),
+      ),
+    ];
+    if (newItems.length > 0) {
+      await ioRepo.save(newItems);
+    }
+    variant.ioItems = newItems;
+  }
+
+  private async persistVariantConfiguration(
+    variant: MethodVariant,
+    dto: VariantConfigurationDto,
+    calculationMode: CalculationMode,
+    inputs: VariantConfigurationDto['inputs'] = [],
+    outputs: VariantConfigurationDto['outputs'] = [],
+  ): Promise<void> {
+    await this.variantRepo.manager.transaction(async (manager) => {
+      const ioRepo = manager.getRepository(VariantIoItem);
+
+      if (calculationMode === CalculationMode.DYNAMIC) {
+        variant.actionType = null;
+        variant.actionsPerHour = null;
+        variant.xpHour = null;
+        variant.clickIntensity = null;
+        variant.afkiness = null;
+        await ioRepo.delete({ variant: { id: variant.id } });
+        variant.ioItems = [];
+        await this.replaceDynamicConfiguration(variant, dto, manager);
+      } else {
+        await this.removeDynamicConfiguration(variant.id, manager);
+        await this.replaceFixedIoItems(variant, { ...dto, inputs, outputs }, manager);
+      }
+
+      await manager.getRepository(MethodVariant).save(variant);
+    });
+  }
+
   private collectItemIdsFromVariantPayload(
     inputs: VariantItemPayload[] = [],
     outputs: VariantItemPayload[] = [],
@@ -2350,7 +2617,13 @@ export class MethodsService implements OnModuleDestroy {
       createDto.variants.map((variant) => ({
         variantTitle: this.normalizeVariantTitle(variant.label),
         members: variant.members ?? false,
-        itemIds: this.collectItemIdsFromVariantPayload(variant.inputs, variant.outputs),
+        itemIds:
+          this.resolveCalculationMode(variant) === CalculationMode.DYNAMIC
+            ? this.collectItemIdsFromVariantPayload(
+                variant.dynamicAction?.inputs,
+                variant.dynamicAction?.outputs,
+              )
+            : this.collectItemIdsFromVariantPayload(variant.inputs, variant.outputs),
       })),
     );
   }
@@ -2363,7 +2636,14 @@ export class MethodsService implements OnModuleDestroy {
       {
         variantTitle: this.normalizeVariantTitle(updateDto.label ?? existingVariant.label),
         members: updateDto.members ?? existingVariant.members ?? false,
-        itemIds: this.collectItemIdsFromVariantPayload(updateDto.inputs, updateDto.outputs),
+        itemIds:
+          this.resolveCalculationMode(updateDto, existingVariant.calculationMode) ===
+          CalculationMode.DYNAMIC
+            ? this.collectItemIdsFromVariantPayload(
+                updateDto.dynamicAction?.inputs,
+                updateDto.dynamicAction?.outputs,
+              )
+            : this.collectItemIdsFromVariantPayload(updateDto.inputs, updateDto.outputs),
       },
     ]);
   }
@@ -2380,82 +2660,87 @@ export class MethodsService implements OnModuleDestroy {
         return {
           variantTitle: this.normalizeVariantTitle(variant.label ?? existingVariant?.label),
           members: variant.members ?? existingVariant?.members ?? false,
-          itemIds: this.collectItemIdsFromVariantPayload(variant.inputs, variant.outputs),
+          itemIds:
+            this.resolveCalculationMode(variant, existingVariant?.calculationMode) ===
+            CalculationMode.DYNAMIC
+              ? this.collectItemIdsFromVariantPayload(
+                  variant.dynamicAction?.inputs,
+                  variant.dynamicAction?.outputs,
+                )
+              : this.collectItemIdsFromVariantPayload(variant.inputs, variant.outputs),
         };
       }),
     );
   }
 
   async create(createDto: CreateMethodDto, authenticatedUserId: string): Promise<MethodDto> {
+    for (const variant of createDto.variants) {
+      this.validateVariantConfiguration(variant);
+    }
     await this.validateCreateIconReferences(createDto);
     await this.validateCreateVariantMembership(createDto);
 
     const creator = await this.getMethodCreatorOrThrow(authenticatedUserId);
     const { name, description, category, enabled, variants, icon_id, iconSource } = createDto;
-    const method = this.methodRepo.create({
-      name,
-      description,
-      category,
-      enabled,
-      iconId: icon_id,
-      iconSource,
-      createdBy: creator.id,
-      isOfficial: creator.role === 'super_admin',
-    });
-    method.slug = await this.generateMethodSlug(name);
-    await this.methodRepo.save(method);
-
-    for (const v of variants) {
-      const variant = this.variantRepo.create({
-        method,
-        label: v.label,
-        actionsPerHour: v.actionsPerHour,
-        actionType: v.actionType,
-        xpHour: v.xpHour,
-        clickIntensity: v.clickIntensity,
-        afkiness: v.afkiness,
-        riskLevel: v.riskLevel,
-        iconId: v.icon_id,
-        iconSource: v.iconSource,
-        description: v.description ?? null,
-        wilderness: v.wilderness ?? false,
-        members: v.members ?? false,
-        requirements: v.requirements,
-        recommendations: v.recommendations,
+    const slug = await this.generateMethodSlug(name);
+    const methodId = await this.methodRepo.manager.transaction(async (manager) => {
+      const methodRepo = manager.getRepository(Method);
+      const variantRepo = manager.getRepository(MethodVariant);
+      const method = methodRepo.create({
+        name,
+        description,
+        category,
+        enabled,
+        iconId: icon_id,
+        iconSource,
+        createdBy: creator.id,
+        isOfficial: creator.role === 'super_admin',
+        slug,
       });
-      variant.slug = await this.generateVariantSlug(method.id, v.label);
-      await this.variantRepo.save(variant);
+      await methodRepo.save(method);
 
-      for (const input of v.inputs) {
-        const io = this.ioRepo.create({
-          variant,
-          itemId: input.id,
-          type: 'input',
-          quantity: input.quantity,
-          reason: input.reason ?? null,
+      for (const v of variants) {
+        const calculationMode = this.resolveCalculationMode(v);
+        const variant = variantRepo.create({
+          method,
+          label: v.label,
+          calculationMode,
+          actionsPerHour: calculationMode === CalculationMode.FIXED ? v.actionsPerHour! : null,
+          actionType: calculationMode === CalculationMode.FIXED ? v.actionType! : null,
+          xpHour: calculationMode === CalculationMode.FIXED ? (v.xpHour ?? null) : null,
+          clickIntensity:
+            calculationMode === CalculationMode.FIXED ? (v.clickIntensity ?? null) : null,
+          afkiness: calculationMode === CalculationMode.FIXED ? (v.afkiness ?? null) : null,
+          riskLevel: v.riskLevel,
+          iconId: v.icon_id,
+          iconSource: v.iconSource,
+          description: v.description ?? null,
+          wilderness: v.wilderness ?? false,
+          members: v.members ?? false,
+          requirements: v.requirements,
+          recommendations: v.recommendations,
         });
-        await this.ioRepo.save(io);
+        variant.slug = await this.generateVariantSlug(method.id, v.label);
+        await variantRepo.save(variant);
+
+        if (calculationMode === CalculationMode.DYNAMIC) {
+          await this.replaceDynamicConfiguration(variant, v, manager);
+        } else {
+          await this.replaceFixedIoItems(variant, v, manager);
+        }
       }
 
-      for (const output of v.outputs) {
-        const io = this.ioRepo.create({
-          variant,
-          itemId: output.id,
-          type: 'output',
-          quantity: output.quantity,
-          reason: output.reason ?? null,
-        });
-        await this.ioRepo.save(io);
-      }
-    }
-    return this.findOne(method.id);
+      return method.id;
+    });
+
+    return this.findOne(methodId);
   }
 
   async findAll(page = 1, perPage = 10): Promise<{ data: MethodDto[]; total: number }> {
     const [methods, total] = await this.methodRepo.findAndCount({
       skip: (page - 1) * perPage,
       take: perPage,
-      relations: ['variants', 'variants.ioItems'],
+      relations: [...DYNAMIC_VARIANT_RELATIONS],
       order: { createdAt: 'ASC' },
     });
     return { data: methods.map((m) => this.toDto(m)), total };
@@ -2464,7 +2749,7 @@ export class MethodsService implements OnModuleDestroy {
   async findOne(id: string): Promise<MethodDto> {
     const method = await this.methodRepo.findOne({
       where: { id },
-      relations: ['variants', 'variants.ioItems'],
+      relations: [...DYNAMIC_VARIANT_RELATIONS],
     });
     if (!method) throw new NotFoundException(`Method ${id} not found`);
     return this.toDto(method);
@@ -2473,12 +2758,19 @@ export class MethodsService implements OnModuleDestroy {
   async update(id: string, updateDto: UpdateMethodDto): Promise<MethodDto> {
     const method = await this.methodRepo.findOne({
       where: { id },
-      relations: ['variants', 'variants.ioItems'],
+      relations: [...DYNAMIC_VARIANT_RELATIONS],
     });
     if (!method) {
       throw new NotFoundException(`Method ${id} not found`);
     }
 
+    const existingVariantsById = new Map(method.variants.map((variant) => [variant.id, variant]));
+    for (const variant of updateDto.variants ?? []) {
+      this.validateVariantConfiguration(
+        variant,
+        variant.id ? existingVariantsById.get(variant.id)?.calculationMode : undefined,
+      );
+    }
     await this.validateUpdateIconReferences(method, updateDto);
     await this.validateUpdateMethodVariantMembership(method, updateDto);
 
@@ -2496,15 +2788,19 @@ export class MethodsService implements OnModuleDestroy {
     }
     if (enabled !== undefined) method.enabled = enabled;
 
-    const existingVariants = new Map(method.variants.map((v) => [v.id, v]));
+    const existingVariants = existingVariantsById;
     const updatedVariants: MethodVariant[] = [];
 
     for (const v of variants) {
       if (v.id && existingVariants.has(v.id)) {
         const variant = existingVariants.get(v.id)!;
+        const calculationMode = this.resolveCalculationMode(v, variant.calculationMode);
         const {
           inputs = [],
           outputs = [],
+          dynamicAction: _dynamicAction,
+          cycleSteps: _cycleSteps,
+          calculationMode: _calculationMode,
           snapshotName: _snapshotName,
           snapshotDescription: _snapshotDescription,
           snapshotDate: _snapshotDate,
@@ -2522,37 +2818,17 @@ export class MethodsService implements OnModuleDestroy {
           variant.slug = await this.generateVariantSlug(method.id, v.label, v.id);
         }
 
-        await this.ioRepo.delete({ variant: { id: variant.id } });
-        const newItems: VariantIoItem[] = [];
-        for (const input of inputs) {
-          newItems.push(
-            this.ioRepo.create({
-              variant,
-              itemId: input.id,
-              type: 'input',
-              quantity: input.quantity,
-              reason: input.reason ?? null,
-            }),
-          );
-        }
-        for (const output of outputs) {
-          newItems.push(
-            this.ioRepo.create({
-              variant,
-              itemId: output.id,
-              type: 'output',
-              quantity: output.quantity,
-              reason: output.reason ?? null,
-            }),
-          );
-        }
-        variant.ioItems = newItems;
+        variant.calculationMode = calculationMode;
+        await this.persistVariantConfiguration(variant, v, calculationMode, inputs, outputs);
         updatedVariants.push(variant);
       } else {
         const {
           inputs = [],
           outputs = [],
           label = '',
+          dynamicAction: _dynamicAction,
+          cycleSteps: _cycleSteps,
+          calculationMode: _calculationMode,
           snapshotName: _snapshotName,
           snapshotDescription: _snapshotDescription,
           snapshotDate: _snapshotDate,
@@ -2567,35 +2843,23 @@ export class MethodsService implements OnModuleDestroy {
           iconSource: variantIconSource!,
           ...rest,
         });
+        const calculationMode = this.resolveCalculationMode(v);
+        variant.calculationMode = calculationMode;
+        if (calculationMode === CalculationMode.DYNAMIC) {
+          variant.actionType = null;
+          variant.actionsPerHour = null;
+          variant.xpHour = null;
+          variant.clickIntensity = null;
+          variant.afkiness = null;
+        }
         variant.slug = await this.generateVariantSlug(method.id, label);
         await this.variantRepo.save(variant);
-        const newItems: VariantIoItem[] = [];
-        for (const input of inputs) {
-          newItems.push(
-            this.ioRepo.create({
-              variant,
-              itemId: input.id,
-              type: 'input',
-              quantity: input.quantity,
-              reason: input.reason ?? null,
-            }),
-          );
+        if (calculationMode === CalculationMode.DYNAMIC) {
+          await this.replaceDynamicConfiguration(variant, v);
+          variant.ioItems = [];
+        } else {
+          await this.replaceFixedIoItems(variant, { ...v, inputs, outputs });
         }
-        for (const output of outputs) {
-          newItems.push(
-            this.ioRepo.create({
-              variant,
-              itemId: output.id,
-              type: 'output',
-              quantity: output.quantity,
-              reason: output.reason ?? null,
-            }),
-          );
-        }
-        if (newItems.length) {
-          await this.ioRepo.save(newItems);
-        }
-        variant.ioItems = newItems;
         updatedVariants.push(variant);
       }
     }
@@ -2629,7 +2893,7 @@ export class MethodsService implements OnModuleDestroy {
     await this.methodRepo.save(method);
     const reloaded = await this.methodRepo.findOne({
       where: { id },
-      relations: ['variants', 'variants.ioItems'],
+      relations: [...DYNAMIC_VARIANT_RELATIONS],
     });
     return this.toDto(reloaded!);
   }
@@ -2645,12 +2909,19 @@ export class MethodsService implements OnModuleDestroy {
     });
     if (!variant) throw new NotFoundException(`Variant ${id} not found`);
 
+    const calculationMode = this.validateVariantConfiguration(dto, variant.calculationMode);
+    if (generateSnapshot && calculationMode === CalculationMode.DYNAMIC) {
+      throw new BadRequestException('Snapshots are not supported for dynamic variants');
+    }
     await this.validateVariantIconReference(dto);
     await this.validateUpdateVariantMembership(variant, dto);
 
     const {
       inputs = [],
       outputs = [],
+      dynamicAction: _dynamicAction,
+      cycleSteps: _cycleSteps,
+      calculationMode: _calculationMode,
       snapshotName,
       snapshotDescription,
       snapshotDate,
@@ -2668,35 +2939,8 @@ export class MethodsService implements OnModuleDestroy {
       variant.slug = await this.generateVariantSlug(variant.method.id, dto.label, id);
     }
 
-    // Remove existing IO items to avoid duplicates
-    await this.ioRepo.delete({ variant: { id } });
-
-    const newItems: VariantIoItem[] = [];
-    for (const input of inputs) {
-      newItems.push(
-        this.ioRepo.create({
-          variant,
-          itemId: input.id,
-          type: 'input',
-          quantity: input.quantity,
-          reason: input.reason ?? null,
-        }),
-      );
-    }
-    for (const output of outputs) {
-      newItems.push(
-        this.ioRepo.create({
-          variant,
-          itemId: output.id,
-          type: 'output',
-          quantity: output.quantity,
-          reason: output.reason ?? null,
-        }),
-      );
-    }
-
-    variant.ioItems = newItems;
-    await this.variantRepo.save(variant);
+    variant.calculationMode = calculationMode;
+    await this.persistVariantConfiguration(variant, dto, calculationMode, inputs, outputs);
 
     if (generateSnapshot) {
       if (!snapshotName) {
@@ -3296,7 +3540,7 @@ export class MethodsService implements OnModuleDestroy {
         enabled: filters.enabled,
         ...(filters.isOfficial != null ? { isOfficial: filters.isOfficial } : {}),
       },
-      relations: ['variants', 'variants.ioItems'],
+      relations: [...DYNAMIC_VARIANT_RELATIONS],
     });
     const variantCounts = allEntities.reduce<Record<string, number>>((acc, method) => {
       acc[method.id] = method.variants.length;
@@ -3357,6 +3601,8 @@ export class MethodsService implements OnModuleDestroy {
             slug,
             icon_id,
             iconSource,
+            calculationMode,
+            actionsPerHour,
             actionType,
             clickIntensity,
             afkiness,
@@ -3373,6 +3619,8 @@ export class MethodsService implements OnModuleDestroy {
             slug,
             icon_id,
             iconSource,
+            calculationMode,
+            actionsPerHour,
             actionType,
             xpHour,
             label,
@@ -3517,7 +3765,7 @@ export class MethodsService implements OnModuleDestroy {
             enabled: filters.enabled,
             ...(filters.isOfficial != null ? { isOfficial: filters.isOfficial } : {}),
           },
-          relations: ['variants', 'variants.ioItems'],
+          relations: [...DYNAMIC_VARIANT_RELATIONS],
         }),
     );
     const variantCounts = allEntities.reduce<Record<string, number>>((acc, method) => {
@@ -3583,6 +3831,8 @@ export class MethodsService implements OnModuleDestroy {
             slug,
             icon_id,
             iconSource,
+            calculationMode,
+            actionsPerHour,
             actionType,
             clickIntensity,
             afkiness,
@@ -3599,6 +3849,8 @@ export class MethodsService implements OnModuleDestroy {
             slug,
             icon_id,
             iconSource,
+            calculationMode,
+            actionsPerHour,
             actionType,
             xpHour,
             label,
@@ -3847,7 +4099,7 @@ export class MethodsService implements OnModuleDestroy {
     const methodEntity = await this.timeMethodDetailsStep(perfLogsEnabled, scope, 'findOne', () =>
       this.methodRepo.findOne({
         where: { id },
-        relations: ['variants', 'variants.ioItems', 'createdByUser'],
+        relations: [...DYNAMIC_VARIANT_RELATIONS, 'createdByUser'],
       }),
     );
     if (!methodEntity) {

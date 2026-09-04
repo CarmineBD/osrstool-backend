@@ -144,7 +144,17 @@ describe('MethodsService player context', () => {
     expect(response.data.cooking.officialVariantCount).toBe(2);
     expect(find).toHaveBeenCalledWith({
       where: { enabled: true, isOfficial: true },
-      relations: ['variants'],
+      relations: [
+        'variants',
+        'variants.ioItems',
+        'variants.dynamicAction',
+        'variants.dynamicAction.inputs',
+        'variants.dynamicAction.outputs',
+        'variants.dynamicAction.skillXp',
+        'variants.dynamicAction.skillXp.skill',
+        'variants.dynamicCycle',
+        'variants.dynamicCycle.steps',
+      ],
     });
   });
 

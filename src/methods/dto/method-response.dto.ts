@@ -3,6 +3,7 @@ import { IoItemDto } from './io-item.dto';
 import { XpHour, VariantRecommendations, VariantRequirements } from '../types';
 import { ActionType } from '../action-type.enum';
 import { IconSource } from '../../icons/icon-source.enum';
+import { CalculationMode } from '../calculation-mode.enum';
 
 export class VariantTagResponseDto {
   label: string;
@@ -19,9 +20,10 @@ export class VariantResponseDto {
   description?: string;
   xpHour?: XpHour;
   actionsPerHour?: number;
+  calculationMode?: CalculationMode;
   actionType?: ActionType;
-  clickIntensity?: number;
-  afkiness?: number;
+  clickIntensity?: number | null;
+  afkiness?: number | null;
   riskLevel?: string;
   requirements?: VariantRequirements;
   recommendations?: VariantRecommendations;
@@ -38,6 +40,24 @@ export class VariantResponseDto {
   tags?: VariantTagResponseDto[];
   inputs: IoItemDto[];
   outputs: IoItemDto[];
+  cycleTotalDurationTicks?: number;
+  cyclesPerHour?: number;
+  action?: {
+    id: string;
+    name: string;
+    rollIntervalTicks: number;
+    xpGained: Array<{ skillId: number; skill: string; experience: number }>;
+    inputs: Array<{ id: number; quantity: number }>;
+    outputs: Array<{ id: number; quantity: number }>;
+  };
+  cycleSteps?: Array<{
+    name: string;
+    stepOrderPosition: number;
+    durationTicks: number;
+    clicksMade: number;
+    isAfk: boolean;
+    actionsMade: number | null;
+  }>;
 }
 
 export class MethodResponseDto {
