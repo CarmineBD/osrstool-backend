@@ -26,6 +26,7 @@ import { IconSource } from '../src/icons/icon-source.enum';
 import { GameIcon } from '../src/icons/entities/game-icon.entity';
 import { Skill } from '../src/catalogs/entities/skill.entity';
 import { CalculationMode } from '../src/methods/calculation-mode.enum';
+import { ActionCondition } from '../src/methods/action-condition.enum';
 
 jest.mock('pg', () => createPgMemAdapter());
 
@@ -1183,6 +1184,133 @@ describe('Methods (e2e)', () => {
 
     const body = response.body as { message?: unknown };
     expect(String(body.message)).toContain('actionsPerHour');
+  });
+
+  it('accepts a dynamic action with a success-only condition', async () => {
+    await seedItems(100, 4151, 4152);
+
+    const server = app.getHttpServer() as unknown as Server;
+    const response = await request(server)
+      .post('/methods/create')
+      .send({
+        name: 'Success-only conditional dynamic method',
+        icon_id: 4151,
+        iconSource: IconSource.ITEM,
+        category: 'Skilling',
+        variants: [
+          {
+            label: 'Success-only condition',
+            icon_id: 4152,
+            iconSource: IconSource.ITEM,
+            calculationMode: CalculationMode.DYNAMIC,
+            dynamicAction: {
+              name: 'Action',
+              rollIntervalTicks: 4,
+              inputs: [{ id: 100, quantity: 1, condition: ActionCondition.SUCCESS }],
+            },
+            cycleSteps: [
+              {
+                name: 'Action',
+                stepOrderPosition: 1,
+                actionsMade: 1,
+                clicksMade: 1,
+                isAfk: false,
+              },
+            ],
+          },
+        ],
+      })
+      .expect(201);
+
+    const body = response.body as {
+      data: { variants: Array<{ action?: { inputs?: unknown[] } }> };
+    };
+    expect(body.data.variants[0]?.action?.inputs).toEqual([
+      expect.objectContaining({ id: 100, condition: ActionCondition.SUCCESS }),
+    ]);
+  });
+
+  it('rejects a dynamic action that combines always and failure conditions', async () => {
+    await seedItems(100, 200, 4151, 4152);
+
+    const server = app.getHttpServer() as unknown as Server;
+    const response = await request(server)
+      .post('/methods/create')
+      .send({
+        name: 'Mixed conditional dynamic method',
+        icon_id: 4151,
+        iconSource: IconSource.ITEM,
+        category: 'Skilling',
+        variants: [
+          {
+            label: 'Mixed conditions',
+            icon_id: 4152,
+            iconSource: IconSource.ITEM,
+            calculationMode: CalculationMode.DYNAMIC,
+            dynamicAction: {
+              name: 'Action',
+              rollIntervalTicks: 4,
+              inputs: [
+                { id: 100, quantity: 1, condition: ActionCondition.ALWAYS },
+                { id: 200, quantity: 1, condition: ActionCondition.FAILURE },
+              ],
+            },
+            cycleSteps: [
+              {
+                name: 'Action',
+                stepOrderPosition: 1,
+                actionsMade: 1,
+                clicksMade: 1,
+                isAfk: false,
+              },
+            ],
+          },
+        ],
+      })
+      .expect(400);
+
+    const body = response.body as { message?: unknown };
+    expect(String(body.message)).toContain(
+      'dynamicAction.inputs must not combine "always" with "success" or "failure"',
+    );
+  });
+
+  it('rejects a dynamic cycle with no action-generating step', async () => {
+    await seedItems(4151, 4152);
+
+    const server = app.getHttpServer() as unknown as Server;
+    const response = await request(server)
+      .post('/methods/create')
+      .send({
+        name: 'Dynamic method without actions',
+        icon_id: 4151,
+        iconSource: IconSource.ITEM,
+        category: 'Skilling',
+        variants: [
+          {
+            label: 'Waiting only',
+            icon_id: 4152,
+            iconSource: IconSource.ITEM,
+            calculationMode: CalculationMode.DYNAMIC,
+            dynamicAction: { name: 'Action', rollIntervalTicks: 4 },
+            cycleSteps: [
+              {
+                name: 'Wait',
+                stepOrderPosition: 1,
+                durationTicks: 4,
+                clicksMade: 0,
+                isAfk: false,
+              },
+            ],
+          },
+        ],
+      })
+      .expect(400);
+
+    const body = response.body as { message?: unknown };
+    expect(String(body.message)).toContain(
+      'Dynamic cycle must include at least one step that generates actions',
+    );
   });
 
   it('rejects dynamic cycle steps whose order starts at zero', async () => {
