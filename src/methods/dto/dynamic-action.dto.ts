@@ -2,6 +2,7 @@ import {
   ArrayMaxSize,
   IsArray,
   IsInt,
+  IsNumber,
   IsOptional,
   IsString,
   Max,
@@ -31,6 +32,12 @@ export class DynamicActionDto {
   @Min(1)
   @Max(MAX_DYNAMIC_ROLL_INTERVAL_TICKS)
   rollIntervalTicks: number;
+
+  @IsOptional()
+  @IsNumber({ allowInfinity: false, allowNaN: false, maxDecimalPlaces: 4 })
+  @Min(0)
+  @Max(1)
+  baseSuccessChance?: number;
 
   @IsOptional()
   @IsArray()
