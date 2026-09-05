@@ -7,6 +7,13 @@ import { ConfigService } from '@nestjs/config';
 import { parseBooleanEnv } from '../common/utils/parse-boolean-env';
 import { RedisService } from '../redis/redis.service';
 import { METHODS_PROFITS_HASH_KEY } from '../methods/profit-cache.constants';
+import { CalculationMode } from '../methods/calculation-mode.enum';
+import { calculateDynamicVariant } from '../methods/dynamic-variant-calculator';
+
+interface ProfitValues {
+  low: number;
+  high: number;
+}
 
 @Injectable()
 export class MethodProfitRefresherService implements OnModuleInit {
@@ -62,6 +69,10 @@ export class MethodProfitRefresherService implements OnModuleInit {
       for (const variant of method.variants) {
         variant.inputs.forEach((i) => itemIds.add(i.id));
         variant.outputs.forEach((o) => itemIds.add(o.id));
+        if (variant.calculationMode === CalculationMode.DYNAMIC) {
+          variant.action?.inputs.forEach((i) => itemIds.add(i.id));
+          variant.action?.outputs.forEach((o) => itemIds.add(o.id));
+        }
       }
     }
 
@@ -70,7 +81,10 @@ export class MethodProfitRefresherService implements OnModuleInit {
     const prices: Record<number, { high?: number; low: number }> = raw;
 
     // 3) Calcular profits por variante de cada metodo
-    const profits: Record<string, Record<string, { low: number; high: number }>> = {};
+    const profits: Record<
+      string,
+      Record<string, ProfitValues & Partial<Record<'historyLow' | 'historyHigh', number>>>
+    > = {};
     for (const method of methods) {
       profits[method.id] = {};
       method.variants.forEach((variant) => {
@@ -82,15 +96,49 @@ export class MethodProfitRefresherService implements OnModuleInit {
             return acc + unit * quantity;
           }, 0);
 
-        const outputsLow = sum(variant.outputs, 'low');
-        const outputsHigh = sum(variant.outputs, 'high');
-        const inputsHigh = sum(variant.inputs, 'high');
-        const inputsLow = sum(variant.inputs, 'low');
+        const calculateProfit = (
+          inputs: { id: number; quantity: number }[],
+          outputs: { id: number; quantity: number }[],
+        ): ProfitValues => ({
+          low: sum(outputs, 'low') - sum(inputs, 'high'),
+          high: sum(outputs, 'high') - sum(inputs, 'low'),
+        });
 
-        const lowProfit = outputsLow - inputsHigh;
-        const highProfit = outputsHigh - inputsLow;
+        const profit = calculateProfit(variant.inputs, variant.outputs);
+        const historyProfit =
+          variant.calculationMode === CalculationMode.DYNAMIC &&
+          variant.action &&
+          variant.cycleSteps
+            ? (() => {
+                const calculation = calculateDynamicVariant(
+                  {
+                    id: variant.action.id,
+                    name: variant.action.name,
+                    rollIntervalTicks: variant.action.rollIntervalTicks,
+                    baseSuccessChance: 1,
+                    inputs: variant.action.inputs.map(({ id, quantity, condition }) => ({
+                      itemId: id,
+                      quantity,
+                      condition,
+                    })),
+                    outputs: variant.action.outputs.map(({ id, quantity, condition }) => ({
+                      itemId: id,
+                      quantity,
+                      condition,
+                    })),
+                  },
+                  variant.cycleSteps,
+                );
+                return calculateProfit(calculation.inputs, calculation.outputs);
+              })()
+            : null;
 
-        profits[method.id][variant.id] = { low: lowProfit, high: highProfit };
+        profits[method.id][variant.id] = {
+          ...profit,
+          ...(historyProfit
+            ? { historyLow: historyProfit.low, historyHigh: historyProfit.high }
+            : {}),
+        };
       });
     }
 
