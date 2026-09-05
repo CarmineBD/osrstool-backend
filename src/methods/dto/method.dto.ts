@@ -3,6 +3,7 @@ import { ActionType } from '../action-type.enum';
 import { IconSource } from '../../icons/icon-source.enum';
 import { CalculationMode } from '../calculation-mode.enum';
 import { calculateDynamicVariant } from '../dynamic-variant-calculator';
+import { ActionCondition } from '../action-condition.enum';
 
 export interface VariantDto {
   id: string;
@@ -32,9 +33,15 @@ export interface VariantDto {
     id: string;
     name: string;
     rollIntervalTicks: number;
-    xpGained: Array<{ skillId: number; skill: string; experience: number }>;
-    inputs: { id: number; quantity: number }[];
-    outputs: { id: number; quantity: number }[];
+    baseSuccessChance: number;
+    xpGained: Array<{
+      skillId: number;
+      skill: string;
+      experience: number;
+      condition: ActionCondition;
+    }>;
+    inputs: { id: number; quantity: number; condition: ActionCondition }[];
+    outputs: { id: number; quantity: number; condition: ActionCondition }[];
   };
   cycleSteps?: Array<{
     name: string;
@@ -121,11 +128,21 @@ export class MethodDto {
         id: string;
         name: string;
         rollIntervalTicks: number;
-        inputs?: Array<{ itemId: number; quantity: number | string }>;
-        outputs?: Array<{ itemId: number; quantity: number | string }>;
+        baseSuccessChance?: number | string;
+        inputs?: Array<{
+          itemId: number;
+          quantity: number | string;
+          condition?: ActionCondition;
+        }>;
+        outputs?: Array<{
+          itemId: number;
+          quantity: number | string;
+          condition?: ActionCondition;
+        }>;
         skillXp?: Array<{
           skillId: number;
           experience: number | string;
+          condition?: ActionCondition;
           skill?: { key?: string | null } | null;
         }>;
       } | null;
@@ -148,14 +165,17 @@ export class MethodDto {
           id: item.itemId,
           quantity: Number(item.quantity),
           reason: item.reason ?? null,
-        }));
+        }))
+        .filter(({ quantity }) => quantity !== 0);
       const fixedOutputs = (variant.ioItems ?? [])
         .filter((item) => item.type === 'output')
         .map((item) => ({
           id: item.itemId,
           quantity: Number(item.quantity),
           reason: item.reason ?? null,
-        }));
+        }))
+        .filter(({ quantity }) => quantity !== 0);
+      const fixedXpHour = variant.xpHour?.filter(({ experience }) => experience !== 0) ?? null;
       const calculationMode = variant.calculationMode ?? CalculationMode.FIXED;
       const dynamicCalculation =
         calculationMode === CalculationMode.DYNAMIC && variant.dynamicAction && variant.dynamicCycle
@@ -184,7 +204,7 @@ export class MethodDto {
         afkiness: dynamicCalculation?.afkiness ?? variant.afkiness,
         riskLevel: variant.riskLevel,
         requirements: variant.requirements,
-        xpHour: dynamicCalculation?.xpHour ?? variant.xpHour,
+        xpHour: dynamicCalculation?.xpHour ?? fixedXpHour,
         inputs: dynamicCalculation?.inputs ?? fixedInputs,
         outputs: dynamicCalculation?.outputs ?? fixedOutputs,
         recommendations: variant.recommendations,

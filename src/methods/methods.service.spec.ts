@@ -11,6 +11,7 @@ import type { User } from '../auth/entities/user.entity';
 import type { Item } from '../items/entities/item.entity';
 import type { RedisService } from '../redis/redis.service';
 import { CalculationMode } from './calculation-mode.enum';
+import { ActionCondition } from './action-condition.enum';
 import { IconSource } from '../icons/icon-source.enum';
 
 describe('MethodsService player context', () => {
@@ -225,9 +226,9 @@ describe('MethodsService player context', () => {
             dynamicAction: { name: 'Action', rollIntervalTicks: 4 },
             cycleSteps: [
               {
-                name: 'Wait',
+                name: 'Action',
                 stepOrderPosition: 1,
-                durationTicks: 4,
+                actionsMade: 1,
                 clicksMade: 0,
                 isAfk: false,
               },
@@ -242,6 +243,53 @@ describe('MethodsService player context', () => {
     expect(transactionVariantRepo.save).toHaveBeenCalledTimes(1);
     expect(globalVariantCreate).not.toHaveBeenCalled();
     expect(globalVariantSave).not.toHaveBeenCalled();
+  });
+
+  it('allows success-only and failure-only dynamic effects', () => {
+    const redisService = {
+      getClient: jest.fn().mockReturnValue({}),
+    } as unknown as RedisService;
+    const service = new MethodsService(
+      {} as Repository<Method>,
+      {} as Repository<MethodVariant>,
+      {} as Repository<VariantIoItem>,
+      {} as Repository<VariantHistory>,
+      {} as Repository<MethodVariant>,
+      {} as Repository<User>,
+      {} as VariantSnapshotService,
+      { get: jest.fn() } as unknown as ConfigService,
+      {} as Repository<Item>,
+      redisService,
+    );
+    const dto = {
+      calculationMode: CalculationMode.DYNAMIC,
+      dynamicAction: {
+        name: 'Open chest',
+        rollIntervalTicks: 4,
+        outputs: [{ id: 100, quantity: 1, condition: ActionCondition.SUCCESS }],
+        xpGained: [{ skillId: 1, experience: 25, condition: ActionCondition.FAILURE }],
+      },
+      cycleSteps: [
+        {
+          name: 'Open chest',
+          stepOrderPosition: 1,
+          actionsMade: 1,
+          clicksMade: 1,
+          isAfk: false,
+        },
+      ],
+    };
+
+    const internals = service as unknown as {
+      validateVariantConfiguration: (value: typeof dto) => CalculationMode;
+    };
+    expect(internals.validateVariantConfiguration(dto)).toBe(CalculationMode.DYNAMIC);
+    expect(dto.dynamicAction.outputs).toEqual([
+      { id: 100, quantity: 1, condition: ActionCondition.SUCCESS },
+    ]);
+    expect(dto.dynamicAction.xpGained).toEqual([
+      { skillId: 1, experience: 25, condition: ActionCondition.FAILURE },
+    ]);
   });
 
   it('scales roadmap material totals by hours instead of actions per hour', () => {

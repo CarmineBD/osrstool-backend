@@ -28,6 +28,15 @@ export class VariantAction {
   @Column({ name: 'roll_interval_ticks', type: 'int' })
   rollIntervalTicks: number;
 
+  @Column({
+    name: 'base_success_chance',
+    type: 'numeric',
+    precision: 5,
+    scale: 4,
+    default: 1,
+  })
+  baseSuccessChance: number;
+
   @CreateDateColumn({ name: 'created_at', type: 'timestamptz' })
   createdAt: Date;
 

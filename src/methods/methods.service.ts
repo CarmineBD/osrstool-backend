@@ -41,6 +41,7 @@ import { Item } from '../items/entities/item.entity';
 import { IconResolverService, type IconReference } from '../icons/icon-resolver.service';
 import { IconSource } from '../icons/icon-source.enum';
 import { CalculationMode } from './calculation-mode.enum';
+import { ActionCondition } from './action-condition.enum';
 import { METHODS_PROFITS_HASH_KEY } from './profit-cache.constants';
 import { RedisService } from '../redis/redis.service';
 import { METHOD_CATEGORY_VALUES } from './dto/method-category.constants';
@@ -2320,9 +2321,21 @@ export class MethodsService implements OnModuleDestroy {
     return dto.calculationMode ?? existingMode ?? CalculationMode.FIXED;
   }
 
-  private assertUniqueDynamicValues(values: number[], fieldName: string): void {
+  private assertUniqueDynamicValues(values: Array<number | string>, fieldName: string): void {
     if (new Set(values).size !== values.length) {
       throw new BadRequestException(`${fieldName} must not contain duplicate values`);
+    }
+  }
+
+  private validateDynamicActionConditions(
+    entries: Array<{ condition?: ActionCondition }>,
+    fieldName: string,
+  ): void {
+    const conditions = new Set(entries.map((entry) => entry.condition ?? ActionCondition.ALWAYS));
+    if (conditions.has(ActionCondition.ALWAYS) && conditions.size > 1) {
+      throw new BadRequestException(
+        `${fieldName} must not combine "always" with "success" or "failure" conditions`,
+      );
     }
   }
 
@@ -2372,18 +2385,32 @@ export class MethodsService implements OnModuleDestroy {
     }
 
     const { dynamicAction, cycleSteps } = dto;
+    if (!cycleSteps.some((step) => (step.actionsMade ?? 0) > 0)) {
+      throw new BadRequestException(
+        'Dynamic cycle must include at least one step that generates actions',
+      );
+    }
     this.assertUniqueDynamicValues(
-      (dynamicAction.inputs ?? []).map((item) => item.id),
-      'dynamicAction.inputs item id',
+      (dynamicAction.inputs ?? []).map(
+        (item) => `${item.id}:${item.condition ?? ActionCondition.ALWAYS}`,
+      ),
+      'dynamicAction.inputs item id and condition',
     );
     this.assertUniqueDynamicValues(
-      (dynamicAction.outputs ?? []).map((item) => item.id),
-      'dynamicAction.outputs item id',
+      (dynamicAction.outputs ?? []).map(
+        (item) => `${item.id}:${item.condition ?? ActionCondition.ALWAYS}`,
+      ),
+      'dynamicAction.outputs item id and condition',
     );
     this.assertUniqueDynamicValues(
-      (dynamicAction.xpGained ?? []).map((entry) => entry.skillId),
-      'dynamicAction.xpGained skillId',
+      (dynamicAction.xpGained ?? []).map(
+        (entry) => `${entry.skillId}:${entry.condition ?? ActionCondition.ALWAYS}`,
+      ),
+      'dynamicAction.xpGained skillId and condition',
     );
+    this.validateDynamicActionConditions(dynamicAction.inputs ?? [], 'dynamicAction.inputs');
+    this.validateDynamicActionConditions(dynamicAction.outputs ?? [], 'dynamicAction.outputs');
+    this.validateDynamicActionConditions(dynamicAction.xpGained ?? [], 'dynamicAction.xpGained');
     this.assertUniqueDynamicValues(
       cycleSteps.map((step) => step.stepOrderPosition),
       'cycleSteps stepOrderPosition',
@@ -2464,17 +2491,21 @@ export class MethodsService implements OnModuleDestroy {
       variant,
       name: dto.dynamicAction.name,
       rollIntervalTicks: dto.dynamicAction.rollIntervalTicks,
+      baseSuccessChance: dto.dynamicAction.baseSuccessChance ?? 1,
       inputs: (dto.dynamicAction.inputs ?? []).map((input) => ({
         itemId: input.id,
         quantity: input.quantity,
+        condition: input.condition ?? ActionCondition.ALWAYS,
       })),
       outputs: (dto.dynamicAction.outputs ?? []).map((output) => ({
         itemId: output.id,
         quantity: output.quantity,
+        condition: output.condition ?? ActionCondition.ALWAYS,
       })),
       skillXp: (dto.dynamicAction.xpGained ?? []).map((entry) => ({
         skillId: entry.skillId,
         experience: entry.experience,
+        condition: entry.condition ?? ActionCondition.ALWAYS,
       })),
     });
     const savedAction = await actionRepo.save(action);
