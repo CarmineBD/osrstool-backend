@@ -24,6 +24,13 @@ interface RollupWriteStats {
   updated: number;
 }
 
+interface CachedProfit {
+  low: number;
+  high: number;
+  historyLow?: number;
+  historyHigh?: number;
+}
+
 @Injectable()
 export class VariantHistoryService {
   private readonly logger = new Logger(VariantHistoryService.name);
@@ -95,12 +102,12 @@ export class VariantHistoryService {
     }
   }
 
-  private parseProfitRecord(value: unknown): Record<string, { low: number; high: number }> | null {
+  private parseProfitRecord(value: unknown): Record<string, CachedProfit> | null {
     if (!value || typeof value !== 'object' || Array.isArray(value)) {
       return null;
     }
 
-    const result: Record<string, { low: number; high: number }> = {};
+    const result: Record<string, CachedProfit> = {};
     for (const [variantId, candidate] of Object.entries(value as Record<string, unknown>)) {
       if (!candidate || typeof candidate !== 'object' || Array.isArray(candidate)) {
         continue;
@@ -111,16 +118,21 @@ export class VariantHistoryService {
         continue;
       }
 
+      const historyLow = maybeProfit.historyLow;
+      const historyHigh = maybeProfit.historyHigh;
       result[variantId] = {
         low: maybeProfit.low,
         high: maybeProfit.high,
+        ...(typeof historyLow === 'number' && typeof historyHigh === 'number'
+          ? { historyLow, historyHigh }
+          : {}),
       };
     }
 
     return result;
   }
 
-  private parseProfitRecordString(value: unknown): Record<string, { low: number; high: number }> {
+  private parseProfitRecordString(value: unknown): Record<string, CachedProfit> {
     const rawText =
       typeof value === 'string' ? value : Buffer.isBuffer(value) ? value.toString('utf8') : null;
     if (!rawText) return {};
@@ -132,10 +144,8 @@ export class VariantHistoryService {
     }
   }
 
-  private parseHashProfits(
-    raw: unknown,
-  ): Record<string, Record<string, { low: number; high: number }>> {
-    const result: Record<string, Record<string, { low: number; high: number }>> = {};
+  private parseHashProfits(raw: unknown): Record<string, Record<string, CachedProfit>> {
+    const result: Record<string, Record<string, CachedProfit>> = {};
 
     if (Array.isArray(raw)) {
       const entries = raw as unknown[];
@@ -159,9 +169,7 @@ export class VariantHistoryService {
     return result;
   }
 
-  private async getAllMethodsProfits(): Promise<
-    Record<string, Record<string, { low: number; high: number }>>
-  > {
+  private async getAllMethodsProfits(): Promise<Record<string, Record<string, CachedProfit>>> {
     const hashRaw = await this.redis.call('HGETALL', this.methodsProfitsHashKey);
     return this.parseHashProfits(hashRaw);
   }
@@ -212,8 +220,8 @@ export class VariantHistoryService {
             this.historyRepo.create({
               variant: { id: variantId } as MethodVariant,
               timestamp: now,
-              lowProfit: profit.low,
-              highProfit: profit.high,
+              lowProfit: profit.historyLow ?? profit.low,
+              highProfit: profit.historyHigh ?? profit.high,
             }),
           );
         }

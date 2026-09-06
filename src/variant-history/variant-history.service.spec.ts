@@ -309,6 +309,41 @@ describe('VariantHistoryService', () => {
     );
   });
 
+  it('captures the dedicated dynamic 100% success-chance profit when it is available', async () => {
+    const { service, historyRepo, history15mRepo, dailyHistoryRepo } = createService();
+    redisCall.mockImplementation((command: string) => {
+      if (command === 'SET') return Promise.resolve('OK');
+      if (command === 'EVAL') return Promise.resolve(1);
+      if (command === 'HGETALL') {
+        return Promise.resolve([
+          'method-1',
+          JSON.stringify({
+            'variant-1': { low: 100, high: 200, historyLow: 150, historyHigh: 250 },
+          }),
+        ]);
+      }
+      return Promise.resolve(null);
+    });
+
+    await service.capture();
+
+    expect(historyRepo.save).toHaveBeenCalledWith([
+      expect.objectContaining({ lowProfit: 150, highProfit: 250 }),
+    ]);
+    expect(history15mRepo.query).toHaveBeenCalledWith(expect.any(String), [
+      'variant-1',
+      expect.any(Date),
+      150,
+      250,
+    ]);
+    expect(dailyHistoryRepo.query).toHaveBeenCalledWith(expect.any(String), [
+      'variant-1',
+      expect.any(Date),
+      150,
+      250,
+    ]);
+  });
+
   it('skips capture when another instance holds the lock', async () => {
     const { service, historyRepo } = createService();
     redisCall.mockImplementation((command: string) => {
