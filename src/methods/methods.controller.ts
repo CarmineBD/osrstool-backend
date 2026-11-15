@@ -29,6 +29,7 @@ import type { Request } from 'express';
 import { MethodsService } from './methods.service';
 import {
   CreateMethodDto,
+  ModifierContextDto,
   PlayerContextDto,
   UpdateMethodDto,
   UpdateMethodBasicDto,
@@ -752,6 +753,29 @@ export class MethodsController {
     @Req() req?: Request,
   ): Promise<unknown> {
     return this.svc.methodDetailsWithProfitResponse(id, context.player, req?.headers.authorization);
+  }
+
+  @Post(':id/modifiers')
+  @HttpCode(HttpStatus.OK)
+  @UseGuards(SupabaseAuthGuard, TermsAcceptanceGuard, CompleteProfileGuard)
+  @ApiBearerAuth()
+  @ApiOperation({
+    summary: 'Get method detail with selected dynamic modifiers',
+    description: 'Requires an authenticated, complete account with accepted terms.',
+  })
+  @ApiBody({ type: ModifierContextDto })
+  @ApiUnauthorizedResponse({ description: 'Missing, invalid, or expired bearer token' })
+  async findMethodDetailsWithModifiers(
+    @Param('id') id: string,
+    @Body() context: ModifierContextDto,
+    @Req() req: Request,
+  ): Promise<unknown> {
+    return this.svc.methodDetailsWithProfitResponse(
+      id,
+      context.player,
+      req.headers.authorization,
+      context.modifiers,
+    );
   }
 
   @Patch(':id')

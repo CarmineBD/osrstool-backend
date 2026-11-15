@@ -54,6 +54,15 @@ describe('MethodsController guard metadata', () => {
     const guards = Reflect.getMetadata(GUARDS_METADATA, descriptor?.value as object) as unknown[];
     expect(guards).toEqual([SupabaseAuthGuard, TermsAcceptanceGuard, CompleteProfileGuard]);
   });
+
+  it('requires a registered account for modifier-resolved method detail', () => {
+    const descriptor = Object.getOwnPropertyDescriptor(
+      MethodsController.prototype,
+      'findMethodDetailsWithModifiers',
+    );
+    const guards = Reflect.getMetadata(GUARDS_METADATA, descriptor?.value as object) as unknown[];
+    expect(guards).toEqual([SupabaseAuthGuard, TermsAcceptanceGuard, CompleteProfileGuard]);
+  });
 });
 
 describe('MethodsController player context endpoints', () => {
@@ -143,6 +152,27 @@ describe('MethodsController player context endpoints', () => {
       'method-1',
       player,
       'Bearer token',
+    );
+  });
+
+  it('forwards modifier selections for authenticated method detail', async () => {
+    const svc = { methodDetailsWithProfitResponse: jest.fn().mockResolvedValue({}) };
+    const controller = new MethodsController(svc as unknown as MethodsService);
+    const req = { headers: { authorization: 'Bearer token' } } as unknown as Request;
+    const modifiers = [
+      {
+        variant_id: '11111111-1111-1111-1111-111111111111',
+        modifiers: [{ type: 'location' as const, value: 'Myths Guild' }],
+      },
+    ];
+
+    await controller.findMethodDetailsWithModifiers('method-1', { player, modifiers }, req);
+
+    expect(svc.methodDetailsWithProfitResponse).toHaveBeenCalledWith(
+      'method-1',
+      player,
+      'Bearer token',
+      modifiers,
     );
   });
 });
