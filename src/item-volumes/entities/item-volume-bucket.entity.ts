@@ -1,7 +1,11 @@
 import { Column, Entity, PrimaryColumn } from 'typeorm';
+import type { MarketMode } from '../../market/market-mode';
 
 @Entity('item_volume_buckets')
 export class ItemVolumeBucket {
+  @PrimaryColumn({ name: 'market_mode', type: 'varchar', length: 16, default: 'osrs' })
+  marketMode: MarketMode;
+
   @PrimaryColumn({ name: 'item_id', type: 'int' })
   itemId: number;
 

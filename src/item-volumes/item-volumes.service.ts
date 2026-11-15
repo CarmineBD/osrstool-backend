@@ -9,6 +9,12 @@ import { Repository } from 'typeorm';
 import { ItemVolumeBucket } from './entities/item-volume-bucket.entity';
 import { parseBooleanEnv } from '../common/utils/parse-boolean-env';
 import { RedisService } from '../redis/redis.service';
+import {
+  getMarketMode,
+  marketApiPath,
+  marketCacheKey,
+  runWithMarketMode,
+} from '../market/market-mode';
 
 interface WikiHourVolumeEntry {
   highPriceVolume?: number;
@@ -36,7 +42,7 @@ export class ItemVolumesService implements OnModuleInit, OnModuleDestroy {
   private readonly logger = new Logger(ItemVolumesService.name);
   private readonly redis: Redis;
   private readonly ownsRedisClient: boolean;
-  private readonly volumesApi = 'https://prices.runescape.wiki/api/v1/osrs/1h';
+  private readonly volumesApiBase = 'https://prices.runescape.wiki/api';
   private readonly vol24hHashKey = 'items:vol24h';
   private readonly lockKey = 'lock:items:volumes:1h';
   private readonly lockTtlSeconds = 180;
@@ -73,7 +79,7 @@ export class ItemVolumesService implements OnModuleInit, OnModuleDestroy {
       this.logger.log('Skipping item volume init pipeline (ITEM_VOLUMES_INIT_ENABLED=false).');
       return;
     }
-    await this.runVolumePipeline('init', this.getCurrentHourTs());
+    await this.runAllMarketPipelines('init', this.getCurrentHourTs());
   }
 
   onModuleDestroy(): void {
@@ -88,13 +94,22 @@ export class ItemVolumesService implements OnModuleInit, OnModuleDestroy {
       return;
     }
 
-    await this.runVolumePipeline('cron', this.getCurrentHourTs());
+    await this.runAllMarketPipelines('cron', this.getCurrentHourTs());
   }
 
   async forceBackfillLast24Hours(referenceTs?: number): Promise<void> {
     const hourTs =
       referenceTs === undefined ? this.getCurrentHourTs() : this.normalizeHourTs(referenceTs);
-    await this.runVolumePipeline('manual', hourTs);
+    await this.runAllMarketPipelines('manual', hourTs);
+  }
+
+  private async runAllMarketPipelines(
+    trigger: 'init' | 'cron' | 'manual',
+    referenceHourTs: number,
+  ): Promise<void> {
+    for (const marketMode of ['osrs', 'osrs-hc'] as const) {
+      await runWithMarketMode(marketMode, () => this.runVolumePipeline(trigger, referenceHourTs));
+    }
   }
 
   async fetchVolumesHour(timestamp?: number): Promise<Record<string, HourVolume>> {
@@ -105,7 +120,7 @@ export class ItemVolumesService implements OnModuleInit, OnModuleDestroy {
 
     try {
       const { data } = await firstValueFrom(
-        this.http.get<WikiHourResponse>(this.volumesApi, {
+        this.http.get<WikiHourResponse>(`${this.volumesApiBase}/${marketApiPath()}/1h`, {
           headers: { 'User-Agent': this.userAgent },
           params: hourTs === undefined ? undefined : { timestamp: hourTs },
         }),
@@ -148,6 +163,7 @@ export class ItemVolumesService implements OnModuleInit, OnModuleDestroy {
       }
 
       entities.push({
+        marketMode: getMarketMode(),
         itemId,
         bucketTs: bucketDate,
         highVolume: this.toNonNegativeInt(volumes.highVolume),
@@ -163,7 +179,7 @@ export class ItemVolumesService implements OnModuleInit, OnModuleDestroy {
     const chunkSize = 1000;
     for (let i = 0; i < entities.length; i += chunkSize) {
       const chunk = entities.slice(i, i + chunkSize);
-      await this.volumeBucketRepo.upsert(chunk, ['itemId', 'bucketTs']);
+      await this.volumeBucketRepo.upsert(chunk, ['marketMode', 'itemId', 'bucketTs']);
     }
 
     return entities.length;
@@ -176,7 +192,8 @@ export class ItemVolumesService implements OnModuleInit, OnModuleDestroy {
       .createQueryBuilder()
       .delete()
       .from(ItemVolumeBucket)
-      .where('bucket_ts <= :cutoff', { cutoff: cutoffDate.toISOString() })
+      .where('market_mode = :marketMode', { marketMode: getMarketMode() })
+      .andWhere('bucket_ts <= :cutoff', { cutoff: cutoffDate.toISOString() })
       .execute();
 
     return result.affected ?? 0;
@@ -194,6 +211,7 @@ export class ItemVolumesService implements OnModuleInit, OnModuleDestroy {
       .addSelect('COALESCE(SUM(bucket.low_volume), 0)::bigint', 'low24h')
       .where('bucket.bucket_ts > :cutoff', { cutoff: new Date(cutoffTs * 1000).toISOString() })
       .andWhere('bucket.bucket_ts <= :hourTs', { hourTs: new Date(hourTs * 1000).toISOString() })
+      .andWhere('bucket.market_mode = :marketMode', { marketMode: getMarketMode() })
       .groupBy('bucket.item_id')
       .getRawMany<{ itemId: string; high24h: string; low24h: string }>();
 
@@ -218,7 +236,8 @@ export class ItemVolumesService implements OnModuleInit, OnModuleDestroy {
   }
 
   async writeRedisVol24hAtomically(volumes: Record<string, ItemVol24h>): Promise<void> {
-    const tmpKey = `${this.vol24hHashKey}:tmp:${Date.now()}:${Math.floor(Math.random() * 100000)}`;
+    const vol24hHashKey = marketCacheKey(this.vol24hHashKey);
+    const tmpKey = `${vol24hHashKey}:tmp:${Date.now()}:${Math.floor(Math.random() * 100000)}`;
     const sentinelField = '__tmp__';
     let swapped = false;
 
@@ -241,7 +260,7 @@ export class ItemVolumesService implements OnModuleInit, OnModuleDestroy {
         this.finalizeSwapScript,
         2,
         tmpKey,
-        this.vol24hHashKey,
+        vol24hHashKey,
         sentinelField,
       );
       swapped = finalizeResult === 1 || finalizeResult === '1';
@@ -263,7 +282,11 @@ export class ItemVolumesService implements OnModuleInit, OnModuleDestroy {
     if (ids.length === 0) return {};
 
     const fields = ids.map(String);
-    const raw: unknown = await this.redis.call('HMGET', this.vol24hHashKey, ...fields);
+    const raw: unknown = await this.redis.call(
+      'HMGET',
+      marketCacheKey(this.vol24hHashKey),
+      ...fields,
+    );
     const rows: unknown[] = Array.isArray(raw) ? raw : [];
 
     const result: Record<number, ItemVol24h> = {};
@@ -288,7 +311,7 @@ export class ItemVolumesService implements OnModuleInit, OnModuleDestroy {
   }
 
   async getAll(): Promise<Record<number, ItemVol24h>> {
-    const raw: unknown = await this.redis.call('HGETALL', this.vol24hHashKey);
+    const raw: unknown = await this.redis.call('HGETALL', marketCacheKey(this.vol24hHashKey));
     const result: Record<number, ItemVol24h> = {};
 
     if (Array.isArray(raw)) {
@@ -324,7 +347,9 @@ export class ItemVolumesService implements OnModuleInit, OnModuleDestroy {
   ): Promise<void> {
     const lockValue = await this.acquireLock();
     if (!lockValue) {
-      this.logger.log(`Skipping ${trigger} run for items:vol24h (lock already acquired).`);
+      this.logger.log(
+        `Skipping ${trigger} run for ${marketCacheKey(this.vol24hHashKey)} (lock already acquired).`,
+      );
       return;
     }
 
@@ -338,7 +363,7 @@ export class ItemVolumesService implements OnModuleInit, OnModuleDestroy {
       await this.writeRedisVol24hAtomically(vol24h);
 
       this.logger.log(
-        `items:vol24h refresh done (trigger=${trigger}, hourTs=${normalizedHourTs}, backfilled=${backfilledHours}, rows=${Object.keys(vol24h).length}, deleted=${deletedRows}, tookMs=${Date.now() - startedAt})`,
+        `${marketCacheKey(this.vol24hHashKey)} refresh done (trigger=${trigger}, hourTs=${normalizedHourTs}, backfilled=${backfilledHours}, rows=${Object.keys(vol24h).length}, deleted=${deletedRows}, tookMs=${Date.now() - startedAt})`,
       );
     } catch (error) {
       this.logger.error(`items:vol24h refresh failed (trigger=${trigger})`, error);
@@ -384,6 +409,7 @@ export class ItemVolumesService implements OnModuleInit, OnModuleDestroy {
         startTs: new Date(startHourTs * 1000).toISOString(),
       })
       .andWhere('bucket.bucket_ts <= :endTs', { endTs: new Date(endHourTs * 1000).toISOString() })
+      .andWhere('bucket.market_mode = :marketMode', { marketMode: getMarketMode() })
       .groupBy('bucket.bucket_ts')
       .getRawMany<{ hourTs: string }>();
 
@@ -474,13 +500,25 @@ export class ItemVolumesService implements OnModuleInit, OnModuleDestroy {
 
   private async acquireLock(): Promise<string | null> {
     const lockValue = `${process.pid}:${Date.now()}:${Math.random().toString(36).slice(2)}`;
-    const acquired = await this.redis.set(this.lockKey, lockValue, 'EX', this.lockTtlSeconds, 'NX');
+    const acquired = await this.redis.set(
+      marketCacheKey(this.lockKey),
+      lockValue,
+      'EX',
+      this.lockTtlSeconds,
+      'NX',
+    );
     return acquired === 'OK' ? lockValue : null;
   }
 
   private async releaseLock(lockValue: string): Promise<void> {
     try {
-      await this.redis.call('EVAL', this.releaseLockScript, 1, this.lockKey, lockValue);
+      await this.redis.call(
+        'EVAL',
+        this.releaseLockScript,
+        1,
+        marketCacheKey(this.lockKey),
+        lockValue,
+      );
     } catch (error) {
       this.logger.warn('Could not release items volume lock', error);
     }
