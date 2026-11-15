@@ -27,6 +27,7 @@ import { GameIcon } from '../src/icons/entities/game-icon.entity';
 import { Skill } from '../src/catalogs/entities/skill.entity';
 import { CalculationMode } from '../src/methods/calculation-mode.enum';
 import { ActionCondition } from '../src/methods/action-condition.enum';
+import { Modifier } from '../src/methods/entities/modifier.entity';
 
 jest.mock('pg', () => createPgMemAdapter());
 
@@ -1147,6 +1148,261 @@ describe('Methods (e2e)', () => {
       cyclesPerHour: 1000,
       action: { name: 'Cook karambwan latest', rollIntervalTicks: 6 },
     });
+  });
+
+  it('persists a location modifier with its dynamic variant', async () => {
+    await seedItems(4151, 4152);
+
+    const cycleStepId = 'b42fd577-078c-46aa-a66a-c462afb35511';
+    const server = app.getHttpServer() as unknown as Server;
+    const createResponse = await request(server)
+      .post('/methods/create')
+      .send({
+        name: 'Location modifier method',
+        icon_id: 4151,
+        iconSource: IconSource.ITEM,
+        description: '',
+        category: 'Skilling',
+        enabled: true,
+        variants: [
+          {
+            label: 'Location modifier variant',
+            icon_id: 4152,
+            iconSource: IconSource.ITEM,
+            calculationMode: CalculationMode.DYNAMIC,
+            dynamicAction: {
+              name: 'Action',
+              rollIntervalTicks: 4,
+            },
+            cycleSteps: [
+              {
+                targetId: cycleStepId,
+                name: 'Wait',
+                stepOrderPosition: 1,
+                durationTicks: 4,
+                clicksMade: 0,
+                isAfk: false,
+              },
+              {
+                targetId: 'deb5c30f-8d24-41e2-9339-0b9b05b88c76',
+                name: 'Act',
+                stepOrderPosition: 2,
+                actionsMade: 1,
+                clicksMade: 1,
+                isAfk: false,
+              },
+            ],
+            modifiers: [
+              {
+                name: 'Myths guild',
+                type: 'location',
+                effects: [
+                  {
+                    target_type: 'cycle_steps',
+                    target_id: cycleStepId,
+                    target_property: 'durationTicks',
+                    operation: 'set',
+                    value_type: 'constant',
+                    value: 0,
+                  },
+                ],
+              },
+            ],
+          },
+        ],
+      })
+      .expect(201);
+    const created = createResponse.body as {
+      data: { variants: Array<{ id: string }> };
+    };
+
+    const modifier = await dataSource.getRepository(Modifier).findOne({
+      where: { name: 'Myths guild' },
+      relations: ['variant', 'effects'],
+    });
+
+    expect(modifier).toMatchObject({
+      variantId: created.data.variants[0].id,
+      name: 'Myths guild',
+      type: 'location',
+      skillId: null,
+      effects: [
+        expect.objectContaining({
+          targetId: cycleStepId,
+          targetProperty: 'durationTicks',
+        }),
+      ],
+    });
+  });
+
+  it('persists a location modifier when updating an existing dynamic variant', async () => {
+    await seedItems(4151, 4152);
+
+    const cycleStepId = 'aed1284d-c2e8-4af2-9297-2e85ac988946';
+    const server = app.getHttpServer() as unknown as Server;
+    const createResponse = await request(server)
+      .post('/methods/create')
+      .send({
+        name: 'Update location modifier method',
+        icon_id: 4151,
+        iconSource: IconSource.ITEM,
+        description: '',
+        category: 'Skilling',
+        enabled: true,
+        variants: [
+          {
+            label: 'Update location modifier variant',
+            icon_id: 4152,
+            iconSource: IconSource.ITEM,
+            calculationMode: CalculationMode.DYNAMIC,
+            dynamicAction: { name: 'Action', rollIntervalTicks: 4 },
+            cycleSteps: [
+              {
+                targetId: cycleStepId,
+                name: 'Wait',
+                stepOrderPosition: 1,
+                durationTicks: 4,
+                clicksMade: 0,
+                isAfk: false,
+              },
+              {
+                targetId: '0b06ed4a-561d-4ad8-a63b-dfde03ab66d4',
+                name: 'Act',
+                stepOrderPosition: 2,
+                actionsMade: 1,
+                clicksMade: 1,
+                isAfk: false,
+              },
+            ],
+          },
+        ],
+      })
+      .expect(201);
+    const created = createResponse.body as {
+      data: { id: string; variants: Array<{ id: string }> };
+    };
+
+    await request(server)
+      .put(`/methods/${created.data.id}`)
+      .send({
+        variants: [
+          {
+            id: created.data.variants[0].id,
+            label: 'Update location modifier variant',
+            icon_id: 4152,
+            iconSource: IconSource.ITEM,
+            calculationMode: CalculationMode.DYNAMIC,
+            dynamicAction: { name: 'Action', rollIntervalTicks: 4 },
+            cycleSteps: [
+              {
+                targetId: cycleStepId,
+                name: 'Wait',
+                stepOrderPosition: 1,
+                durationTicks: 4,
+                clicksMade: 0,
+                isAfk: false,
+              },
+              {
+                targetId: '0b06ed4a-561d-4ad8-a63b-dfde03ab66d4',
+                name: 'Act',
+                stepOrderPosition: 2,
+                actionsMade: 1,
+                clicksMade: 1,
+                isAfk: false,
+              },
+            ],
+            modifiers: [
+              {
+                name: 'Mythis guild',
+                type: 'location',
+                effects: [
+                  {
+                    target_type: 'cycle_steps',
+                    target_id: cycleStepId,
+                    target_property: 'durationTicks',
+                    operation: 'set',
+                    value_type: 'constant',
+                    value: 0,
+                  },
+                ],
+              },
+            ],
+          },
+        ],
+      })
+      .expect(200);
+
+    await expect(
+      dataSource.getRepository(Modifier).findOneBy({ name: 'Mythis guild' }),
+    ).resolves.toMatchObject({
+      variantId: created.data.variants[0].id,
+      type: 'location',
+      skillId: null,
+    });
+  });
+
+  it('removes a dynamic variant and its cycle steps during a method update', async () => {
+    await seedItems(100, 200, 4151, 4152);
+
+    const dynamicVariant = (label: string) => ({
+      label,
+      icon_id: 4152,
+      iconSource: IconSource.ITEM,
+      calculationMode: CalculationMode.DYNAMIC,
+      dynamicAction: {
+        name: `${label} action`,
+        rollIntervalTicks: 4,
+        inputs: [{ id: 100, quantity: 1 }],
+        outputs: [{ id: 200, quantity: 1 }],
+      },
+      cycleSteps: [
+        {
+          name: `${label} step`,
+          stepOrderPosition: 1,
+          actionsMade: 1,
+          clicksMade: 1,
+          isAfk: false,
+        },
+      ],
+    });
+    const server = app.getHttpServer() as unknown as Server;
+    const createResponse = await request(server)
+      .post('/methods/create')
+      .send({
+        name: 'Remove dynamic variant',
+        icon_id: 4151,
+        iconSource: IconSource.ITEM,
+        description: '',
+        category: 'Skilling',
+        enabled: true,
+        variants: [dynamicVariant('Keep'), dynamicVariant('Remove')],
+      })
+      .expect(201);
+    const created = createResponse.body as {
+      data: { id: string; variants: Array<{ id: string; label: string }> };
+    };
+    const retained = created.data.variants.find((variant) => variant.label === 'Keep');
+
+    expect(retained).toBeDefined();
+
+    const updateResponse = await request(server)
+      .put(`/methods/${created.data.id}`)
+      .send({
+        variants: [
+          {
+            id: retained!.id,
+            ...dynamicVariant('Keep'),
+          },
+        ],
+      })
+      .expect(200);
+
+    const updated = updateResponse.body as {
+      data: { variants: Array<{ id: string; label: string }> };
+    };
+    expect(updated.data.variants).toEqual([
+      expect.objectContaining({ id: retained!.id, label: 'Keep' }),
+    ]);
   });
 
   it('rejects fixed hourly values in a dynamic variant payload', async () => {

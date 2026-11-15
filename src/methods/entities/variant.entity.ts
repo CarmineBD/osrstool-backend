@@ -19,6 +19,7 @@ import { IconSource } from '../../icons/icon-source.enum';
 import { CalculationMode } from '../calculation-mode.enum';
 import { VariantAction } from './variant-action.entity';
 import { VariantCycle } from './variant-cycle.entity';
+import { Modifier } from './modifier.entity';
 
 @Entity('method_variants')
 @Unique('UQ_variant_method_slug', ['method', 'slug'])
@@ -117,4 +118,7 @@ export class MethodVariant {
 
   @OneToOne(() => VariantCycle, (cycle) => cycle.variant)
   dynamicCycle?: VariantCycle | null;
+
+  @OneToMany(() => Modifier, (modifier) => modifier.variant, { cascade: true })
+  modifiers?: Modifier[];
 }

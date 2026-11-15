@@ -7,11 +7,16 @@ import {
   MaxLength,
   Min,
   MinLength,
+  IsUUID,
 } from 'class-validator';
 import { DYNAMIC_STEP_NAME_MAX_LENGTH, MAX_DYNAMIC_STEP_TICKS } from './validation.constants';
 import { TrimString } from './transforms';
 
 export class DynamicCycleStepDto {
+  @IsOptional()
+  @IsUUID()
+  targetId?: string;
+
   @TrimString()
   @IsString()
   @MinLength(1)

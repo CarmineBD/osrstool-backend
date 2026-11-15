@@ -1,8 +1,12 @@
-import { IsEnum, IsInt, IsNumber, IsOptional, Max, Min } from 'class-validator';
+import { IsEnum, IsInt, IsNumber, IsOptional, IsUUID, Max, Min } from 'class-validator';
 import { ActionCondition } from '../action-condition.enum';
 import { MAX_ITEM_QUANTITY, MAX_ITEM_QUANTITY_DECIMAL_PLACES } from './validation.constants';
 
 export class DynamicActionItemDto {
+  @IsOptional()
+  @IsUUID()
+  targetId?: string;
+
   @IsInt()
   @Min(1)
   id: number;

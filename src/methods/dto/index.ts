@@ -10,4 +10,6 @@ export * from './update-method-variant.dto';
 export * from './dynamic-action.dto';
 export * from './dynamic-cycle-step.dto';
 export * from './player-info.dto';
+export * from './modifier.dto';
+export * from './modifier-context.dto';
 export * from '../action-type.enum';

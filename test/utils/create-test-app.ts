@@ -16,6 +16,8 @@ import { VariantActionOutput } from '../../src/methods/entities/variant-action-o
 import { VariantActionSkillXp } from '../../src/methods/entities/variant-action-skill-xp.entity';
 import { VariantCycle } from '../../src/methods/entities/variant-cycle.entity';
 import { VariantCycleStep } from '../../src/methods/entities/variant-cycle-step.entity';
+import { Modifier } from '../../src/methods/entities/modifier.entity';
+import { ModifierEffect } from '../../src/methods/entities/modifier-effect.entity';
 import { VariantHistory15m } from '../../src/methods/entities/variant-history-15m.entity';
 import { VariantHistory } from '../../src/methods/entities/variant-history.entity';
 import { VariantHistoryDaily } from '../../src/methods/entities/variant-history-daily.entity';
@@ -91,6 +93,8 @@ export const createTestApp = async (): Promise<TestApp> => {
           VariantActionSkillXp,
           VariantCycle,
           VariantCycleStep,
+          Modifier,
+          ModifierEffect,
           VariantHistory,
           VariantHistory15m,
           VariantHistoryDaily,

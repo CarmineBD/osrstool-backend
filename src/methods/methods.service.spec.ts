@@ -157,6 +157,9 @@ describe('MethodsService player context', () => {
         'variants.dynamicAction.skillXp.skill',
         'variants.dynamicCycle',
         'variants.dynamicCycle.steps',
+        'variants.modifiers',
+        'variants.modifiers.skill',
+        'variants.modifiers.effects',
       ],
       relationLoadStrategy: 'query',
     });
@@ -290,6 +293,118 @@ describe('MethodsService player context', () => {
     expect(dto.dynamicAction.xpGained).toEqual([
       { skillId: 1, experience: 25, condition: ActionCondition.FAILURE },
     ]);
+  });
+
+  it('resolves a selected skill modifier using linear curve interpolation', () => {
+    const redisService = {
+      getClient: jest.fn().mockReturnValue({}),
+    } as unknown as RedisService;
+    const service = new MethodsService(
+      {} as Repository<Method>,
+      {} as Repository<MethodVariant>,
+      {} as Repository<VariantIoItem>,
+      {} as Repository<VariantHistory>,
+      {} as Repository<MethodVariant>,
+      {} as Repository<User>,
+      {} as VariantSnapshotService,
+      { get: jest.fn() } as unknown as ConfigService,
+      {} as Repository<Item>,
+      redisService,
+    );
+    const internals = service as unknown as {
+      applySelectedModifiers: (
+        method: Method,
+        selections: Array<{ variant_id: string; modifiers: Array<Record<string, unknown>> }>,
+      ) => { method: Method; selectedVariantIds: Set<string> };
+    };
+    const method = {
+      variants: [
+        {
+          id: 'variant-1',
+          calculationMode: CalculationMode.DYNAMIC,
+          dynamicAction: {
+            id: 'action-1',
+            rollIntervalTicks: 4,
+            baseSuccessChance: '0.1',
+            inputs: [],
+            outputs: [],
+            skillXp: [],
+          },
+          dynamicCycle: {
+            steps: [
+              {
+                id: 'step-0',
+                durationTicks: 4,
+                actionsMade: null,
+                clicksMade: 0,
+                isAfk: false,
+              },
+              {
+                id: 'step-1',
+                durationTicks: null,
+                actionsMade: 1,
+                clicksMade: 0,
+                isAfk: false,
+              },
+            ],
+          },
+          modifiers: [
+            {
+              id: 'modifier-1',
+              type: 'skill_level',
+              skill: { key: 'cooking' },
+              effects: [
+                {
+                  id: 'effect-1',
+                  targetType: 'actions',
+                  targetId: 'action-1',
+                  targetProperty: 'baseSuccessChance',
+                  operation: 'set',
+                  valueType: 'curve',
+                  value: {
+                    interpolation: 'linear',
+                    points: [
+                      { input: 35, output: 0.3 },
+                      { input: 99, output: 1 },
+                    ],
+                  },
+                },
+              ],
+            },
+            {
+              id: 'modifier-2',
+              name: 'Myths guild',
+              type: 'location',
+              effects: [
+                {
+                  id: 'effect-2',
+                  targetType: 'cycle_steps',
+                  targetId: 'step-0',
+                  targetProperty: 'durationTicks',
+                  operation: 'set',
+                  valueType: 'constant',
+                  value: 0,
+                },
+              ],
+            },
+          ],
+        },
+      ],
+    } as unknown as Method;
+
+    const result = internals.applySelectedModifiers(method, [
+      {
+        variant_id: 'variant-1',
+        modifiers: [
+          { type: 'skill_level', skill: 'cooking', value: 67 },
+          { type: 'location', value: 'Myths guild' },
+        ],
+      },
+    ]);
+
+    expect(result.selectedVariantIds).toEqual(new Set(['variant-1']));
+    expect(result.method.variants[0].dynamicAction?.baseSuccessChance).toBeCloseTo(0.65);
+    expect(result.method.variants[0].dynamicCycle?.steps[0].durationTicks).toBe(0);
   });
 
   it('scales roadmap material totals by hours instead of actions per hour', () => {
