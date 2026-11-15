@@ -394,9 +394,11 @@ export class MethodsController {
     @Body() context: PlayerContextDto = {},
     @Req() req?: Request,
   ): Promise<unknown> {
-    const disallowedQueryParams = Object.keys(query ?? {}).filter((key) => key !== 'enabled');
+    const disallowedQueryParams = Object.keys(query ?? {}).filter(
+      (key) => key !== 'enabled' && key !== 'market',
+    );
     if (disallowedQueryParams.length > 0) {
-      throw new BadRequestException('Only enabled query parameters are allowed');
+      throw new BadRequestException('Only enabled and market query parameters are allowed');
     }
 
     return this.svc.skillsSummaryWithProfitResponse(
@@ -476,13 +478,14 @@ export class MethodsController {
       'show_only_free_to_play',
       'ignoredTags',
       'enabled',
+      'market',
     ]);
     const disallowedQueryParams = Object.keys(query ?? {}).filter(
       (key) => !allowedQueryParams.has(key),
     );
     if (disallowedQueryParams.length > 0) {
       throw new BadRequestException(
-        'Only skill, strategy, target_level, show_only_free_to_play, ignoredTags and enabled query parameters are allowed',
+        'Only skill, strategy, target_level, show_only_free_to_play, ignoredTags, enabled and market query parameters are allowed',
       );
     }
 
