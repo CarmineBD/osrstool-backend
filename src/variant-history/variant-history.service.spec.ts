@@ -27,6 +27,7 @@ const createDeleteQueryBuilder = (execute = jest.fn().mockResolvedValue({ affect
   delete: jest.fn().mockReturnThis(),
   from: jest.fn().mockReturnThis(),
   where: jest.fn().mockReturnThis(),
+  andWhere: jest.fn().mockReturnThis(),
   execute,
 });
 
@@ -246,7 +247,7 @@ describe('VariantHistoryService', () => {
 
     expect(dailyHistoryRepo.query).toHaveBeenCalledWith(
       expect.stringContaining("SELECT MIN(bucket_date::timestamp AT TIME ZONE 'UTC') AS min"),
-      ['variant-1'],
+      ['variant-1', 'osrs'],
     );
     expect(historyRepo.createQueryBuilder).not.toHaveBeenCalled();
     expect(history15mRepo.query).not.toHaveBeenCalledWith(
@@ -300,12 +301,12 @@ describe('VariantHistoryService', () => {
       }),
     ]);
     expect(history15mRepo.query).toHaveBeenCalledWith(
-      expect.stringContaining('ON CONFLICT (variant_id, bucket_start) DO UPDATE SET'),
-      ['variant-1', expect.any(Date), 100, 200],
+      expect.stringContaining('ON CONFLICT (market_mode, variant_id, bucket_start) DO UPDATE SET'),
+      ['variant-1', 'osrs', expect.any(Date), 100, 200],
     );
     expect(dailyHistoryRepo.query).toHaveBeenCalledWith(
-      expect.stringContaining('ON CONFLICT (variant_id, bucket_date) DO UPDATE SET'),
-      ['variant-1', expect.any(Date), 100, 200],
+      expect.stringContaining('ON CONFLICT (market_mode, variant_id, bucket_date) DO UPDATE SET'),
+      ['variant-1', 'osrs', expect.any(Date), 100, 200],
     );
   });
 
@@ -332,12 +333,14 @@ describe('VariantHistoryService', () => {
     ]);
     expect(history15mRepo.query).toHaveBeenCalledWith(expect.any(String), [
       'variant-1',
+      'osrs',
       expect.any(Date),
       150,
       250,
     ]);
     expect(dailyHistoryRepo.query).toHaveBeenCalledWith(expect.any(String), [
       'variant-1',
+      'osrs',
       expect.any(Date),
       150,
       250,

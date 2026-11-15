@@ -1,8 +1,12 @@
 import { Column, Entity, JoinColumn, ManyToOne, PrimaryColumn } from 'typeorm';
 import { MethodVariant } from './variant.entity';
+import type { MarketMode } from '../../market/market-mode';
 
 @Entity('variant_history_daily')
 export class VariantHistoryDaily {
+  @PrimaryColumn({ name: 'market_mode', type: 'varchar', length: 16, default: 'osrs' })
+  marketMode: MarketMode;
+
   @PrimaryColumn({ name: 'variant_id', type: 'uuid' })
   variantId: string;
 

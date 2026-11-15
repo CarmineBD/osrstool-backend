@@ -12,6 +12,7 @@ import { MethodVariant } from '../methods/entities/variant.entity';
 import { parseBooleanEnv } from '../common/utils/parse-boolean-env';
 import { RedisService } from '../redis/redis.service';
 import { METHODS_PROFITS_HASH_KEY } from '../methods/profit-cache.constants';
+import { getMarketMode, marketCacheKey, runWithMarketMode } from '../market/market-mode';
 import {
   HistoryAgg,
   HistoryGranularity,
@@ -170,7 +171,7 @@ export class VariantHistoryService {
   }
 
   private async getAllMethodsProfits(): Promise<Record<string, Record<string, CachedProfit>>> {
-    const hashRaw = await this.redis.call('HGETALL', this.methodsProfitsHashKey);
+    const hashRaw = await this.redis.call('HGETALL', marketCacheKey(this.methodsProfitsHashKey));
     return this.parseHashProfits(hashRaw);
   }
 
@@ -192,12 +193,15 @@ export class VariantHistoryService {
       return;
     }
 
-    await this.capture();
+    for (const marketMode of ['osrs', 'osrs-hc'] as const) {
+      await runWithMarketMode(marketMode, () => this.capture());
+    }
   }
 
   async capture(): Promise<void> {
     const startedAt = Date.now();
-    const lockValue = await this.acquireLock(this.captureLockKey, this.captureLockTtlSeconds);
+    const lockKey = marketCacheKey(this.captureLockKey);
+    const lockValue = await this.acquireLock(lockKey, this.captureLockTtlSeconds);
     if (!lockValue) {
       this.logger.log(
         `capture skipped reason=lock_not_acquired durationMs=${Date.now() - startedAt}`,
@@ -219,6 +223,7 @@ export class VariantHistoryService {
           records.push(
             this.historyRepo.create({
               variant: { id: variantId } as MethodVariant,
+              marketMode: getMarketMode(),
               timestamp: now,
               lowProfit: profit.historyLow ?? profit.low,
               highProfit: profit.historyHigh ?? profit.high,
@@ -252,7 +257,7 @@ export class VariantHistoryService {
       this.logger.error(`capture failed durationMs=${Date.now() - startedAt}`, stack);
       throw error;
     } finally {
-      await this.releaseLock(this.captureLockKey, lockValue);
+      await this.releaseLock(lockKey, lockValue);
     }
   }
 
@@ -263,9 +268,15 @@ export class VariantHistoryService {
 
     const params: unknown[] = [];
     const valuesSql = records.map((record, index) => {
-      const base = index * 4;
-      params.push(record.variant.id, record.timestamp, record.lowProfit, record.highProfit);
-      return `($${base + 1}::uuid, $${base + 2}::timestamptz, $${base + 3}::numeric, $${base + 4}::numeric)`;
+      const base = index * 5;
+      params.push(
+        record.variant.id,
+        record.marketMode,
+        record.timestamp,
+        record.lowProfit,
+        record.highProfit,
+      );
+      return `($${base + 1}::uuid, $${base + 2}::varchar, $${base + 3}::timestamptz, $${base + 4}::numeric, $${base + 5}::numeric)`;
     });
 
     const rows: Array<{ inserted_count: number | string; updated_count: number | string }> =
@@ -273,6 +284,7 @@ export class VariantHistoryService {
         `
         INSERT INTO variant_history_15m (
           variant_id,
+          market_mode,
           bucket_start,
           low_profit_sum,
           high_profit_sum,
@@ -291,6 +303,7 @@ export class VariantHistoryService {
         )
         SELECT
           input.variant_id,
+          input.market_mode,
           to_timestamp(floor(extract(epoch FROM input.timestamp) / 900) * 900),
           input.low_profit,
           input.high_profit,
@@ -308,11 +321,12 @@ export class VariantHistoryService {
           now()
         FROM (VALUES ${valuesSql.join(', ')}) AS input(
           variant_id,
+          market_mode,
           timestamp,
           low_profit,
           high_profit
         )
-        ON CONFLICT (variant_id, bucket_start) DO UPDATE SET
+        ON CONFLICT (market_mode, variant_id, bucket_start) DO UPDATE SET
           low_profit_sum = variant_history_15m.low_profit_sum + EXCLUDED.low_profit_sum,
           high_profit_sum = variant_history_15m.high_profit_sum + EXCLUDED.high_profit_sum,
           low_profit_min = LEAST(variant_history_15m.low_profit_min, EXCLUDED.low_profit_min),
@@ -360,9 +374,15 @@ export class VariantHistoryService {
 
     const params: unknown[] = [];
     const valuesSql = records.map((record, index) => {
-      const base = index * 4;
-      params.push(record.variant.id, record.timestamp, record.lowProfit, record.highProfit);
-      return `($${base + 1}::uuid, $${base + 2}::timestamptz, $${base + 3}::numeric, $${base + 4}::numeric)`;
+      const base = index * 5;
+      params.push(
+        record.variant.id,
+        record.marketMode,
+        record.timestamp,
+        record.lowProfit,
+        record.highProfit,
+      );
+      return `($${base + 1}::uuid, $${base + 2}::varchar, $${base + 3}::timestamptz, $${base + 4}::numeric, $${base + 5}::numeric)`;
     });
 
     const rows: Array<{ inserted_count: number | string; updated_count: number | string }> =
@@ -370,6 +390,7 @@ export class VariantHistoryService {
         `
         INSERT INTO variant_history_daily (
           variant_id,
+          market_mode,
           bucket_date,
           low_profit_sum,
           high_profit_sum,
@@ -388,6 +409,7 @@ export class VariantHistoryService {
         )
         SELECT
           input.variant_id,
+          input.market_mode,
           (input.timestamp AT TIME ZONE 'Europe/London')::date AS bucket_date,
           input.low_profit,
           input.high_profit,
@@ -405,11 +427,12 @@ export class VariantHistoryService {
           now()
         FROM (VALUES ${valuesSql.join(', ')}) AS input(
           variant_id,
+          market_mode,
           timestamp,
           low_profit,
           high_profit
         )
-        ON CONFLICT (variant_id, bucket_date) DO UPDATE SET
+        ON CONFLICT (market_mode, variant_id, bucket_date) DO UPDATE SET
           low_profit_sum = variant_history_daily.low_profit_sum + EXCLUDED.low_profit_sum,
           high_profit_sum = variant_history_daily.high_profit_sum + EXCLUDED.high_profit_sum,
           low_profit_min = LEAST(variant_history_daily.low_profit_min, EXCLUDED.low_profit_min),
@@ -591,10 +614,11 @@ export class VariantHistoryService {
         WHERE variant_id = $1
           AND bucket_start >= $2
           AND bucket_start <= $3
+          AND market_mode = $4
         GROUP BY bucket
         ORDER BY bucket
       `,
-      [variantId, from.toISOString(), to.toISOString()],
+      [variantId, from.toISOString(), to.toISOString(), getMarketMode()],
     );
   }
 
@@ -614,10 +638,11 @@ export class VariantHistoryService {
         WHERE variant_id = $1
           AND bucket_date >= ($2::timestamptz AT TIME ZONE 'UTC')::date
           AND bucket_date <= ($3::timestamptz AT TIME ZONE 'UTC')::date
+          AND market_mode = $4
         GROUP BY bucket
         ORDER BY bucket
       `,
-      [variantId, from.toISOString(), to.toISOString()],
+      [variantId, from.toISOString(), to.toISOString(), getMarketMode()],
     );
   }
 
@@ -626,9 +651,9 @@ export class VariantHistoryService {
       `
         SELECT MIN(bucket_date::timestamp AT TIME ZONE 'UTC') AS min
         FROM variant_history_daily
-        WHERE variant_id = $1
+        WHERE variant_id = $1 AND market_mode = $2
       `,
-      [variantId],
+      [variantId, getMarketMode()],
     );
 
     const value = rows[0]?.min;
@@ -646,7 +671,9 @@ export class VariantHistoryService {
       return;
     }
 
-    await this.pruneHistory();
+    for (const marketMode of ['osrs', 'osrs-hc'] as const) {
+      await runWithMarketMode(marketMode, () => this.pruneHistory());
+    }
   }
 
   async pruneHistory(): Promise<void> {
@@ -655,7 +682,8 @@ export class VariantHistoryService {
     }
 
     const startedAt = Date.now();
-    const lockValue = await this.acquireLock(this.pruneLockKey, this.pruneLockTtlSeconds);
+    const lockKey = marketCacheKey(this.pruneLockKey);
+    const lockValue = await this.acquireLock(lockKey, this.pruneLockTtlSeconds);
     if (!lockValue) {
       this.logger.log(
         `prune skipped reason=lock_not_acquired durationMs=${Date.now() - startedAt}`,
@@ -668,14 +696,16 @@ export class VariantHistoryService {
         .createQueryBuilder()
         .delete()
         .from(VariantHistory)
-        .where(`timestamp < now() - interval '${this.rawRetentionHours} hours'`)
+        .where('market_mode = :marketMode', { marketMode: getMarketMode() })
+        .andWhere(`timestamp < now() - interval '${this.rawRetentionHours} hours'`)
         .execute();
 
       const history15mDelete = await this.history15mRepo
         .createQueryBuilder()
         .delete()
         .from(VariantHistory15m)
-        .where(`bucket_start < now() - interval '${this.history15mRetentionDays} days'`)
+        .where('market_mode = :marketMode', { marketMode: getMarketMode() })
+        .andWhere(`bucket_start < now() - interval '${this.history15mRetentionDays} days'`)
         .execute();
 
       this.logger.log(
@@ -686,7 +716,7 @@ export class VariantHistoryService {
       this.logger.error(`prune failed durationMs=${Date.now() - startedAt}`, stack);
       throw error;
     } finally {
-      await this.releaseLock(this.pruneLockKey, lockValue);
+      await this.releaseLock(lockKey, lockValue);
     }
   }
 
@@ -764,7 +794,7 @@ export class VariantHistoryService {
     } else if (this.shouldUse15mHistory(range, granularity, from, now)) {
       rows = await this.query15mHistory(variantId, from, now, granularity, agg);
     } else {
-      const params: unknown[] = [variantId, from.toISOString(), now.toISOString()];
+      const params: unknown[] = [variantId, from.toISOString(), now.toISOString(), getMarketMode()];
 
       let bucketExpr = '';
       if (
@@ -790,7 +820,7 @@ export class VariantHistoryService {
         `
           SELECT ${this.buildRawSelectClause(agg, bucketExpr)}
           FROM variant_history
-          WHERE variant_id = $1 AND timestamp >= $2 AND timestamp <= $3
+          WHERE variant_id = $1 AND timestamp >= $2 AND timestamp <= $3 AND market_mode = $4
           GROUP BY bucket
           ORDER BY bucket
         `,

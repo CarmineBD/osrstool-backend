@@ -10,6 +10,7 @@ import helmet from 'helmet';
 import { ItemsSeederService } from './items/items-seeder.service';
 import { HttpExceptionFilter } from './common/filters/http-exception.filter';
 import { RequestLoggingInterceptor } from './common/interceptors/request-logging.interceptor';
+import { marketModeMiddleware } from './market/market-mode.middleware';
 
 async function bootstrap() {
   const app = await NestFactory.create<NestExpressApplication>(AppModule, {
@@ -35,6 +36,7 @@ async function bootstrap() {
     });
   }
   app.use(helmet());
+  app.use(marketModeMiddleware);
   app.useBodyParser('json', { limit: requestBodyLimit });
   app.useBodyParser('urlencoded', { extended: true, limit: requestBodyLimit });
 

@@ -203,6 +203,18 @@ For versioned Terms of Service acceptances, execute this SQL file once per envir
 sql/2026-08-17-add-user-terms-acceptances.sql
 ```
 
+## Manual SQL setup for dual OSRS markets
+
+Before deploying the standard OSRS and Hardcore market backend changes, execute this versioned
+SQL file once in each database, first in TST and then in PRO after validation:
+
+```txt
+sql/2026-11-15-add-market-modes.sql
+```
+
+Existing data is retained as the `osrs` market. The migration adds isolated market keys for
+Hardcore price history and item-volume buckets.
+
 ## Manual SQL setup for `presence_history`
 
 This repository still does not ship automated database migrations between TST and PRO.

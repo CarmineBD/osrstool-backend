@@ -68,7 +68,7 @@ describe('MethodProfitRefresherService', () => {
     const calls = redisTransactionCall.mock.calls as unknown[][];
     const hsetCall = calls[1] ?? [];
     expect(hsetCall[0]).toBe('HSET');
-    expect(hsetCall[1]).toMatch(new RegExp(`^${METHODS_PROFITS_HASH_KEY}:refresh:`));
+    expect(hsetCall[1]).toMatch(new RegExp(`^${METHODS_PROFITS_HASH_KEY}:osrs:refresh:`));
     expect(hsetCall[2]).toBe('m1');
     const payload = typeof hsetCall[3] === 'string' ? hsetCall[3] : '{}';
     const parsed = JSON.parse(payload) as unknown as {
@@ -76,7 +76,7 @@ describe('MethodProfitRefresherService', () => {
     };
     expect(parsed.v1.low).toBe(36);
     expect(parsed.v1.high).toBe(55);
-    expect(calls[2]).toEqual(['RENAME', hsetCall[1], METHODS_PROFITS_HASH_KEY]);
+    expect(calls[2]).toEqual(['RENAME', hsetCall[1], `${METHODS_PROFITS_HASH_KEY}:osrs`]);
     expect(redisTransactionExec).toHaveBeenCalledTimes(1);
   });
 

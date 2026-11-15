@@ -70,6 +70,7 @@ import {
   VARIANT_TAG_DEFINITIONS,
   VARIANT_TAG_QUERY_VALUES,
 } from './variant-tags';
+import { getMarketMode, marketCacheKey } from '../market/market-mode';
 import { MODIFIER_TARGET_PROPERTIES, type ModifierTargetType } from './modifier.constants';
 
 // Definimos tipos para mayor seguridad
@@ -167,6 +168,7 @@ type TrendingProfitWindow = '15m' | '1h' | '24h' | '7d' | '30d';
 type TrendingProfitMode = 'reliable' | 'instant' | 'slow';
 
 interface ListQuery {
+  market?: string;
   page?: string;
   perPage?: string;
   player?: UserInfo;
@@ -345,6 +347,7 @@ interface SkillSummaryBySkill {
 type RoadmapStrategy = 'fastest' | 'profitable' | 'most_afk';
 
 interface RoadmapQuery {
+  market?: string;
   player?: UserInfo;
   skill?: string;
   strategy?: string;
@@ -590,7 +593,7 @@ export class MethodsService implements OnModuleDestroy {
   private makeCacheKey(prefix: string, value: unknown): string {
     const serialized = JSON.stringify(value);
     const digest = createHash('sha256').update(serialized).digest('hex');
-    return `${prefix}:${digest}`;
+    return `${marketCacheKey(prefix)}:${digest}`;
   }
 
   private async getCachedJson<T>(key: string): Promise<T | null> {
@@ -3393,12 +3396,16 @@ export class MethodsService implements OnModuleDestroy {
   }
 
   private async getAllMethodsProfits(): Promise<Record<string, ProfitRecord>> {
-    const hashRaw = await this.redis.call('HGETALL', this.methodsProfitsHashKey);
+    const hashRaw = await this.redis.call('HGETALL', marketCacheKey(this.methodsProfitsHashKey));
     return this.parseHashProfits(hashRaw);
   }
 
   private async getMethodProfits(methodId: string): Promise<ProfitRecord> {
-    const hashRaw = await this.redis.call('HGET', this.methodsProfitsHashKey, methodId);
+    const hashRaw = await this.redis.call(
+      'HGET',
+      marketCacheKey(this.methodsProfitsHashKey),
+      methodId,
+    );
     return this.parseProfitRecordString(hashRaw) ?? {};
   }
 
@@ -3447,7 +3454,11 @@ export class MethodsService implements OnModuleDestroy {
     if (ids.length === 0) return {};
 
     const fields = ids.map(String);
-    const hashRaw = await this.redis.call('HMGET', this.itemPricesHashKey, ...fields);
+    const hashRaw = await this.redis.call(
+      'HMGET',
+      marketCacheKey(this.itemPricesHashKey),
+      ...fields,
+    );
     const rows: unknown[] = Array.isArray(hashRaw) ? hashRaw : [];
 
     const result: Record<number, ItemPrice> = {};
@@ -3484,7 +3495,11 @@ export class MethodsService implements OnModuleDestroy {
     if (ids.length === 0) return {};
 
     const fields = ids.map(String);
-    const hashRaw = await this.redis.call('HMGET', this.itemVolumes24hHashKey, ...fields);
+    const hashRaw = await this.redis.call(
+      'HMGET',
+      marketCacheKey(this.itemVolumes24hHashKey),
+      ...fields,
+    );
     const rows: unknown[] = Array.isArray(hashRaw) ? hashRaw : [];
 
     const result: Record<number, ItemVolume24h> = {};
@@ -3547,6 +3562,7 @@ export class MethodsService implements OnModuleDestroy {
 
     const placeholders = normalizedVariantIds.map((_, index) => `$${index + 1}`).join(', ');
     const sinceParam = normalizedVariantIds.length + 1;
+    const marketModeParam = sinceParam + 1;
     const rawRows = (await this.historyRepo.query(
       `
         SELECT
@@ -3557,9 +3573,10 @@ export class MethodsService implements OnModuleDestroy {
         FROM variant_history
         WHERE variant_id IN (${placeholders})
           AND "timestamp" >= $${sinceParam}
+          AND market_mode = $${marketModeParam}
         GROUP BY variant_id
       `,
-      [...normalizedVariantIds, since.toISOString()],
+      [...normalizedVariantIds, since.toISOString(), getMarketMode()],
     )) as unknown;
 
     const rows = Array.isArray(rawRows) ? (rawRows as VariantSafety24hRow[]) : [];
@@ -3658,6 +3675,7 @@ export class MethodsService implements OnModuleDestroy {
     const variantPlaceholders = variantIds.map((_, index) => `$${index + 1}`).join(', ');
     const previousStartParam = variantIds.length + 1;
     const currentEndParam = variantIds.length + 2;
+    const marketModeParam = variantIds.length + 3;
     const rawRows = (await this.historyRepo.query(
       `
         SELECT
@@ -3669,9 +3687,15 @@ export class MethodsService implements OnModuleDestroy {
         WHERE variant_id IN (${variantPlaceholders})
           AND "timestamp" >= $${previousStartParam}
           AND "timestamp" <= $${currentEndParam}
+          AND market_mode = $${marketModeParam}
         ORDER BY variant_id, "timestamp" ASC
       `,
-      [...variantIds, previousPeriodStart.toISOString(), currentPeriodEnd.toISOString()],
+      [
+        ...variantIds,
+        previousPeriodStart.toISOString(),
+        currentPeriodEnd.toISOString(),
+        getMarketMode(),
+      ],
     )) as unknown;
     const rows = Array.isArray(rawRows) ? (rawRows as ProfitGrowthPeriodRow[]) : [];
 
@@ -4440,6 +4464,7 @@ export class MethodsService implements OnModuleDestroy {
           where: {
             variant: { id: variantId },
             timestamp: LessThanOrEqual(pastDate),
+            marketMode: getMarketMode(),
           },
           order: { timestamp: 'DESC' },
         });
