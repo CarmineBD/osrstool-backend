@@ -407,6 +407,105 @@ describe('MethodsService player context', () => {
     expect(result.method.variants[0].dynamicCycle?.steps[0].durationTicks).toBe(0);
   });
 
+  it('applies selected modifier effects by priority with a stable id tie-breaker', () => {
+    const redisService = {
+      getClient: jest.fn().mockReturnValue({}),
+    } as unknown as RedisService;
+    const service = new MethodsService(
+      {} as Repository<Method>,
+      {} as Repository<MethodVariant>,
+      {} as Repository<VariantIoItem>,
+      {} as Repository<VariantHistory>,
+      {} as Repository<MethodVariant>,
+      {} as Repository<User>,
+      {} as VariantSnapshotService,
+      { get: jest.fn() } as unknown as ConfigService,
+      {} as Repository<Item>,
+      redisService,
+    );
+    const internals = service as unknown as {
+      applySelectedModifiers: (
+        method: Method,
+        selections: Array<{ variant_id: string; modifiers: Array<Record<string, unknown>> }>,
+      ) => { method: Method; selectedVariantIds: Set<string> };
+    };
+    const method = {
+      variants: [
+        {
+          id: 'variant-1',
+          calculationMode: CalculationMode.DYNAMIC,
+          dynamicAction: {
+            id: 'action-1',
+            rollIntervalTicks: 4,
+            baseSuccessChance: '0.1',
+            inputs: [],
+            outputs: [],
+            skillXp: [],
+          },
+          dynamicCycle: {
+            steps: [
+              {
+                id: 'step-1',
+                durationTicks: null,
+                actionsMade: 1,
+                clicksMade: 0,
+                isAfk: false,
+              },
+            ],
+          },
+          modifiers: [
+            {
+              id: 'modifier-set',
+              name: 'Set chance',
+              type: 'equipment',
+              effects: [
+                {
+                  id: 'effect-set',
+                  targetType: 'actions',
+                  targetId: 'action-1',
+                  targetProperty: 'baseSuccessChance',
+                  operation: 'set',
+                  valueType: 'constant',
+                  value: 0.4,
+                  priority: 20,
+                },
+              ],
+            },
+            {
+              id: 'modifier-multiply',
+              name: 'Multiply chance',
+              type: 'equipment',
+              effects: [
+                {
+                  id: 'effect-multiply',
+                  targetType: 'actions',
+                  targetId: 'action-1',
+                  targetProperty: 'baseSuccessChance',
+                  operation: 'multiply',
+                  valueType: 'constant',
+                  value: 2,
+                  priority: 10,
+                },
+              ],
+            },
+          ],
+        },
+      ],
+    } as unknown as Method;
+
+    const result = internals.applySelectedModifiers(method, [
+      {
+        variant_id: 'variant-1',
+        modifiers: [
+          { type: 'equipment', value: 'Set chance' },
+          { type: 'equipment', value: 'Multiply chance' },
+        ],
+      },
+    ]);
+
+    expect(result.method.variants[0].dynamicAction?.baseSuccessChance).toBe(0.4);
+  });
+
   it('scales roadmap material totals by hours instead of actions per hour', () => {
     const redisService = {
       getClient: jest.fn().mockReturnValue({}),

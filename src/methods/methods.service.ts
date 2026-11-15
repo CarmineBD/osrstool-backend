@@ -17,7 +17,11 @@ import { Method } from './entities/method.entity';
 import { MethodVariant } from './entities/variant.entity';
 import { VariantIoItem } from './entities/io-item.entity';
 import { VariantAction } from './entities/variant-action.entity';
+import { VariantActionInput } from './entities/variant-action-input.entity';
+import { VariantActionOutput } from './entities/variant-action-output.entity';
+import { VariantActionSkillXp } from './entities/variant-action-skill-xp.entity';
 import { VariantCycle } from './entities/variant-cycle.entity';
+import { VariantCycleStep } from './entities/variant-cycle-step.entity';
 import { Modifier } from './entities/modifier.entity';
 import { ModifierEffect } from './entities/modifier-effect.entity';
 import { VariantHistory } from './entities/variant-history.entity';
@@ -2551,6 +2555,73 @@ export class MethodsService implements OnModuleDestroy {
     );
   }
 
+  private async assertDynamicTargetIdsBelongToVariant(
+    dto: VariantConfigurationDto,
+    variantId: string,
+    manager: EntityManager,
+  ): Promise<void> {
+    const targetIds = this.getDynamicTargetIds(dto);
+    const actions: VariantAction[] = targetIds.actions.size
+      ? await manager.getRepository(VariantAction).find({
+          where: { id: In([...targetIds.actions]) },
+          relations: ['variant'],
+        })
+      : [];
+    const inputs: VariantActionInput[] = targetIds.actions_inputs.size
+      ? await manager.getRepository(VariantActionInput).find({
+          where: { id: In([...targetIds.actions_inputs]) },
+          relations: ['action', 'action.variant'],
+        })
+      : [];
+    const outputs: VariantActionOutput[] = targetIds.actions_outputs.size
+      ? await manager.getRepository(VariantActionOutput).find({
+          where: { id: In([...targetIds.actions_outputs]) },
+          relations: ['action', 'action.variant'],
+        })
+      : [];
+    const skillXp: VariantActionSkillXp[] = targetIds.actions_skill_xp.size
+      ? await manager.getRepository(VariantActionSkillXp).find({
+          where: { id: In([...targetIds.actions_skill_xp]) },
+          relations: ['action', 'action.variant'],
+        })
+      : [];
+    const cycleSteps: VariantCycleStep[] = targetIds.cycle_steps.size
+      ? await manager.getRepository(VariantCycleStep).find({
+          where: { id: In([...targetIds.cycle_steps]) },
+          relations: ['cycle', 'cycle.variant'],
+        })
+      : [];
+
+    const assertOwners = (targetType: ModifierTargetType, owners: Array<string | undefined>) => {
+      if (owners.some((ownerId) => ownerId !== variantId)) {
+        throw new BadRequestException(
+          `${targetType} target IDs must belong to the dynamic variant being saved`,
+        );
+      }
+    };
+
+    assertOwners(
+      'actions',
+      actions.map((action) => action.variant?.id),
+    );
+    assertOwners(
+      'actions_inputs',
+      inputs.map((input) => input.action?.variant?.id),
+    );
+    assertOwners(
+      'actions_outputs',
+      outputs.map((output) => output.action?.variant?.id),
+    );
+    assertOwners(
+      'actions_skill_xp',
+      skillXp.map((entry) => entry.action?.variant?.id),
+    );
+    assertOwners(
+      'cycle_steps',
+      cycleSteps.map((step) => step.cycle?.variant?.id),
+    );
+  }
+
   private validateModifierValue(valueType: string, value: unknown, path: string): void {
     if (valueType === 'constant') {
       if ((typeof value === 'number' && Number.isFinite(value)) || typeof value === 'boolean')
@@ -2675,6 +2746,25 @@ export class MethodsService implements OnModuleDestroy {
     }
   }
 
+  private validateRetainedModifierTargets(
+    variant: MethodVariant,
+    dto: VariantConfigurationDto,
+    calculationMode: CalculationMode,
+  ): void {
+    if (calculationMode !== CalculationMode.DYNAMIC || dto.modifiers !== undefined) return;
+
+    const targetIds = this.getDynamicTargetIds(dto);
+    for (const modifier of variant.modifiers ?? []) {
+      for (const effect of modifier.effects ?? []) {
+        if (!targetIds[effect.targetType].has(effect.targetId)) {
+          throw new BadRequestException(
+            `Retained modifier effect ${effect.id} targets an entity that is not present in the updated dynamic configuration`,
+          );
+        }
+      }
+    }
+  }
+
   private async replaceModifiers(
     variant: MethodVariant,
     modifiers: ModifierDto[] | undefined,
@@ -2759,6 +2849,7 @@ export class MethodsService implements OnModuleDestroy {
         variant.afkiness = null;
         await ioRepo.delete({ variant: { id: variant.id } });
         variant.ioItems = [];
+        await this.assertDynamicTargetIdsBelongToVariant(dto, variant.id, transactionManager);
         await this.replaceDynamicConfiguration(variant, dto, transactionManager);
         await this.replaceModifiers(variant, dto.modifiers, transactionManager);
       } else {
@@ -2962,6 +3053,7 @@ export class MethodsService implements OnModuleDestroy {
         await variantRepo.save(variant);
 
         if (calculationMode === CalculationMode.DYNAMIC) {
+          await this.assertDynamicTargetIdsBelongToVariant(v, variant.id, manager);
           await this.replaceDynamicConfiguration(variant, v, manager);
           await this.replaceModifiers(variant, v.modifiers, manager);
         } else {
@@ -3037,6 +3129,7 @@ export class MethodsService implements OnModuleDestroy {
         if (v.id && existingVariants.has(v.id)) {
           const variant = existingVariants.get(v.id)!;
           const calculationMode = this.resolveCalculationMode(v, variant.calculationMode);
+          this.validateRetainedModifierTargets(variant, v, calculationMode);
           const {
             inputs = [],
             outputs = [],
@@ -3106,6 +3199,7 @@ export class MethodsService implements OnModuleDestroy {
           variant.slug = await this.generateVariantSlug(method.id, label);
           await variantRepo.save(variant);
           if (calculationMode === CalculationMode.DYNAMIC) {
+            await this.assertDynamicTargetIdsBelongToVariant(v, variant.id, manager);
             await this.replaceDynamicConfiguration(variant, v, manager);
             await this.replaceModifiers(variant, v.modifiers, manager);
             variant.ioItems = [];
@@ -3163,11 +3257,24 @@ export class MethodsService implements OnModuleDestroy {
   ): Promise<MethodDto> {
     const variant = await this.variantRepo.findOne({
       where: { id },
-      relations: ['ioItems', 'method'],
+      relations: [
+        'ioItems',
+        'method',
+        'dynamicAction',
+        'dynamicAction.inputs',
+        'dynamicAction.outputs',
+        'dynamicAction.skillXp',
+        'dynamicCycle',
+        'dynamicCycle.steps',
+        'modifiers',
+        'modifiers.effects',
+      ],
+      relationLoadStrategy: 'query',
     });
     if (!variant) throw new NotFoundException(`Variant ${id} not found`);
 
     const calculationMode = this.validateVariantConfiguration(dto, variant.calculationMode);
+    this.validateRetainedModifierTargets(variant, dto, calculationMode);
     if (generateSnapshot && calculationMode === CalculationMode.DYNAMIC) {
       throw new BadRequestException('Snapshots are not supported for dynamic variants');
     }
@@ -4556,6 +4663,11 @@ export class MethodsService implements OnModuleDestroy {
         for (const effect of modifier.effects ?? [])
           selectedEffects.push({ modifier, effect, value: entry.value });
       }
+      selectedEffects.sort(
+        (left, right) =>
+          left.effect.priority - right.effect.priority ||
+          left.effect.id.localeCompare(right.effect.id),
+      );
       for (const selected of selectedEffects) {
         this.applyEffectToDynamicConfiguration(
           action,

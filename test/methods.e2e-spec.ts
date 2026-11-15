@@ -1341,6 +1341,139 @@ describe('Methods (e2e)', () => {
     });
   });
 
+  it('rejects an update that removes a target referenced by retained modifiers', async () => {
+    await seedItems(4151, 4152);
+
+    const actionId = 'c4475263-21df-432f-8716-3fea090fce8a';
+    const server = app.getHttpServer() as unknown as Server;
+    const createResponse = await request(server)
+      .post('/methods/create')
+      .send({
+        name: 'Retained modifier target validation',
+        icon_id: 4151,
+        iconSource: IconSource.ITEM,
+        description: '',
+        category: 'Skilling',
+        enabled: true,
+        variants: [
+          {
+            label: 'Retained modifier target validation variant',
+            icon_id: 4152,
+            iconSource: IconSource.ITEM,
+            calculationMode: CalculationMode.DYNAMIC,
+            dynamicAction: { id: actionId, name: 'Action', rollIntervalTicks: 4 },
+            cycleSteps: [
+              {
+                targetId: '7652da5a-6f45-4e9c-a11f-87939318c60a',
+                name: 'Act',
+                stepOrderPosition: 1,
+                actionsMade: 1,
+                clicksMade: 1,
+                isAfk: false,
+              },
+            ],
+            modifiers: [
+              {
+                name: 'Myths guild',
+                type: 'location',
+                effects: [
+                  {
+                    target_type: 'actions',
+                    target_id: actionId,
+                    target_property: 'baseSuccessChance',
+                    operation: 'set',
+                    value_type: 'constant',
+                    value: 0.5,
+                  },
+                ],
+              },
+            ],
+          },
+        ],
+      })
+      .expect(201);
+    const created = createResponse.body as {
+      data: { id: string; variants: Array<{ id: string }> };
+    };
+
+    const response = await request(server)
+      .put(`/methods/${created.data.id}`)
+      .send({
+        variants: [
+          {
+            id: created.data.variants[0].id,
+            label: 'Retained modifier target validation variant',
+            icon_id: 4152,
+            iconSource: IconSource.ITEM,
+            calculationMode: CalculationMode.DYNAMIC,
+            dynamicAction: {
+              id: 'b30f4455-8bcf-4a33-a536-3a20842c502b',
+              name: 'Replacement action',
+              rollIntervalTicks: 4,
+            },
+            cycleSteps: [
+              {
+                targetId: '9b0c8100-63f6-4f5e-9e3e-8660636cda03',
+                name: 'Replacement act',
+                stepOrderPosition: 1,
+                actionsMade: 1,
+                clicksMade: 1,
+                isAfk: false,
+              },
+            ],
+          },
+        ],
+      })
+      .expect(400);
+
+    expect(String((response.body as { message?: unknown }).message)).toContain(
+      'Retained modifier effect',
+    );
+  });
+
+  it('rejects dynamic target IDs owned by another variant', async () => {
+    await seedItems(4151, 4152);
+
+    const actionId = '21861d9e-a3dc-4902-846c-f7ebd7af4d37';
+    const dynamicVariant = (label: string, stepId: string) => ({
+      label,
+      icon_id: 4152,
+      iconSource: IconSource.ITEM,
+      calculationMode: CalculationMode.DYNAMIC,
+      dynamicAction: { id: actionId, name: `${label} action`, rollIntervalTicks: 4 },
+      cycleSteps: [
+        {
+          targetId: stepId,
+          name: `${label} action`,
+          stepOrderPosition: 1,
+          actionsMade: 1,
+          clicksMade: 1,
+          isAfk: false,
+        },
+      ],
+    });
+    const server = app.getHttpServer() as unknown as Server;
+    const response = await request(server)
+      .post('/methods/create')
+      .send({
+        name: 'Cross-variant dynamic target',
+        icon_id: 4151,
+        iconSource: IconSource.ITEM,
+        description: '',
+        category: 'Skilling',
+        enabled: true,
+        variants: [
+          dynamicVariant('First', 'ff654c7b-7b78-46a7-b18a-fc2918ec3286'),
+          dynamicVariant('Second', '24f8efbe-7e1d-40e3-8fc7-e2a0781d10cc'),
+        ],
+      })
+      .expect(400);
+
+    expect(String((response.body as { message?: unknown }).message)).toContain(
+      'actions target IDs must belong to the dynamic variant being saved',
+    );
+  });
+
   it('removes a dynamic variant and its cycle steps during a method update', async () => {
     await seedItems(100, 200, 4151, 4152);
 
