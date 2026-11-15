@@ -41,6 +41,7 @@ import { IconSource, ICON_SOURCE_VALUES } from '../../icons/icon-source.enum';
 import { CalculationMode } from '../calculation-mode.enum';
 import { DynamicActionDto } from './dynamic-action.dto';
 import { DynamicCycleStepDto } from './dynamic-cycle-step.dto';
+import { ModifierDto } from './modifier.dto';
 
 const RISK_LEVEL_PATTERN = /^(100|[1-9]?\d)$/;
 
@@ -177,4 +178,11 @@ export class UpdateVariantDto {
   @ValidateNested({ each: true })
   @Type(() => DynamicCycleStepDto)
   cycleSteps?: DynamicCycleStepDto[];
+
+  @IsOptional()
+  @IsArray()
+  @ArrayMaxSize(100)
+  @ValidateNested({ each: true })
+  @Type(() => ModifierDto)
+  modifiers?: ModifierDto[];
 }

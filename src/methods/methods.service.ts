@@ -17,13 +17,21 @@ import { Method } from './entities/method.entity';
 import { MethodVariant } from './entities/variant.entity';
 import { VariantIoItem } from './entities/io-item.entity';
 import { VariantAction } from './entities/variant-action.entity';
+import { VariantActionInput } from './entities/variant-action-input.entity';
+import { VariantActionOutput } from './entities/variant-action-output.entity';
+import { VariantActionSkillXp } from './entities/variant-action-skill-xp.entity';
 import { VariantCycle } from './entities/variant-cycle.entity';
+import { VariantCycleStep } from './entities/variant-cycle-step.entity';
+import { Modifier } from './entities/modifier.entity';
+import { ModifierEffect } from './entities/modifier-effect.entity';
 import { VariantHistory } from './entities/variant-history.entity';
 import { CreateMethodDto } from './dto/create-method.dto';
 import { UpdateMethodDto } from './dto/update-method.dto';
 import { UpdateMethodBasicDto } from './dto/update-method-basic.dto';
 import { UpdateVariantDto } from './dto/update-variant.dto';
 import { CreateVariantDto } from './dto/create-variant.dto';
+import { ModifierDto } from './dto/modifier.dto';
+import { VariantModifierSelectionDto } from './dto/modifier-context.dto';
 import { MethodDto } from './dto/method.dto';
 import IORedis, { Redis } from 'ioredis';
 import { VariantSnapshotService } from '../variant-snapshots/variant-snapshot.service';
@@ -62,6 +70,7 @@ import {
   VARIANT_TAG_DEFINITIONS,
   VARIANT_TAG_QUERY_VALUES,
 } from './variant-tags';
+import { MODIFIER_TARGET_PROPERTIES, type ModifierTargetType } from './modifier.constants';
 
 // Definimos tipos para mayor seguridad
 interface Profit {
@@ -108,6 +117,9 @@ const DYNAMIC_VARIANT_RELATIONS = [
   'variants.dynamicAction.skillXp.skill',
   'variants.dynamicCycle',
   'variants.dynamicCycle.steps',
+  'variants.modifiers',
+  'variants.modifiers.skill',
+  'variants.modifiers.effects',
 ];
 
 // Dynamic action inputs, outputs, XP and cycle steps are sibling collections.
@@ -2103,7 +2115,12 @@ export class MethodsService implements OnModuleDestroy {
     };
   }
 
-  async methodDetailsWithProfitResponse(id: string, player?: UserInfo, authorization?: string) {
+  async methodDetailsWithProfitResponse(
+    id: string,
+    player?: UserInfo,
+    authorization?: string,
+    modifierSelections?: VariantModifierSelectionDto[],
+  ) {
     const perfLogsEnabled = this.isMethodDetailsPerfLogEnabled();
     const scope = `methodDetails id=${id}`;
     const totalStartedAt = performance.now();
@@ -2127,6 +2144,7 @@ export class MethodsService implements OnModuleDestroy {
           id,
           userInfo ?? undefined,
           authenticatedUserId ?? undefined,
+          modifierSelections,
         ),
     );
 
@@ -2355,7 +2373,11 @@ export class MethodsService implements OnModuleDestroy {
       if (!Array.isArray(dto.outputs)) {
         throw new BadRequestException('outputs must be an array for fixed variants');
       }
-      if (dto.dynamicAction !== undefined || dto.cycleSteps !== undefined) {
+      if (
+        dto.dynamicAction !== undefined ||
+        dto.cycleSteps !== undefined ||
+        dto.modifiers !== undefined
+      ) {
         throw new BadRequestException(
           'dynamicAction and cycleSteps are only valid when calculationMode is dynamic',
         );
@@ -2447,6 +2469,8 @@ export class MethodsService implements OnModuleDestroy {
       throw new BadRequestException('Dynamic cycle duration must be greater than zero');
     }
 
+    this.validateModifierDefinitions(dto);
+
     return calculationMode;
   }
 
@@ -2488,21 +2512,25 @@ export class MethodsService implements OnModuleDestroy {
     await this.removeDynamicConfiguration(variant.id, manager);
 
     const action = actionRepo.create({
+      id: dto.dynamicAction.id,
       variant,
       name: dto.dynamicAction.name,
       rollIntervalTicks: dto.dynamicAction.rollIntervalTicks,
       baseSuccessChance: dto.dynamicAction.baseSuccessChance ?? 1,
       inputs: (dto.dynamicAction.inputs ?? []).map((input) => ({
+        id: input.targetId,
         itemId: input.id,
         quantity: input.quantity,
         condition: input.condition ?? ActionCondition.ALWAYS,
       })),
       outputs: (dto.dynamicAction.outputs ?? []).map((output) => ({
+        id: output.targetId,
         itemId: output.id,
         quantity: output.quantity,
         condition: output.condition ?? ActionCondition.ALWAYS,
       })),
       skillXp: (dto.dynamicAction.xpGained ?? []).map((entry) => ({
+        id: entry.targetId,
         skillId: entry.skillId,
         experience: entry.experience,
         condition: entry.condition ?? ActionCondition.ALWAYS,
@@ -2514,6 +2542,7 @@ export class MethodsService implements OnModuleDestroy {
       cycleRepo.create({
         variant,
         steps: dto.cycleSteps.map((step) => ({
+          id: step.targetId,
           stepOrderPosition: step.stepOrderPosition,
           name: step.name,
           durationTicks: step.actionsMade == null ? step.durationTicks! : null,
@@ -2523,6 +2552,248 @@ export class MethodsService implements OnModuleDestroy {
           actionsMade: step.actionsMade ?? null,
         })),
       }),
+    );
+  }
+
+  private async assertDynamicTargetIdsBelongToVariant(
+    dto: VariantConfigurationDto,
+    variantId: string,
+    manager: EntityManager,
+  ): Promise<void> {
+    const targetIds = this.getDynamicTargetIds(dto);
+    const actions: VariantAction[] = targetIds.actions.size
+      ? await manager.getRepository(VariantAction).find({
+          where: { id: In([...targetIds.actions]) },
+          relations: ['variant'],
+        })
+      : [];
+    const inputs: VariantActionInput[] = targetIds.actions_inputs.size
+      ? await manager.getRepository(VariantActionInput).find({
+          where: { id: In([...targetIds.actions_inputs]) },
+          relations: ['action', 'action.variant'],
+        })
+      : [];
+    const outputs: VariantActionOutput[] = targetIds.actions_outputs.size
+      ? await manager.getRepository(VariantActionOutput).find({
+          where: { id: In([...targetIds.actions_outputs]) },
+          relations: ['action', 'action.variant'],
+        })
+      : [];
+    const skillXp: VariantActionSkillXp[] = targetIds.actions_skill_xp.size
+      ? await manager.getRepository(VariantActionSkillXp).find({
+          where: { id: In([...targetIds.actions_skill_xp]) },
+          relations: ['action', 'action.variant'],
+        })
+      : [];
+    const cycleSteps: VariantCycleStep[] = targetIds.cycle_steps.size
+      ? await manager.getRepository(VariantCycleStep).find({
+          where: { id: In([...targetIds.cycle_steps]) },
+          relations: ['cycle', 'cycle.variant'],
+        })
+      : [];
+
+    const assertOwners = (targetType: ModifierTargetType, owners: Array<string | undefined>) => {
+      if (owners.some((ownerId) => ownerId !== variantId)) {
+        throw new BadRequestException(
+          `${targetType} target IDs must belong to the dynamic variant being saved`,
+        );
+      }
+    };
+
+    assertOwners(
+      'actions',
+      actions.map((action) => action.variant?.id),
+    );
+    assertOwners(
+      'actions_inputs',
+      inputs.map((input) => input.action?.variant?.id),
+    );
+    assertOwners(
+      'actions_outputs',
+      outputs.map((output) => output.action?.variant?.id),
+    );
+    assertOwners(
+      'actions_skill_xp',
+      skillXp.map((entry) => entry.action?.variant?.id),
+    );
+    assertOwners(
+      'cycle_steps',
+      cycleSteps.map((step) => step.cycle?.variant?.id),
+    );
+  }
+
+  private validateModifierValue(valueType: string, value: unknown, path: string): void {
+    if (valueType === 'constant') {
+      if ((typeof value === 'number' && Number.isFinite(value)) || typeof value === 'boolean')
+        return;
+      throw new BadRequestException(
+        `${path} must be a finite number or boolean for value_type "constant"`,
+      );
+    }
+
+    if (!value || typeof value !== 'object' || Array.isArray(value)) {
+      throw new BadRequestException(`${path} must be a curve object for value_type "curve"`);
+    }
+    const curve = value as { interpolation?: unknown; points?: unknown };
+    if (
+      curve.interpolation !== 'linear' ||
+      !Array.isArray(curve.points) ||
+      curve.points.length < 2
+    ) {
+      throw new BadRequestException(
+        `${path} must contain interpolation "linear" and at least two points for value_type "curve"`,
+      );
+    }
+    let previousInput = -Infinity;
+    for (const [index, point] of curve.points.entries()) {
+      if (!point || typeof point !== 'object' || Array.isArray(point)) {
+        throw new BadRequestException(`${path}.points[${index}] must be an object`);
+      }
+      const candidate = point as { input?: unknown; output?: unknown };
+      if (
+        typeof candidate.input !== 'number' ||
+        !Number.isFinite(candidate.input) ||
+        typeof candidate.output !== 'number' ||
+        !Number.isFinite(candidate.output) ||
+        candidate.input <= previousInput
+      ) {
+        throw new BadRequestException(
+          `${path}.points must have finite numeric input/output values with strictly increasing input`,
+        );
+      }
+      previousInput = candidate.input;
+    }
+  }
+
+  private getDynamicTargetIds(
+    dto: VariantConfigurationDto,
+  ): Record<ModifierTargetType, Set<string>> {
+    return {
+      actions: new Set(dto.dynamicAction?.id ? [dto.dynamicAction.id] : []),
+      actions_inputs: new Set(
+        (dto.dynamicAction?.inputs ?? []).flatMap((input) =>
+          input.targetId ? [input.targetId] : [],
+        ),
+      ),
+      actions_outputs: new Set(
+        (dto.dynamicAction?.outputs ?? []).flatMap((output) =>
+          output.targetId ? [output.targetId] : [],
+        ),
+      ),
+      actions_skill_xp: new Set(
+        (dto.dynamicAction?.xpGained ?? []).flatMap((xp) => (xp.targetId ? [xp.targetId] : [])),
+      ),
+      cycle_steps: new Set(
+        (dto.cycleSteps ?? []).flatMap((step) => (step.targetId ? [step.targetId] : [])),
+      ),
+    };
+  }
+
+  private validateModifierDefinitions(dto: VariantConfigurationDto): void {
+    const modifiers = dto.modifiers;
+    if (modifiers === undefined) return;
+    if (this.resolveCalculationMode(dto) !== CalculationMode.DYNAMIC) {
+      throw new BadRequestException('modifiers are only valid when calculationMode is dynamic');
+    }
+
+    const targetIds = this.getDynamicTargetIds(dto);
+    const seenModifierKeys = new Set<string>();
+    for (const [modifierIndex, modifier] of modifiers.entries()) {
+      if (modifier.type === 'skill_level' && !modifier.skill_id) {
+        throw new BadRequestException(
+          `modifiers[${modifierIndex}].skill_id is required for skill_level`,
+        );
+      }
+      if (modifier.type !== 'skill_level' && modifier.skill_id !== undefined) {
+        throw new BadRequestException(
+          `modifiers[${modifierIndex}].skill_id is only valid for skill_level`,
+        );
+      }
+      const modifierKey = `${modifier.type}:${modifier.type === 'skill_level' ? modifier.skill_id : modifier.name.toLowerCase()}`;
+      if (seenModifierKeys.has(modifierKey)) {
+        throw new BadRequestException('modifier names must be unique per variant and type');
+      }
+      seenModifierKeys.add(modifierKey);
+
+      for (const [effectIndex, effect] of modifier.effects.entries()) {
+        const path = `modifiers[${modifierIndex}].effects[${effectIndex}].value`;
+        this.validateModifierValue(effect.value_type, effect.value, path);
+        if (effect.value_type === 'curve' && modifier.type !== 'skill_level') {
+          throw new BadRequestException(`${path} curves are only valid for skill_level modifiers`);
+        }
+        if (!MODIFIER_TARGET_PROPERTIES[effect.target_type].includes(effect.target_property)) {
+          throw new BadRequestException(
+            `modifiers[${modifierIndex}].effects[${effectIndex}].target_property is not valid for ${effect.target_type}`,
+          );
+        }
+        if (!targetIds[effect.target_type].has(effect.target_id)) {
+          throw new BadRequestException(
+            `modifiers[${modifierIndex}].effects[${effectIndex}].target_id must identify a target in this dynamic variant. Include its id/targetId in the dynamic configuration.`,
+          );
+        }
+        if (effect.target_property === 'isAfk') {
+          if (
+            effect.value_type !== 'constant' ||
+            typeof effect.value !== 'boolean' ||
+            effect.operation !== 'set'
+          ) {
+            throw new BadRequestException(`${path} can only set a boolean isAfk value`);
+          }
+        } else if (typeof effect.value === 'boolean') {
+          throw new BadRequestException(`${path} must be numeric for ${effect.target_property}`);
+        }
+      }
+    }
+  }
+
+  private validateRetainedModifierTargets(
+    variant: MethodVariant,
+    dto: VariantConfigurationDto,
+    calculationMode: CalculationMode,
+  ): void {
+    if (calculationMode !== CalculationMode.DYNAMIC || dto.modifiers !== undefined) return;
+
+    const targetIds = this.getDynamicTargetIds(dto);
+    for (const modifier of variant.modifiers ?? []) {
+      for (const effect of modifier.effects ?? []) {
+        if (!targetIds[effect.targetType].has(effect.targetId)) {
+          throw new BadRequestException(
+            `Retained modifier effect ${effect.id} targets an entity that is not present in the updated dynamic configuration`,
+          );
+        }
+      }
+    }
+  }
+
+  private async replaceModifiers(
+    variant: MethodVariant,
+    modifiers: ModifierDto[] | undefined,
+    manager: EntityManager,
+  ): Promise<void> {
+    if (modifiers === undefined) return;
+    const repository = manager.getRepository(Modifier);
+    await repository.delete({ variantId: variant.id });
+    variant.modifiers = [];
+    if (modifiers.length === 0) return;
+    variant.modifiers = await repository.save(
+      modifiers.map((modifier) =>
+        repository.create({
+          variant,
+          variantId: variant.id,
+          name: modifier.name,
+          type: modifier.type,
+          skillId: modifier.skill_id ?? null,
+          effects: modifier.effects.map((effect) => ({
+            targetType: effect.target_type,
+            targetId: effect.target_id,
+            targetProperty: effect.target_property,
+            operation: effect.operation,
+            valueType: effect.value_type,
+            value: effect.value as boolean | number | Record<string, unknown>,
+            priority: effect.priority ?? 100,
+          })),
+        }),
+      ),
     );
   }
 
@@ -2578,9 +2849,12 @@ export class MethodsService implements OnModuleDestroy {
         variant.afkiness = null;
         await ioRepo.delete({ variant: { id: variant.id } });
         variant.ioItems = [];
+        await this.assertDynamicTargetIdsBelongToVariant(dto, variant.id, transactionManager);
         await this.replaceDynamicConfiguration(variant, dto, transactionManager);
+        await this.replaceModifiers(variant, dto.modifiers, transactionManager);
       } else {
         await this.removeDynamicConfiguration(variant.id, transactionManager);
+        await this.replaceModifiers(variant, [], transactionManager);
         await this.replaceFixedIoItems(variant, { ...dto, inputs, outputs }, transactionManager);
       }
 
@@ -2779,7 +3053,9 @@ export class MethodsService implements OnModuleDestroy {
         await variantRepo.save(variant);
 
         if (calculationMode === CalculationMode.DYNAMIC) {
+          await this.assertDynamicTargetIdsBelongToVariant(v, variant.id, manager);
           await this.replaceDynamicConfiguration(variant, v, manager);
+          await this.replaceModifiers(variant, v.modifiers, manager);
         } else {
           await this.replaceFixedIoItems(variant, v, manager);
         }
@@ -2853,11 +3129,13 @@ export class MethodsService implements OnModuleDestroy {
         if (v.id && existingVariants.has(v.id)) {
           const variant = existingVariants.get(v.id)!;
           const calculationMode = this.resolveCalculationMode(v, variant.calculationMode);
+          this.validateRetainedModifierTargets(variant, v, calculationMode);
           const {
             inputs = [],
             outputs = [],
             dynamicAction: _dynamicAction,
             cycleSteps: _cycleSteps,
+            modifiers: _modifiers,
             calculationMode: _calculationMode,
             snapshotName: _snapshotName,
             snapshotDescription: _snapshotDescription,
@@ -2893,6 +3171,7 @@ export class MethodsService implements OnModuleDestroy {
             label = '',
             dynamicAction: _dynamicAction,
             cycleSteps: _cycleSteps,
+            modifiers: _modifiers,
             calculationMode: _calculationMode,
             snapshotName: _snapshotName,
             snapshotDescription: _snapshotDescription,
@@ -2920,7 +3199,9 @@ export class MethodsService implements OnModuleDestroy {
           variant.slug = await this.generateVariantSlug(method.id, label);
           await variantRepo.save(variant);
           if (calculationMode === CalculationMode.DYNAMIC) {
+            await this.assertDynamicTargetIdsBelongToVariant(v, variant.id, manager);
             await this.replaceDynamicConfiguration(variant, v, manager);
+            await this.replaceModifiers(variant, v.modifiers, manager);
             variant.ioItems = [];
           } else {
             await this.replaceFixedIoItems(variant, { ...v, inputs, outputs }, manager);
@@ -2932,6 +3213,9 @@ export class MethodsService implements OnModuleDestroy {
       const dtoIds = new Set(variants.filter((v) => v.id).map((v) => v.id!));
       const toRemove = method.variants.filter((v) => !dtoIds.has(v.id));
       if (toRemove.length) {
+        for (const variant of toRemove) {
+          await this.removeDynamicConfiguration(variant.id, manager);
+        }
         await variantRepo.delete(toRemove.map((v) => v.id));
       }
 
@@ -2973,11 +3257,24 @@ export class MethodsService implements OnModuleDestroy {
   ): Promise<MethodDto> {
     const variant = await this.variantRepo.findOne({
       where: { id },
-      relations: ['ioItems', 'method'],
+      relations: [
+        'ioItems',
+        'method',
+        'dynamicAction',
+        'dynamicAction.inputs',
+        'dynamicAction.outputs',
+        'dynamicAction.skillXp',
+        'dynamicCycle',
+        'dynamicCycle.steps',
+        'modifiers',
+        'modifiers.effects',
+      ],
+      relationLoadStrategy: 'query',
     });
     if (!variant) throw new NotFoundException(`Variant ${id} not found`);
 
     const calculationMode = this.validateVariantConfiguration(dto, variant.calculationMode);
+    this.validateRetainedModifierTargets(variant, dto, calculationMode);
     if (generateSnapshot && calculationMode === CalculationMode.DYNAMIC) {
       throw new BadRequestException('Snapshots are not supported for dynamic variants');
     }
@@ -2989,6 +3286,7 @@ export class MethodsService implements OnModuleDestroy {
       outputs = [],
       dynamicAction: _dynamicAction,
       cycleSteps: _cycleSteps,
+      modifiers: _modifiers,
       calculationMode: _calculationMode,
       snapshotName,
       snapshotDescription,
@@ -4156,10 +4454,267 @@ export class MethodsService implements OnModuleDestroy {
     return trends;
   }
 
+  private getModifierEffectValue(
+    modifier: Modifier,
+    effect: ModifierEffect,
+    selectionValue: unknown,
+  ): boolean | number {
+    if (effect.valueType === 'constant') return effect.value as boolean | number;
+    if (modifier.type !== 'skill_level' || typeof selectionValue !== 'number') {
+      throw new BadRequestException('Curve modifiers require a selected skill_level value');
+    }
+    const curve = effect.value as {
+      interpolation: 'linear';
+      points: Array<{ input: number; output: number }>;
+    };
+    const points = curve.points;
+    if (selectionValue <= points[0].input) return points[0].output;
+    if (selectionValue >= points[points.length - 1].input) return points[points.length - 1].output;
+    const upperIndex = points.findIndex((point) => point.input >= selectionValue);
+    const upper = points[upperIndex];
+    const lower = points[upperIndex - 1];
+    const ratio = (selectionValue - lower.input) / (upper.input - lower.input);
+    return lower.output + (upper.output - lower.output) * ratio;
+  }
+
+  private applyModifierOperation(
+    current: unknown,
+    effect: ModifierEffect,
+    modifier: Modifier,
+    selectionValue: unknown,
+  ): boolean | number {
+    const value = this.getModifierEffectValue(modifier, effect, selectionValue);
+    if (typeof current === 'boolean') {
+      if (effect.operation !== 'set' || typeof value !== 'boolean') {
+        throw new BadRequestException(`Modifier effect ${effect.id} can only set a boolean value`);
+      }
+      return value;
+    }
+    const numericCurrent =
+      typeof current === 'number'
+        ? current
+        : typeof current === 'string' && current.trim() !== ''
+          ? Number(current)
+          : Number.NaN;
+    if (!Number.isFinite(numericCurrent) || typeof value !== 'number') {
+      throw new BadRequestException(`Modifier effect ${effect.id} requires numeric values`);
+    }
+    if (effect.operation === 'set') return value;
+    if (effect.operation === 'add') return numericCurrent + value;
+    return numericCurrent * value;
+  }
+
+  private applyEffectToDynamicConfiguration(
+    action: VariantAction,
+    steps: VariantCycle['steps'],
+    modifier: Modifier,
+    effect: ModifierEffect,
+    selectionValue: unknown,
+  ): void {
+    const collections: Record<ModifierTargetType, Array<Record<string, unknown>>> = {
+      actions: [action as unknown as Record<string, unknown>],
+      actions_inputs: (action.inputs ?? []) as unknown as Array<Record<string, unknown>>,
+      actions_outputs: (action.outputs ?? []) as unknown as Array<Record<string, unknown>>,
+      actions_skill_xp: (action.skillXp ?? []) as unknown as Array<Record<string, unknown>>,
+      cycle_steps: (steps ?? []) as unknown as Array<Record<string, unknown>>,
+    };
+    const target = collections[effect.targetType].find(
+      (candidate) => candidate.id === effect.targetId,
+    );
+    if (!target) {
+      throw new BadRequestException(
+        `Modifier effect ${effect.id} targets an entity outside its variant`,
+      );
+    }
+    if (
+      effect.targetType === 'cycle_steps' &&
+      effect.targetProperty === 'durationTicks' &&
+      target.actionsMade != null
+    ) {
+      throw new BadRequestException(
+        `Modifier effect ${effect.id} cannot change durationTicks on an action step`,
+      );
+    }
+    if (
+      effect.targetType === 'cycle_steps' &&
+      effect.targetProperty === 'actionsMade' &&
+      target.actionsMade == null
+    ) {
+      throw new BadRequestException(
+        `Modifier effect ${effect.id} cannot change actionsMade on a timed step`,
+      );
+    }
+    target[effect.targetProperty] = this.applyModifierOperation(
+      target[effect.targetProperty],
+      effect,
+      modifier,
+      selectionValue,
+    );
+  }
+
+  private validateResolvedDynamicConfiguration(
+    action: VariantAction,
+    steps: VariantCycle['steps'],
+  ): void {
+    if (!Number.isInteger(action.rollIntervalTicks) || action.rollIntervalTicks <= 0) {
+      throw new BadRequestException('Resolved rollIntervalTicks must be a positive integer');
+    }
+    if (
+      !Number.isFinite(Number(action.baseSuccessChance)) ||
+      Number(action.baseSuccessChance) < 0 ||
+      Number(action.baseSuccessChance) > 1
+    ) {
+      throw new BadRequestException('Resolved baseSuccessChance must be between 0 and 1');
+    }
+    for (const item of [...(action.inputs ?? []), ...(action.outputs ?? [])]) {
+      if (!Number.isFinite(Number(item.quantity)) || Number(item.quantity) < 0) {
+        throw new BadRequestException('Resolved action item quantities must be non-negative');
+      }
+    }
+    for (const xp of action.skillXp ?? []) {
+      if (!Number.isFinite(Number(xp.experience)) || Number(xp.experience) < 0) {
+        throw new BadRequestException('Resolved action experience must be non-negative');
+      }
+    }
+    for (const step of steps ?? []) {
+      if (!Number.isInteger(step.clicksMade) || step.clicksMade < 0) {
+        throw new BadRequestException('Resolved clicksMade must be a non-negative integer');
+      }
+      if (step.actionsMade == null) {
+        if (
+          typeof step.durationTicks !== 'number' ||
+          !Number.isInteger(step.durationTicks) ||
+          step.durationTicks < 0
+        ) {
+          throw new BadRequestException('Resolved durationTicks must be a non-negative integer');
+        }
+      } else if (!Number.isInteger(step.actionsMade) || step.actionsMade <= 0) {
+        throw new BadRequestException('Resolved actionsMade must be a positive integer');
+      }
+    }
+  }
+
+  private applySelectedModifiers(
+    method: Method,
+    selections: VariantModifierSelectionDto[] | undefined,
+  ): { method: Method; selectedVariantIds: Set<string> } {
+    if (!selections?.length) return { method, selectedVariantIds: new Set() };
+    const selectionByVariant = new Map<string, VariantModifierSelectionDto>();
+    for (const selection of selections) {
+      if (selectionByVariant.has(selection.variant_id)) {
+        throw new BadRequestException('modifiers must contain each variant_id at most once');
+      }
+      selectionByVariant.set(selection.variant_id, selection);
+    }
+
+    const variants = method.variants.map((variant) => {
+      const selection = selectionByVariant.get(variant.id);
+      if (!selection) return variant;
+      if (
+        variant.calculationMode !== CalculationMode.DYNAMIC ||
+        !variant.dynamicAction ||
+        !variant.dynamicCycle
+      ) {
+        throw new BadRequestException(`Variant ${variant.id} does not support modifiers`);
+      }
+      const action = {
+        ...variant.dynamicAction,
+        inputs: (variant.dynamicAction.inputs ?? []).map((input) => ({ ...input })),
+        outputs: (variant.dynamicAction.outputs ?? []).map((output) => ({ ...output })),
+        skillXp: (variant.dynamicAction.skillXp ?? []).map((xp) => ({ ...xp })),
+      } as VariantAction;
+      const steps = (variant.dynamicCycle.steps ?? []).map((step) => ({ ...step }));
+      const selectedEffects: Array<{ modifier: Modifier; effect: ModifierEffect; value: unknown }> =
+        [];
+      const locationSelections = selection.modifiers.filter((entry) => entry.type === 'location');
+      if (locationSelections.length > 1)
+        throw new BadRequestException('Only one location modifier can be selected');
+      const usedSelections = new Set<string>();
+      for (const entry of selection.modifiers) {
+        if (entry.type === 'skill_level') {
+          if (
+            typeof entry.skill !== 'string' ||
+            !Number.isInteger(entry.value) ||
+            (entry.value as number) < 1 ||
+            (entry.value as number) > 99
+          ) {
+            throw new BadRequestException(
+              'skill_level modifiers require skill and an integer value between 1 and 99',
+            );
+          }
+        } else if (typeof entry.value !== 'string' || entry.value.trim().length === 0) {
+          throw new BadRequestException(
+            `${entry.type} modifiers require the modifier name as value`,
+          );
+        }
+        const modifier = (variant.modifiers ?? []).find((candidate) =>
+          entry.type === 'skill_level'
+            ? candidate.type === entry.type && candidate.skill?.key.toLowerCase() === entry.skill
+            : candidate.type === entry.type &&
+              candidate.name.toLowerCase() === (entry.value as string).trim().toLowerCase(),
+        );
+        if (!modifier)
+          throw new BadRequestException(
+            `Selected ${entry.type} modifier does not exist on variant ${variant.id}`,
+          );
+        if (usedSelections.has(modifier.id))
+          throw new BadRequestException('A modifier cannot be selected more than once');
+        usedSelections.add(modifier.id);
+        for (const effect of modifier.effects ?? [])
+          selectedEffects.push({ modifier, effect, value: entry.value });
+      }
+      selectedEffects.sort(
+        (left, right) =>
+          left.effect.priority - right.effect.priority ||
+          left.effect.id.localeCompare(right.effect.id),
+      );
+      for (const selected of selectedEffects) {
+        this.applyEffectToDynamicConfiguration(
+          action,
+          steps,
+          selected.modifier,
+          selected.effect,
+          selected.value,
+        );
+      }
+      this.validateResolvedDynamicConfiguration(action, steps);
+      return {
+        ...variant,
+        dynamicAction: action,
+        dynamicCycle: { ...variant.dynamicCycle, steps },
+      } as MethodVariant;
+    });
+    for (const id of selectionByVariant.keys()) {
+      if (!method.variants.some((variant) => variant.id === id)) {
+        throw new BadRequestException(`Variant ${id} does not belong to this method`);
+      }
+    }
+    return {
+      method: { ...method, variants } as Method,
+      selectedVariantIds: new Set(selectionByVariant.keys()),
+    };
+  }
+
+  private calculateCurrentProfit(
+    variant: { inputs: VariantIoQuantity[]; outputs: VariantIoQuantity[] },
+    pricesByItem: Record<number, ItemPrice>,
+  ): Profit {
+    const total = (items: VariantIoQuantity[], priceField: 'high' | 'low') =>
+      items.reduce((sum, item) => {
+        const price = pricesByItem[item.id];
+        return sum + (price ? (priceField === 'high' ? price.high : price.low) * item.quantity : 0);
+      }, 0);
+    return {
+      low: total(variant.outputs, 'low') - total(variant.inputs, 'high'),
+      high: total(variant.outputs, 'high') - total(variant.inputs, 'low'),
+    };
+  }
+
   async findMethodDetailsWithProfit(
     id: string,
     userInfo?: UserInfo,
     likedByUserId?: string,
+    modifierSelections?: VariantModifierSelectionDto[],
   ): Promise<MethodDetailsWithProfit> {
     const perfLogsEnabled = this.isMethodDetailsPerfLogEnabled();
     const scope = `findMethodDetailsWithProfit id=${id}`;
@@ -4174,7 +4729,11 @@ export class MethodsService implements OnModuleDestroy {
       throw new NotFoundException(`Method ${id} not found`);
     }
 
-    const methodDto = this.toDto(methodEntity);
+    const { method: resolvedMethodEntity, selectedVariantIds } = this.applySelectedModifiers(
+      methodEntity,
+      modifierSelections,
+    );
+    const methodDto = this.toDto(resolvedMethodEntity);
     const itemIds = this.collectItemIdsFromVariants(methodDto.variants);
     const variantIds = methodDto.variants.map((variant) => variant.id);
     const [allProfits, pricesByItem, volumes24hByItem, itemMetadataById, safety24hByVariantId] =
@@ -4218,7 +4777,9 @@ export class MethodsService implements OnModuleDestroy {
           methodDto.variants.map(async (variant) => {
             // Single-variant methods reuse the variant id as the profit lookup key.
             const profitKey = variant.id;
-            const profit = allProfits[profitKey] ?? { low: 0, high: 0 };
+            const profit = selectedVariantIds.has(variant.id)
+              ? this.calculateCurrentProfit(variant, pricesByItem)
+              : (allProfits[profitKey] ?? { low: 0, high: 0 });
             const marketImpact = this.calculateVariantMarketImpact(
               variant,
               pricesByItem,

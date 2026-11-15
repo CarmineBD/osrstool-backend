@@ -10,6 +10,7 @@ import {
   Min,
   MinLength,
   ValidateNested,
+  IsUUID,
 } from 'class-validator';
 import { Type } from 'class-transformer';
 import { ActionSkillXpDto } from './action-skill-xp.dto';
@@ -22,6 +23,10 @@ import {
 } from './validation.constants';
 
 export class DynamicActionDto {
+  @IsOptional()
+  @IsUUID()
+  id?: string;
+
   @TrimString()
   @IsString()
   @MinLength(1)

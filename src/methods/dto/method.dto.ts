@@ -4,6 +4,12 @@ import { IconSource } from '../../icons/icon-source.enum';
 import { CalculationMode } from '../calculation-mode.enum';
 import { calculateDynamicVariant } from '../dynamic-variant-calculator';
 import { ActionCondition } from '../action-condition.enum';
+import {
+  ModifierType,
+  ModifierOperation,
+  ModifierTargetType,
+  ModifierValueType,
+} from '../modifier.constants';
 
 export interface VariantDto {
   id: string;
@@ -35,21 +41,40 @@ export interface VariantDto {
     rollIntervalTicks: number;
     baseSuccessChance: number;
     xpGained: Array<{
+      targetId?: string;
       skillId: number;
       skill: string;
       experience: number;
       condition: ActionCondition;
     }>;
-    inputs: { id: number; quantity: number; condition: ActionCondition }[];
-    outputs: { id: number; quantity: number; condition: ActionCondition }[];
+    inputs: { id: number; targetId?: string; quantity: number; condition: ActionCondition }[];
+    outputs: { id: number; targetId?: string; quantity: number; condition: ActionCondition }[];
   };
   cycleSteps?: Array<{
+    targetId?: string;
     name: string;
     stepOrderPosition: number;
     durationTicks: number;
     clicksMade: number;
     isAfk: boolean;
     actionsMade: number | null;
+  }>;
+  modifiers?: Array<{
+    id: string;
+    name: string;
+    type: ModifierType;
+    skill_id: number | null;
+    skill?: { id: number; key: string; name: string } | null;
+    effects: Array<{
+      id: string;
+      target_type: ModifierTargetType;
+      target_id: string;
+      target_property: string;
+      operation: ModifierOperation;
+      value_type: ModifierValueType;
+      value: boolean | number | Record<string, unknown>;
+      priority: number;
+    }>;
   }>;
 }
 
@@ -130,16 +155,19 @@ export class MethodDto {
         rollIntervalTicks: number;
         baseSuccessChance?: number | string;
         inputs?: Array<{
+          id?: string;
           itemId: number;
           quantity: number | string;
           condition?: ActionCondition;
         }>;
         outputs?: Array<{
+          id?: string;
           itemId: number;
           quantity: number | string;
           condition?: ActionCondition;
         }>;
         skillXp?: Array<{
+          id?: string;
           skillId: number;
           experience: number | string;
           condition?: ActionCondition;
@@ -148,6 +176,7 @@ export class MethodDto {
       } | null;
       dynamicCycle?: {
         steps?: Array<{
+          id?: string;
           name: string;
           stepOrderPosition: number;
           durationTicks: number | null;
@@ -156,6 +185,23 @@ export class MethodDto {
           actionsMade: number | null;
         }>;
       } | null;
+      modifiers?: Array<{
+        id: string;
+        name: string;
+        type: ModifierType;
+        skillId?: number | null;
+        skill?: { id: number; key: string; name: string } | null;
+        effects?: Array<{
+          id: string;
+          targetType: ModifierTargetType;
+          targetId: string;
+          targetProperty: string;
+          operation: ModifierOperation;
+          valueType: ModifierValueType;
+          value: boolean | number | Record<string, unknown>;
+          priority: number;
+        }>;
+      }>;
     }>;
   }): MethodDto {
     const variants = e.variants.map((variant) => {
@@ -220,6 +266,25 @@ export class MethodDto {
               cycleSteps: dynamicCalculation.cycleSteps,
             }
           : {}),
+        modifiers: (variant.modifiers ?? []).map((modifier) => ({
+          id: modifier.id,
+          name: modifier.name,
+          type: modifier.type,
+          skill_id: modifier.skillId ?? null,
+          skill: modifier.skill
+            ? { id: modifier.skill.id, key: modifier.skill.key, name: modifier.skill.name }
+            : null,
+          effects: (modifier.effects ?? []).map((effect) => ({
+            id: effect.id,
+            target_type: effect.targetType,
+            target_id: effect.targetId,
+            target_property: effect.targetProperty,
+            operation: effect.operation,
+            value_type: effect.valueType,
+            value: effect.value,
+            priority: effect.priority,
+          })),
+        })),
       };
     });
     return new MethodDto(

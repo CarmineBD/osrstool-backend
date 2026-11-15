@@ -4,12 +4,14 @@ import { ActionCondition } from './action-condition.enum';
 const TICKS_PER_HOUR = 6_000;
 
 export interface DynamicCalculationItem {
+  id?: string;
   itemId: number;
   quantity: number | string;
   condition?: ActionCondition;
 }
 
 export interface DynamicCalculationSkillXp {
+  id?: string;
   skillId: number;
   experience: number | string;
   condition?: ActionCondition;
@@ -29,6 +31,7 @@ export interface DynamicCalculationAction {
 }
 
 export interface DynamicCalculationStep {
+  id?: string;
   name: string;
   stepOrderPosition: number;
   durationTicks: number | null;
@@ -52,15 +55,17 @@ export interface DynamicVariantCalculation {
     rollIntervalTicks: number;
     baseSuccessChance: number;
     xpGained: Array<{
+      targetId?: string;
       skillId: number;
       skill: string;
       experience: number;
       condition: ActionCondition;
     }>;
-    inputs: Array<{ id: number; quantity: number; condition: ActionCondition }>;
-    outputs: Array<{ id: number; quantity: number; condition: ActionCondition }>;
+    inputs: Array<{ id: number; targetId?: string; quantity: number; condition: ActionCondition }>;
+    outputs: Array<{ id: number; targetId?: string; quantity: number; condition: ActionCondition }>;
   };
   cycleSteps: Array<{
+    targetId?: string;
     name: string;
     stepOrderPosition: number;
     durationTicks: number;
@@ -134,6 +139,7 @@ export const calculateDynamicVariant = (
       actionsMade == null ? asFiniteNumber(step.durationTicks) : actionsMade * rollIntervalTicks;
 
     return {
+      id: step.id,
       name: step.name,
       stepOrderPosition: step.stepOrderPosition,
       durationTicks,
@@ -175,6 +181,7 @@ export const calculateDynamicVariant = (
           exactActionsPerHour,
     );
     return {
+      targetId: entry.id,
       skillId: entry.skillId,
       skill,
       experience,
@@ -205,6 +212,7 @@ export const calculateDynamicVariant = (
       inputs: (action.inputs ?? [])
         .map((input) => ({
           id: input.itemId,
+          targetId: input.id,
           quantity: asFiniteNumber(input.quantity),
           condition: resolveCondition(input.condition),
         }))
@@ -212,13 +220,15 @@ export const calculateDynamicVariant = (
       outputs: (action.outputs ?? [])
         .map((output) => ({
           id: output.itemId,
+          targetId: output.id,
           quantity: asFiniteNumber(output.quantity),
           condition: resolveCondition(output.condition),
         }))
         .filter(({ quantity }) => quantity !== 0),
     },
-    cycleSteps: resolvedSteps.map((step) => ({
+    cycleSteps: resolvedSteps.map(({ id, ...step }) => ({
       ...step,
+      targetId: id,
       clicksMade: Math.floor(step.clicksMade),
       actionsMade: step.actionsMade == null ? null : Math.floor(step.actionsMade),
     })),
