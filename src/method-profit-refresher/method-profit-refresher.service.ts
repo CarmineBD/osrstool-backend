@@ -9,6 +9,7 @@ import { RedisService } from '../redis/redis.service';
 import { METHODS_PROFITS_HASH_KEY } from '../methods/profit-cache.constants';
 import { CalculationMode } from '../methods/calculation-mode.enum';
 import { calculateDynamicVariant } from '../methods/dynamic-variant-calculator';
+import { marketCacheKey, runWithMarketMode } from '../market/market-mode';
 
 interface ProfitValues {
   low: number;
@@ -43,7 +44,7 @@ export class MethodProfitRefresherService implements OnModuleInit {
       return;
     }
 
-    await this.refresh();
+    await this.refreshAllMarkets();
   }
 
   @Cron('*/1 * * * *') // cada minuto
@@ -52,13 +53,20 @@ export class MethodProfitRefresherService implements OnModuleInit {
       return;
     }
 
-    await this.refresh();
+    await this.refreshAllMarkets();
+  }
+
+  private async refreshAllMarkets(): Promise<void> {
+    for (const marketMode of ['osrs', 'osrs-hc'] as const) {
+      await runWithMarketMode(marketMode, () => this.refresh());
+    }
   }
 
   async refresh(): Promise<void> {
+    const methodsProfitsHashKey = marketCacheKey(this.methodsProfitsHashKey);
     const { data: methods } = await this.methodsService.findAll(1, 1000);
     if (methods.length === 0) {
-      await this.redis.call('DEL', this.methodsProfitsHashKey);
+      await this.redis.call('DEL', methodsProfitsHashKey);
       this.logger.log('No hay metodos que refrescar');
       return;
     }
@@ -150,13 +158,13 @@ export class MethodProfitRefresherService implements OnModuleInit {
       entries.push(methodId, JSON.stringify(methodProfits));
     }
 
-    const temporaryKey = `${this.methodsProfitsHashKey}:refresh:${Date.now()}`;
+    const temporaryKey = `${methodsProfitsHashKey}:refresh:${Date.now()}`;
     const transaction = this.redis.multi();
     transaction.call('DEL', temporaryKey);
     transaction.call('HSET', temporaryKey, ...entries);
-    transaction.call('RENAME', temporaryKey, this.methodsProfitsHashKey);
+    transaction.call('RENAME', temporaryKey, methodsProfitsHashKey);
     await transaction.exec();
 
-    this.logger.log(`Actualizado ${this.methodsProfitsHashKey} (${methods.length} metodos)`);
+    this.logger.log(`Actualizado ${methodsProfitsHashKey} (${methods.length} metodos)`);
   }
 }
