@@ -9,6 +9,13 @@ import { Repository } from 'typeorm';
 import { ItemPriceRule, ItemPriceRuleType } from './entities/item-price-rule.entity';
 import { parseBooleanEnv } from '../common/utils/parse-boolean-env';
 import { RedisService } from '../redis/redis.service';
+import {
+  getMarketMode,
+  marketApiPath,
+  marketCacheKey,
+  runWithMarketMode,
+  type MarketMode,
+} from '../market/market-mode';
 
 const DEFAULT_USER_AGENT = 'RSMethods/1.0 (contact: contact@rsmethods.com)';
 const MAX_LOGGED_RESPONSE_DATA_LENGTH = 500;
@@ -37,12 +44,12 @@ interface BestRecipeRuleParams {
 export class PricesService implements OnModuleInit {
   private readonly logger = new Logger(PricesService.name);
   private readonly redis: Redis;
-  private readonly api = 'https://prices.runescape.wiki/api/v1/osrs/latest';
+  private readonly apiBase = 'https://prices.runescape.wiki/api';
   private readonly pricesHashKey = 'items:prices';
   private readonly legacyJsonKey = 'itemsPrices';
   private readonly changeWindowSeconds: number;
   private readonly jobsEnabled: boolean;
-  private isFirstFetch = true;
+  private readonly isFirstFetch = new Set<MarketMode>(['osrs', 'osrs-hc']);
 
   constructor(
     private readonly http: HttpService,
@@ -69,7 +76,7 @@ export class PricesService implements OnModuleInit {
     }
 
     this.logger.log('Fetching initial prices snapshot');
-    await this.fetchPrices(true);
+    await this.fetchAllMarkets(true);
   }
 
   @Cron('*/1 * * * *')
@@ -78,15 +85,26 @@ export class PricesService implements OnModuleInit {
       return;
     }
 
-    await this.fetchPrices();
+    await this.fetchAllMarkets();
+  }
+
+  private async fetchAllMarkets(forceFull = false): Promise<void> {
+    await Promise.all(
+      (['osrs', 'osrs-hc'] as const).map((marketMode) =>
+        runWithMarketMode(marketMode, () => this.fetchPrices(forceFull)),
+      ),
+    );
   }
 
   async fetchPrices(forceFull = false) {
     try {
+      const marketMode = getMarketMode();
+      const api = `${this.apiBase}/${marketApiPath(marketMode)}/latest`;
+      const pricesHashKey = marketCacheKey(this.pricesHashKey, marketMode);
       const userAgent =
         this.config.get<string>('OSRS_WIKI_USER_AGENT')?.trim() || DEFAULT_USER_AGENT;
       const { data } = await firstValueFrom(
-        this.http.get<{ data: Record<string, Price> }>(this.api, {
+        this.http.get<{ data: Record<string, Price> }>(api, {
           headers: { 'User-Agent': userAgent },
         }),
       );
@@ -94,7 +112,7 @@ export class PricesService implements OnModuleInit {
       const changedEntries: Array<[string, Price]> = [];
       const now = Math.floor(Date.now() / 1000);
       const cutoff = now - this.changeWindowSeconds;
-      const shouldForceFull = forceFull || this.isFirstFetch;
+      const shouldForceFull = forceFull || this.isFirstFetch.has(marketMode);
 
       for (const [id, latest] of Object.entries(data.data)) {
         if (shouldForceFull) {
@@ -123,11 +141,11 @@ export class PricesService implements OnModuleInit {
         for (const [id, price] of changedEntries) {
           args.push(id, JSON.stringify(price));
         }
-        await this.redis.call('HSET', this.pricesHashKey, ...args);
+        await this.redis.call('HSET', pricesHashKey, ...args);
 
         const modeLabel = shouldForceFull ? 'full' : 'window';
         this.logger.log(
-          `Tradeable prices updated in ${this.pricesHashKey}: ${changedEntries.length} items changed (mode=${modeLabel}, window=${this.changeWindowSeconds}s)`,
+          `Tradeable prices updated in ${pricesHashKey}: ${changedEntries.length} items changed (mode=${modeLabel}, window=${this.changeWindowSeconds}s)`,
         );
       }
 
@@ -136,15 +154,15 @@ export class PricesService implements OnModuleInit {
         for (const [id, price] of untradeableEntries) {
           args.push(id, JSON.stringify(price));
         }
-        await this.redis.call('HSET', this.pricesHashKey, ...args);
+        await this.redis.call('HSET', pricesHashKey, ...args);
         this.logger.log(
-          `Untradeable prices updated in ${this.pricesHashKey}: ${untradeableEntries.length} items recalculated`,
+          `Untradeable prices updated in ${pricesHashKey}: ${untradeableEntries.length} items recalculated`,
         );
       } else {
         this.logger.log('No enabled untradeable price rules produced a value.');
       }
 
-      this.isFirstFetch = false;
+      this.isFirstFetch.delete(marketMode);
     } catch (error) {
       this.logger.error(this.formatFetchError(error));
     }
@@ -210,7 +228,11 @@ export class PricesService implements OnModuleInit {
     if (ids.length === 0) return {};
 
     const fields = ids.map(String);
-    const raw: unknown = await this.redis.call('HMGET', this.pricesHashKey, ...fields);
+    const raw: unknown = await this.redis.call(
+      'HMGET',
+      marketCacheKey(this.pricesHashKey),
+      ...fields,
+    );
     const rows = this.isUnknownArray(raw) ? raw : [];
 
     const result: Record<number, { high: number; low: number; highTime: number; lowTime: number }> =
@@ -240,7 +262,7 @@ export class PricesService implements OnModuleInit {
     }
 
     // Transitional fallback while data is still mirrored in legacy JSON key.
-    if (Object.keys(result).length < ids.length) {
+    if (getMarketMode() === 'osrs' && Object.keys(result).length < ids.length) {
       const missingIds = ids.filter((id) => result[id] === undefined);
       if (missingIds.length > 0) {
         const legacyRaw = await this.redis.call('JSON.GET', this.legacyJsonKey);

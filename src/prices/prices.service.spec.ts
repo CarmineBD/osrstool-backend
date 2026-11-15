@@ -6,6 +6,7 @@ import { of, throwError } from 'rxjs';
 import { Repository } from 'typeorm';
 import { ItemPriceRule } from './entities/item-price-rule.entity';
 import { RedisService } from '../redis/redis.service';
+import { runWithMarketMode } from '../market/market-mode';
 
 jest.mock('ioredis', () => ({
   __esModule: true,
@@ -59,6 +60,16 @@ describe('PricesService', () => {
     await service.fetchPrices();
 
     expect(httpGet).toHaveBeenCalledWith('https://prices.runescape.wiki/api/v1/osrs/latest', {
+      headers: { 'User-Agent': 'RSMethods/1.0 (contact: contact@rsmethods.com)' },
+    });
+  });
+
+  it('uses the Hardcore Wiki endpoint when refreshing the Hardcore market', async () => {
+    httpGet.mockReturnValue(of({ data: { data: {} } }));
+
+    await runWithMarketMode('osrs-hc', () => service.fetchPrices());
+
+    expect(httpGet).toHaveBeenCalledWith('https://prices.runescape.wiki/api/v2/osrs-hc/latest', {
       headers: { 'User-Agent': 'RSMethods/1.0 (contact: contact@rsmethods.com)' },
     });
   });
